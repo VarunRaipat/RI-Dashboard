@@ -44,7 +44,7 @@ ADMIN_PER_ENTRY =  8_000  # Rs. fixed per DPR entry — placeholder, confirm wit
 MISC_PCT        =   10.0  # % of all costs — placeholder, confirm with admin
 
 HUME_PIPE_DIAMETERS_MM = [150, 200, 250, 300, 450, 600, 750, 900, 1000, 1200]
-HUME_PIPE_CLASSES      = ["NP2", "NP3", "NP4"]
+HUME_PIPE_CLASSES      = ["NP2", "NP3"]
 JOINT_TYPES             = ["Collar", "Socket & Spigot", "M/F"]
 
 # Which Joint Types are actually manufactured for a given diameter+class —
@@ -54,9 +54,8 @@ JOINT_TYPES             = ["Collar", "Socket & Spigot", "M/F"]
 #   NP2, 750-1200mm -> M/F only
 #   NP3, 150-600mm  -> Socket & Spigot or M/F
 #   NP3, 750-1200mm -> M/F only
-#   NP4, all sizes   -> M/F only
 def _joint_types_for(diameter_mm, cls):
-    if cls == "NP4" or diameter_mm > 600:
+    if diameter_mm > 600:
         return ["M/F"]
     if cls == "NP2":
         return ["Collar", "M/F"]
