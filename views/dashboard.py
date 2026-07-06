@@ -115,6 +115,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             "Loading":        ("loading_unloading_cost", "sum"),
             "Power":          ("power_cost", "sum"),
             "Welding":        ("welding_cost", "sum"),
+            "Jalli":          ("jalli_cost",  "sum"),
             "EMI":            ("emi_cost",   "sum"),
             "DG":             ("dg_cost",    "sum"),
             "Admin":          ("admin_cost", "sum"),
@@ -129,7 +130,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
                 lambda r: (r["Profit"] / r["Revenue"] * 100) if r["Revenue"] else 0, axis=1
             )
 
-        money_cols = ["Revenue","RM_Cost","Production","Loading","Power","Welding","EMI","DG","Admin","Misc","Total_Cost","Profit"]
+        money_cols = ["Revenue","RM_Cost","Production","Loading","Power","Welding","Jalli","EMI","DG","Admin","Misc","Total_Cost","Profit"]
         for mc in money_cols:
             if mc in summ.columns:
                 summ[mc] = (summ[mc] / LAKH).round(3)
@@ -139,7 +140,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         rename_map = {
             "product":"Product","Days":"Days","Total_Nos":"Nos.",
             "Revenue":"Prod Value(L)","RM_Cost":"RM(L)","Production":"Production(L)",
-            "Loading":"Loading/Unload(L)","Power":"Power(L)","Welding":"Welding(L)",
+            "Loading":"Loading/Unload(L)","Power":"Power(L)","Welding":"Welding(L)","Jalli":"Jalli(L)",
             "EMI":"EMI(L)","DG":"DG(L)","Admin":"Admin(L)","Misc":"Misc(L)",
             "Total_Cost":"Total Cost(L)","Profit":"Profit(L)","Avg_Profit_Pct":"Profit%",
         }
@@ -156,6 +157,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             Loading    =("loading_unloading_cost", "sum"),
             Power      =("power_cost",  "sum"),
             Welding    =("welding_cost","sum"),
+            Jalli      =("jalli_cost",  "sum"),
             EMI        =("emi_cost",    "sum"),
             DG         =("dg_cost",     "sum"),
             Admin      =("admin_cost",  "sum"),
@@ -230,7 +232,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         st.markdown('<div class="section-header">Monthly Breakup — All Months</div>', unsafe_allow_html=True)
         tbl = m_all.copy()
         tbl["Month"] = tbl["month"].dt.strftime("%b %Y")
-        for mc in ["Revenue","RM","Production","Loading","Power","Welding","EMI","DG","Admin","Misc","Total_Cost","Profit"]:
+        for mc in ["Revenue","RM","Production","Loading","Power","Welding","Jalli","EMI","DG","Admin","Misc","Total_Cost","Profit"]:
             if mc in tbl.columns:
                 tbl[mc] = (tbl[mc] / LAKH).round(3)
         tbl["Profit_Pct"] = tbl["Profit_Pct"].round(1)
@@ -238,12 +240,12 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         tbl = tbl.rename(columns={
             "Month":"Month","Days":"Days","Nos":"Nos.",
             "Revenue":"Prod Value(L)","RM":"RM(L)","Production":"Production(L)",
-            "Loading":"Loading/Unload(L)","Power":"Power(L)","Welding":"Welding(L)",
+            "Loading":"Loading/Unload(L)","Power":"Power(L)","Welding":"Welding(L)","Jalli":"Jalli(L)",
             "EMI":"EMI(L)","DG":"DG(L)","Admin":"Admin(L)","Misc":"Misc(L)",
             "Total_Cost":"Total Cost(L)","Profit":"Profit(L)","Profit_Pct":"Profit%",
         })
         display_cols = ["Month","Days","Nos.","Prod Value(L)","RM(L)","Production(L)","Loading/Unload(L)",
-                        "Power(L)","Welding(L)","EMI(L)","DG(L)",
+                        "Power(L)","Welding(L)","Jalli(L)","EMI(L)","DG(L)",
                         "Admin(L)","Misc(L)","Total Cost(L)","Profit(L)","Profit%"]
         display_cols = [c for c in display_cols if c in tbl.columns]
         st.dataframe(tbl[display_cols], use_container_width=True, hide_index=True)
@@ -252,13 +254,14 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         col3, col4 = st.columns(2)
         with col3:
             st.markdown('<div class="section-header">Cost Breakdown (Period)</div>', unsafe_allow_html=True)
-            cost_labels = ["Raw Material","Production","Loading/Unload","Power","Welding","EMI","DG","Admin","Misc"]
+            cost_labels = ["Raw Material","Production","Loading/Unload","Power","Welding","Jalli","EMI","DG","Admin","Misc"]
             cost_vals   = [
                 df_prod["rm_cost"].sum(),
                 df_prod["production_cost"].sum() if "production_cost" in df_prod.columns else 0,
                 df_prod["loading_unloading_cost"].sum() if "loading_unloading_cost" in df_prod.columns else 0,
                 df_prod["power_cost"].sum(),
                 df_prod["welding_cost"].sum() if "welding_cost" in df_prod.columns else 0,
+                df_prod["jalli_cost"].sum() if "jalli_cost" in df_prod.columns else 0,
                 df_prod["emi_cost"].sum()   if "emi_cost"   in df_prod.columns else 0,
                 df_prod["dg_cost"].sum()    if "dg_cost"    in df_prod.columns else 0,
                 df_prod["admin_cost"].sum() if "admin_cost" in df_prod.columns else 0,
@@ -267,7 +270,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             fig3 = go.Figure(go.Pie(
                 labels=cost_labels, values=cost_vals, hole=0.42,
                 textinfo="label+percent",
-                marker_colors=["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE","#E05252","#E879F9","#F97316"],
+                marker_colors=["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE","#E05252","#E879F9","#F97316","#14B8A6"],
             ))
             fig3.update_layout(**PLOT, height=300, showlegend=False)
             st.plotly_chart(fig3, use_container_width=True)

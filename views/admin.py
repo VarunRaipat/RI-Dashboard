@@ -69,7 +69,7 @@ def show(PLOT):
     # ── Tab 2: Product Config ─────────────────────────────────────────────────
     with tab2:
         st.markdown("### Product Cost Configuration")
-        st.caption("Edit selling price, production/loading/power/welding rates, and Concrete/Steel/Jalli usage "
+        st.caption("Edit selling price, production/loading/power/welding/jalli rates, and Concrete/Steel usage "
                    "per product. Changes apply to all new DPR entries. "
                    "(No Transport field — real transport cost is tracked in the Dispatch module.)")
 
@@ -87,13 +87,14 @@ def show(PLOT):
             new_lu   = cc3.number_input("Loading/Unloading Cost (Rs./nos)", value=float(cfg.get("loading_unloading_cost", 0)), min_value=0.0, step=0.05)
             new_pw   = cc4.number_input("Power (Rs./nos)",                 value=float(cfg["power_per_block"]), min_value=0.0, step=0.05)
 
-            new_weld = st.number_input("Welding Cost (Rs./nos)",           value=float(cfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+            cc5, cc6 = st.columns(2)
+            new_weld  = cc5.number_input("Welding Cost (Rs./nos)",         value=float(cfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+            new_jalli = cc6.number_input("Jalli — Cage Welding (Rs./nos)", value=float(cfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
 
-            st.markdown("**Material usage per unit** (Concrete m³ is pre-computed from diameter+barrel thickness for Hume Pipes)")
-            mc1, mc2, mc3 = st.columns(3)
+            st.markdown("**Raw material usage per unit** (Concrete m³ is pre-computed from diameter+barrel thickness for Hume Pipes)")
+            mc1, mc2 = st.columns(2)
             new_concrete = mc1.number_input("Concrete (m³/Unit)", value=float(cfg.get("concrete_volume_m3", 0)), min_value=0.0, step=0.001, format="%.4f")
             new_steel    = mc2.number_input("Steel — HT Wire (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
-            new_jalli    = mc3.number_input("Jalli — Aggregate (Kg/Unit)", value=float(cfg.get("jalli_kg_per_unit", 0)), min_value=0.0, step=0.1)
 
             st.caption(f"Fixed costs: EMI ₹20,000 · DG ₹5,000 · Admin ₹8,000 · Misc 10%")
 
@@ -104,9 +105,9 @@ def show(PLOT):
                     "loading_unloading_cost": new_lu,
                     "power_per_block":        new_pw,
                     "welding_cost":           new_weld,
+                    "jalli_cost":             new_jalli,
                     "concrete_volume_m3":     new_concrete,
                     "steel_kg_per_unit":      new_steel,
-                    "jalli_kg_per_unit":      new_jalli,
                 })
                 st.success(f"✅ {sel_prod} config saved.")
                 st.rerun()
@@ -122,9 +123,9 @@ def show(PLOT):
                 "Loading/Unload":  c.get("loading_unloading_cost", 0),
                 "Power":           c["power_per_block"],
                 "Welding":         c.get("welding_cost", 0),
+                "Jalli":           c.get("jalli_cost", 0),
                 "Concrete (m³)":   c.get("concrete_volume_m3", 0),
                 "Steel (Kg)":      c.get("steel_kg_per_unit", 0),
-                "Jalli (Kg)":      c.get("jalli_kg_per_unit", 0),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 

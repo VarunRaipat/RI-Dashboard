@@ -1,10 +1,12 @@
 -- Run this in Supabase SQL Editor (supabase.com → your project → SQL Editor)
 --
--- Raw material columns below (concrete_qty/cost, steel_qty/cost, jalli_qty/cost)
--- match core/config.py's RAW_MATERIALS list — all three are fixed per-unit
--- figures on the product (never entered per DPR batch), multiplied by Nos.
--- If you add/rename a material there, add/rename the matching "<key>_qty"
--- and "<key>_cost" columns here too.
+-- Raw material columns below (concrete_qty/cost, steel_qty/cost) match
+-- core/config.py's RAW_MATERIALS list — both are fixed per-unit figures on
+-- the product (never entered per DPR batch), multiplied by Nos. Jalli
+-- (cage welding) is NOT a raw material — it's a flat Rs./nos rate like
+-- Welding, so it only has a jalli_cost column, no jalli_qty/jalli price.
+-- If you add/rename a raw material in RAW_MATERIALS, add/rename the
+-- matching "<key>_qty" and "<key>_cost" columns here too.
 --
 -- If you already ran an earlier version of this file against a live
 -- project, don't re-run the CREATE TABLE statements below (IF NOT EXISTS
@@ -22,13 +24,12 @@ CREATE TABLE IF NOT EXISTS production (
     concrete_cost   REAL DEFAULT 0,
     steel_qty       REAL DEFAULT 0,
     steel_cost      REAL DEFAULT 0,
-    jalli_qty       REAL DEFAULT 0,
-    jalli_cost      REAL DEFAULT 0,
     rm_cost         REAL DEFAULT 0,
     production_cost         REAL DEFAULT 0,
     loading_unloading_cost  REAL DEFAULT 0,
     power_cost      REAL DEFAULT 0,
     welding_cost    REAL DEFAULT 0,
+    jalli_cost      REAL DEFAULT 0,
     emi_cost        REAL DEFAULT 0,
     dg_cost         REAL DEFAULT 0,
     admin_cost      REAL DEFAULT 0,
@@ -67,12 +68,11 @@ CREATE TABLE IF NOT EXISTS rm_prices (
     effective_date  TEXT    NOT NULL,
     concrete        REAL DEFAULT 2500,
     steel           REAL DEFAULT 0,
-    jalli           REAL DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Per-product selling price / production / loading-unloading / power /
--- welding rates plus Concrete/Steel/Jalli usage, edited live via
+-- welding / jalli rates plus Concrete/Steel usage, edited live via
 -- Admin > Product Cost Configuration. "product" must be unique so the app's
 -- upsert (Prefer: resolution=merge-duplicates) works. No transport column —
 -- real transport cost is tracked in the Dispatch module instead.
@@ -84,9 +84,9 @@ CREATE TABLE IF NOT EXISTS product_config (
     loading_unloading_cost  REAL DEFAULT 0,
     power_per_block         REAL DEFAULT 0,
     welding_cost            REAL DEFAULT 0,
+    jalli_cost              REAL DEFAULT 0,
     concrete_volume_m3      REAL DEFAULT 0,
     steel_kg_per_unit       REAL DEFAULT 0,
-    jalli_kg_per_unit       REAL DEFAULT 0,
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -195,29 +195,28 @@ CREATE TABLE IF NOT EXISTS activity_log (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── Migration: Concrete/Jalli costing replaces Cement+GGBS batch entry ───────
+-- ── Migration: Concrete costing replaces Cement+GGBS batch entry ────────────
 -- Run this block if your project was already set up before this change —
 -- it's safe to run even with existing data (old cement_ppc_qty/ggbs_qty/
 -- pct_*/labour_*/transport_* columns are left in place, just unused;
--- nothing is dropped).
+-- nothing is dropped). Jalli (cage welding) is a flat Rs./nos rate, not a
+-- priced raw material — only jalli_cost exists, no jalli_qty/jalli price.
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS concrete_qty REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS concrete_cost REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS steel_qty REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS steel_cost REAL DEFAULT 0;
-ALTER TABLE production     ADD COLUMN IF NOT EXISTS jalli_qty REAL DEFAULT 0;
-ALTER TABLE production     ADD COLUMN IF NOT EXISTS jalli_cost REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS production_cost REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS loading_unloading_cost REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS welding_cost REAL DEFAULT 0;
+ALTER TABLE production     ADD COLUMN IF NOT EXISTS jalli_cost REAL DEFAULT 0;
 ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS concrete REAL DEFAULT 2500;
 ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS steel REAL DEFAULT 0;
-ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS jalli REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS production_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS loading_unloading_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS welding_cost REAL DEFAULT 0;
+ALTER TABLE product_config ADD COLUMN IF NOT EXISTS jalli_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS concrete_volume_m3 REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS steel_kg_per_unit REAL DEFAULT 0;
-ALTER TABLE product_config ADD COLUMN IF NOT EXISTS jalli_kg_per_unit REAL DEFAULT 0;
 
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via

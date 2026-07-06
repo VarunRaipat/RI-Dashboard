@@ -11,10 +11,11 @@ def calculate_production(
     raw_materials: list = None,
 ) -> dict:
     """
-    Nothing is entered per DPR batch — every raw material (Concrete, Steel,
-    Jalli) has a fixed per-unit quantity set on the product (see
-    RAW_MATERIALS's product_field), so usage = Nos x that figure, and
-    cost = usage x the matching RM Prices rate.
+    Nothing is entered per DPR batch — Concrete and Steel each have a fixed
+    per-unit quantity set on the product (see RAW_MATERIALS's product_field),
+    so usage = Nos x that figure, and cost = usage x the matching RM Prices
+    rate. Jalli (cage welding), Welding, Production, Loading/Unloading, and
+    Power are all flat Rs./nos rates on the product — not priced materials.
     """
     cfg = (product_config or PRODUCT_CONFIG)[product]
     materials = raw_materials or RAW_MATERIALS
@@ -29,12 +30,13 @@ def calculate_production(
     loading_unloading_cost = cfg["loading_unloading_cost"] * v(nos)
     power_cost              = cfg["power_per_block"] * v(nos)
     welding_cost             = cfg["welding_cost"] * v(nos)
+    jalli_cost               = cfg["jalli_cost"] * v(nos)
     emi_cost   = float(EMI_PER_ENTRY)    # fixed Rs./entry
     dg_cost    = float(DG_PER_ENTRY)     # fixed Rs./entry
     admin_cost = float(ADMIN_PER_ENTRY)  # fixed Rs./entry
 
     sub_total  = (rm_cost + production_cost + loading_unloading_cost + power_cost
-                  + welding_cost + emi_cost + dg_cost + admin_cost)
+                  + welding_cost + jalli_cost + emi_cost + dg_cost + admin_cost)
     misc_cost  = sub_total * (MISC_PCT / 100)
     total_cost = sub_total + misc_cost
 
@@ -48,6 +50,7 @@ def calculate_production(
         "loading_unloading_cost":  round(loading_unloading_cost, 2),
         "power_cost":              round(power_cost, 2),
         "welding_cost":            round(welding_cost, 2),
+        "jalli_cost":              round(jalli_cost, 2),
         "emi_cost":                round(emi_cost, 2),
         "dg_cost":                 round(dg_cost, 2),
         "admin_cost":              round(admin_cost, 2),

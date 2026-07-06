@@ -23,7 +23,6 @@ USERS = {
 RAW_MATERIALS = [
     {"key": "concrete", "label": "Concrete", "unit": "m³", "product_field": "concrete_volume_m3"},
     {"key": "steel",    "label": "Steel (HT Wire)", "unit": "Kg", "product_field": "steel_kg_per_unit"},
-    {"key": "jalli",    "label": "Jalli (Aggregate)", "unit": "Kg", "product_field": "jalli_kg_per_unit"},
 ]
 
 DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in RAW_MATERIALS}
@@ -31,8 +30,8 @@ DEFAULT_RM_PRICES["concrete"] = 2500.0  # confirmed rate: Concrete Cost = Volume
 RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
-# Formula: Total Cost = RM (Concrete+Steel+Jalli) + Production + Loading/Unloading
-#                      + Power + Welding + EMI + DG + Admin, then + Misc%
+# Formula: Total Cost = RM (Concrete+Steel) + Production + Loading/Unloading
+#                      + Power + Welding + Jalli (cage welding) + EMI + DG + Admin, then + Misc%
 EMI_PER_ENTRY   = 20_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
 DG_PER_ENTRY    =  5_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
 ADMIN_PER_ENTRY =  8_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
@@ -110,10 +109,11 @@ def _joint_types_for(diameter_mm, cls):
 #
 # production_cost / loading_unloading_cost: renamed from labour_production /
 # labour_loading — same ₹/nos mechanic, clearer names.
-# welding_cost: new flat ₹/nos rate (joint welding, not a raw material).
-# concrete_volume_m3 / steel_kg_per_unit / jalli_kg_per_unit: fixed physical
-# quantity per unit — usage per DPR entry = Nos x this figure, at the
-# matching RM Prices rate (see RAW_MATERIALS above).
+# welding_cost / jalli_cost: flat ₹/nos rates (Jalli = cage welding), not raw
+# materials — depend on the product, not on a priced quantity.
+# concrete_volume_m3 / steel_kg_per_unit: fixed physical quantity per unit —
+# usage per DPR entry = Nos x this figure, at the matching RM Prices rate
+# (see RAW_MATERIALS above).
 def _blank_rates():
     return {
         "selling_price":          0.0,
@@ -121,9 +121,9 @@ def _blank_rates():
         "loading_unloading_cost": 0.0,
         "power_per_block":        0.0,
         "welding_cost":           0.0,
+        "jalli_cost":             0.0,
         "concrete_volume_m3":     0.0,
         "steel_kg_per_unit":      0.0,
-        "jalli_kg_per_unit":      0.0,
     }
 
 PRODUCT_CONFIG = {}
@@ -261,12 +261,13 @@ INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTS]
 
 del _d, _c, _joint, _sku, _disp_names, _np4_sku
 
-# Steel / Jalli inventory: opening qty as of INVENTORY_ANCHOR_DATE. Current
-# balance = opening + received (Gate Entry "In" log) - consumed (computed
-# from Production Entry: Nos x the product's fixed per-unit figure). Concrete
+# Steel inventory: opening qty as of INVENTORY_ANCHOR_DATE. Current balance =
+# opening + received (Gate Entry "In" log) - consumed (computed from
+# Production Entry: Nos x the product's fixed per-unit figure). Concrete
 # isn't a separately purchased/stocked item (it's mixed on-site), so it has
-# no inventory balance — it's cost-only.
-RM_INVENTORY_OPENING = {"steel": 0, "jalli": 0}
+# no inventory balance — it's cost-only. Jalli is cage welding (a labour/
+# process cost, not a raw material), so it has no inventory balance either.
+RM_INVENTORY_OPENING = {"steel": 0}
 
 # ── Gate Entry (raw material / equipment / parts movement log) ───────────────
 GATE_CATEGORIES = ["Raw Material", "Plant Equipment & Parts", "Miscellaneous Parts"]

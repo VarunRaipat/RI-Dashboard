@@ -8,7 +8,7 @@ from core.db import insert_production, get_rm_prices, get_production, delete_row
 from core.ui import flash, show_flashes
 
 _RM_COST_FIELDS = [
-    "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost",
+    "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
     "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
 ] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + [f"{m['key']}_cost" for m in RAW_MATERIALS]
 
@@ -78,21 +78,22 @@ def show(PLOT):
             cost = result[f"{m['key']}_cost"]
             rm_cols[i].metric(m["label"], f"₹{cost:,.0f}")
 
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Production",          f"₹{result['production_cost']:,.0f}")
-        k2.metric("Loading/Unloading",    f"₹{result['loading_unloading_cost']:,.0f}")
-        k3.metric("Power",                f"₹{result['power_cost']:,.0f}")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Production",           f"₹{result['production_cost']:,.0f}")
+        k2.metric("Loading/Unloading",     f"₹{result['loading_unloading_cost']:,.0f}")
+        k3.metric("Power",                 f"₹{result['power_cost']:,.0f}")
+        k4.metric("Welding",                f"₹{result['welding_cost']:,.0f}")
 
-        k4, k5, k6, k7 = st.columns(4)
-        k4.metric("Welding",            f"₹{result['welding_cost']:,.0f}")
-        k5.metric("EMI",                f"₹{result['emi_cost']:,.0f}",   "Fixed/entry")
-        k6.metric("DG Cost",            f"₹{result['dg_cost']:,.0f}",    "Fixed/entry")
-        k7.metric("Admin Overheads",    f"₹{result['admin_cost']:,.0f}", "Fixed/entry")
+        k5, k6, k7, k8 = st.columns(4)
+        k5.metric("Jalli (Cage Welding)", f"₹{result['jalli_cost']:,.0f}")
+        k6.metric("EMI",                f"₹{result['emi_cost']:,.0f}",   "Fixed/entry")
+        k7.metric("DG Cost",            f"₹{result['dg_cost']:,.0f}",    "Fixed/entry")
+        k8.metric("Admin Overheads",    f"₹{result['admin_cost']:,.0f}", "Fixed/entry")
 
-        k8, k9, k10 = st.columns(3)
-        k8.metric("Miscellaneous (10%)", f"₹{result['misc_cost']:,.0f}")
-        k9.metric("Total Cost",  f"₹{result['total_cost']:,.0f}")
-        k10.metric("Revenue",    f"₹{result['revenue']:,.0f}",
+        k9, k10, k11 = st.columns(3)
+        k9.metric("Miscellaneous (10%)", f"₹{result['misc_cost']:,.0f}")
+        k10.metric("Total Cost",  f"₹{result['total_cost']:,.0f}")
+        k11.metric("Revenue",    f"₹{result['revenue']:,.0f}",
                    f"@ ₹{prod_cfg[pricing_key]['selling_price']}/nos")
 
         pcolor = "normal" if result["profit"] >= 0 else "inverse"
@@ -104,14 +105,14 @@ def show(PLOT):
         )
 
         labels = [m["label"] for m in RAW_MATERIALS] + [
-            "Production","Loading/Unloading","Power","Welding","EMI","DG","Admin","Misc",
+            "Production","Loading/Unloading","Power","Welding","Jalli","EMI","DG","Admin","Misc",
         ]
         values = [result[f"{m['key']}_cost"] for m in RAW_MATERIALS] + [
             result["production_cost"], result["loading_unloading_cost"], result["power_cost"],
-            result["welding_cost"], result["emi_cost"], result["dg_cost"],
+            result["welding_cost"], result["jalli_cost"], result["emi_cost"], result["dg_cost"],
             result["admin_cost"], result["misc_cost"],
         ]
-        colors = ["#00C49A","#3B82F6","#FDBA44","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9","#27AE60","#D4A011"]
+        colors = ["#00C49A","#3B82F6","#FDBA44","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9","#27AE60","#D4A011","#14B8A6"]
         fig_bar = go.Figure(go.Bar(
             x=labels, y=values,
             marker_color=colors[:len(labels)],
@@ -137,20 +138,20 @@ def show(PLOT):
         df = df.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
 
         show_cols = ["date","product","nos","plant",
-                     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost",
+                     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
                      "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
                      ] + [f"{m['key']}_qty" for m in RAW_MATERIALS]
         show_cols = [c for c in show_cols if c in df.columns]
         rename = {
             "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
             "rm_cost":"RM Cost","production_cost":"Production","loading_unloading_cost":"Loading/Unloading",
-            "power_cost":"Power","welding_cost":"Welding","emi_cost":"EMI",
+            "power_cost":"Power","welding_cost":"Welding","jalli_cost":"Jalli","emi_cost":"EMI",
             "dg_cost":"DG","admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
             "profit":"Profit","profit_pct":"Profit %",
             **{f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS},
         }
         sum_cols = [c for c in ["nos","revenue","rm_cost","production_cost","loading_unloading_cost",
-                                 "power_cost","welding_cost","emi_cost","dg_cost","admin_cost","misc_cost",
+                                 "power_cost","welding_cost","jalli_cost","emi_cost","dg_cost","admin_cost","misc_cost",
                                  "total_cost","profit"] if c in df.columns]
         col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
         interactive_table(df, key="dpr_rec", sum_cols=sum_cols, show_cols=show_cols,
