@@ -162,7 +162,6 @@ def init_db():
         selling_price REAL DEFAULT 0,
         production_cost REAL DEFAULT 0,
         loading_unloading_cost REAL DEFAULT 0,
-        power_per_block REAL DEFAULT 0,
         welding_cost REAL DEFAULT 0,
         jalli_cost REAL DEFAULT 0,
         concrete_volume_m3 REAL DEFAULT 0,
@@ -174,7 +173,6 @@ def init_db():
         diameter_mm INTEGER UNIQUE NOT NULL,
         production_cost REAL DEFAULT 0,
         loading_unloading_cost REAL DEFAULT 0,
-        power_per_block REAL DEFAULT 0,
         welding_cost REAL DEFAULT 0,
         jalli_cost REAL DEFAULT 0,
         steel_kg_per_unit REAL DEFAULT 0,
@@ -395,7 +393,7 @@ def save_rm_prices(prices):
     log_activity("update", "Admin", "RM prices updated")
 
 
-_PRODUCT_CFG_FIELDS = ["selling_price","production_cost","loading_unloading_cost","power_per_block",
+_PRODUCT_CFG_FIELDS = ["selling_price","production_cost","loading_unloading_cost",
                        "welding_cost","jalli_cost","concrete_volume_m3","steel_kg_per_unit"]
 
 
@@ -434,7 +432,7 @@ def get_product_config():
     return result
 
 
-_PIPE_DIAMETER_FIELDS = ["production_cost","loading_unloading_cost","power_per_block",
+_PIPE_DIAMETER_FIELDS = ["production_cost","loading_unloading_cost",
                          "welding_cost","jalli_cost","steel_kg_per_unit"]
 
 

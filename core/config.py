@@ -31,11 +31,16 @@ RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
 # Formula: Total Cost = RM (Concrete+Steel) + Production + Loading/Unloading
-#                      + Power + Welding + Jalli (cage welding) + EMI + DG + Admin, then + Misc%
+#                      + Welding + Jalli (cage welding) + EMI + DG + Power + Admin, then + Misc%
 EMI_PER_ENTRY   = 20_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
 DG_PER_ENTRY    =  5_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
-ADMIN_PER_ENTRY =  8_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
-MISC_PCT        =   10.0  # % of all costs — placeholder, confirm with admin
+POWER_PER_ENTRY =  1_000  # Rs. fixed per DPR entry (daily) — confirmed
+ADMIN_PER_ENTRY =  1_500  # Rs. fixed per DPR entry (daily) — confirmed
+MISC_PCT        =   20.0  # % of all costs — confirmed
+
+# GST on Selling Price — 18%. How this factors into profit_pct is being
+# confirmed with the client before wiring into calculate_production().
+GST_PCT = 18.0
 
 HUME_PIPE_DIAMETERS_MM = [150, 200, 250, 300, 450, 600, 750, 900, 1000, 1200]
 
@@ -112,27 +117,28 @@ def _joint_types_for(diameter_mm, cls):
 # concrete_volume_m3 / steel_kg_per_unit: fixed physical quantity per unit —
 # usage per DPR entry = Nos x this figure, at the matching RM Prices rate
 # (see RAW_MATERIALS above).
+# No "power_per_block" — Power is now a flat POWER_PER_ENTRY (like EMI/DG/
+# Admin), not a per-unit rate.
 def _blank_rates():
     return {
         "selling_price":          0.0,
         "production_cost":        0.0,
         "loading_unloading_cost": 0.0,
-        "power_per_block":        0.0,
         "welding_cost":           0.0,
         "jalli_cost":             0.0,
         "concrete_volume_m3":     0.0,
         "steel_kg_per_unit":      0.0,
     }
 
-# For Hume Pipes, Production/Loading-Unloading/Power/Welding/Jalli/Steel are
-# the same for a given diameter regardless of class (NP2/NP3/NP4) or Joint
-# Type (confirmed) — so those 6 rates are set ONCE per diameter here (Admin >
+# For Hume Pipes, Production/Loading-Unloading/Welding/Jalli/Steel are the
+# same for a given diameter regardless of class (NP2/NP3/NP4) or Joint Type
+# (confirmed) — so those 5 rates are set ONCE per diameter here (Admin >
 # Pipe Diameter Rates), instead of being duplicated/edited separately across
 # every class+joint SKU. Only Selling Price and Concrete Volume genuinely
 # vary by class (different price points / wall thickness), so those stay in
 # PRODUCT_CONFIG, keyed by diameter+class as before.
 _PIPE_DIAMETER_FIELDS = [
-    "production_cost", "loading_unloading_cost", "power_per_block",
+    "production_cost", "loading_unloading_cost",
     "welding_cost", "jalli_cost", "steel_kg_per_unit",
 ]
 

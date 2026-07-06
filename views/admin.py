@@ -106,26 +106,23 @@ def show(PLOT):
                     new_lu   = cc2.number_input("Loading/Unloading Cost (Rs./nos)", value=float(cfg.get("loading_unloading_cost", 0)), min_value=0.0, step=0.05)
 
                     cc3, cc4 = st.columns(2)
-                    new_pw   = cc3.number_input("Power (Rs./nos)",                 value=float(cfg["power_per_block"]), min_value=0.0, step=0.05)
-                    new_weld = cc4.number_input("Welding Cost (Rs./nos)",          value=float(cfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+                    new_weld = cc3.number_input("Welding Cost (Rs./nos)",             value=float(cfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+                    new_jalli = cc4.number_input("Jalli — Cage Welding (Rs./nos)",    value=float(cfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
 
                     cc5, cc6 = st.columns(2)
-                    new_jalli    = cc5.number_input("Jalli — Cage Welding (Rs./nos)", value=float(cfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
-                    new_concrete = cc6.number_input("Concrete (m³/Unit)",             value=float(cfg.get("concrete_volume_m3", 0)), min_value=0.0, step=0.001, format="%.4f")
-
-                    new_steel = st.number_input("Steel — HT Wire (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+                    new_concrete = cc5.number_input("Concrete (m³/Unit)",         value=float(cfg.get("concrete_volume_m3", 0)), min_value=0.0, step=0.001, format="%.4f")
+                    new_steel    = cc6.number_input("Steel — HT Wire (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
 
                     payload.update({
                         "production_cost":        new_prod,
                         "loading_unloading_cost": new_lu,
-                        "power_per_block":        new_pw,
                         "welding_cost":            new_weld,
                         "jalli_cost":              new_jalli,
                         "concrete_volume_m3":      new_concrete,
                         "steel_kg_per_unit":       new_steel,
                     })
 
-                st.caption("Fixed costs: EMI ₹20,000 · DG ₹5,000 · Admin ₹8,000 · Misc 10%")
+                st.caption("Fixed costs (all products): EMI ₹20,000 · DG ₹5,000 · Power ₹1,000 · Admin ₹1,500 · Misc 20%")
 
                 if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
                     save_product_config(sel_prod, payload)
@@ -141,7 +138,6 @@ def show(PLOT):
                     row.update({
                         "Production":     c.get("production_cost", 0),
                         "Loading/Unload": c.get("loading_unloading_cost", 0),
-                        "Power":          c["power_per_block"],
                         "Welding":        c.get("welding_cost", 0),
                         "Jalli":          c.get("jalli_cost", 0),
                         "Steel (Kg)":     c.get("steel_kg_per_unit", 0),
@@ -150,8 +146,9 @@ def show(PLOT):
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
         with cfg_sub2:
-            st.caption("These 6 rates apply to every class (NP2/NP3/NP4) and Joint Type at the "
-                       "selected diameter — set once per diameter, not per SKU.")
+            st.caption("These 5 rates apply to every class (NP2/NP3/NP4) and Joint Type at the "
+                       "selected diameter — set once per diameter, not per SKU. Power is a fixed "
+                       "₹1,000/entry cost applied to every DPR entry, not set here.")
 
             dia_cfg_all = get_pipe_diameter_config()
             sel_dia = st.selectbox("Select Diameter (mm)", HUME_PIPE_DIAMETERS_MM, key="dia_cfg_sel")
@@ -163,18 +160,15 @@ def show(PLOT):
                 d_lu   = dc2.number_input("Loading/Unloading Cost (Rs./nos)", value=float(dcfg.get("loading_unloading_cost", 0)), min_value=0.0, step=0.05)
 
                 dc3, dc4 = st.columns(2)
-                d_pw   = dc3.number_input("Power (Rs./nos)",        value=float(dcfg.get("power_per_block", 0)), min_value=0.0, step=0.05)
-                d_weld = dc4.number_input("Welding Cost (Rs./nos)", value=float(dcfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+                d_weld  = dc3.number_input("Welding Cost (Rs./nos)",           value=float(dcfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+                d_jalli = dc4.number_input("Jalli — Cage Welding (Rs./nos)",   value=float(dcfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
 
-                dc5, dc6 = st.columns(2)
-                d_jalli = dc5.number_input("Jalli — Cage Welding (Rs./nos)", value=float(dcfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
-                d_steel = dc6.number_input("Steel — HT Wire (Kg/Unit)",      value=float(dcfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+                d_steel = st.number_input("Steel — HT Wire (Kg/Unit)", value=float(dcfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
 
                 if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
                     save_pipe_diameter_config(sel_dia, {
                         "production_cost":        d_prod,
                         "loading_unloading_cost": d_lu,
-                        "power_per_block":        d_pw,
                         "welding_cost":           d_weld,
                         "jalli_cost":             d_jalli,
                         "steel_kg_per_unit":      d_steel,
@@ -190,7 +184,6 @@ def show(PLOT):
                     "Diameter (mm)":  d,
                     "Production":     c.get("production_cost", 0),
                     "Loading/Unload": c.get("loading_unloading_cost", 0),
-                    "Power":          c.get("power_per_block", 0),
                     "Welding":        c.get("welding_cost", 0),
                     "Jalli":          c.get("jalli_cost", 0),
                     "Steel (Kg)":     c.get("steel_kg_per_unit", 0),
