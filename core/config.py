@@ -2,7 +2,7 @@ from datetime import date
 
 # ── Users & Roles ─────────────────────────────────────────────────────────────
 USERS = {
-    "admin":      {"password": "ri@admin123",  "role": "admin",      "name": "Admin"},
+    "admin":      {"password": "***REMOVED***",     "role": "admin",      "name": "Admin"},
     "production": {"password": "ri@prod2024",  "role": "production", "name": "Production Operator"},
     "dispatch":   {"password": "ri@disp2024",  "role": "dispatch",   "name": "Dispatch Operator"},
     "headoffice": {"password": "***REMOVED***2024",    "role": "headoffice", "name": "Head Office"},
