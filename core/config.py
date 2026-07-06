@@ -1,3 +1,4 @@
+import math
 from datetime import date
 
 # ── Users & Roles ─────────────────────────────────────────────────────────────
@@ -11,39 +12,66 @@ USERS = {
 }
 
 # ── Raw materials: single source of truth ─────────────────────────────────────
-# Every raw-material-driven view (DPR form, cost calculation, Supabase schema,
-# RM Prices admin page) is generated from this list — adding/renaming a
-# material for the next company duplicate means editing only this list plus
-# the matching columns in supabase_schema.sql / core/db.py's SQLite fallback.
-#   key          — internal identifier, also the DB column prefix
-#   label        — human-readable name shown in forms/tables
-#   unit         — "Bags" or "Kg" — what the operator actually enters
-#   kg_per_unit  — conversion to kg for weight-% breakdown (1 if already kg)
-# These are entered per DPR batch (actual consumption varies run to run).
+# Nothing is entered per DPR batch anymore — every material below is a fixed
+# per-unit figure set once on the product (Admin > Product Cost Configuration)
+# and multiplied by Nos, since usage is known per product rather than measured
+# batch to batch. Each still needs its own price (Admin > RM Prices).
+#   key            — internal identifier, also the DB column prefix
+#   label          — human-readable name
+#   unit           — "m³" or "Kg" — what the per-unit figure is measured in
+#   product_field  — the PRODUCT_CONFIG key holding the per-unit quantity
 RAW_MATERIALS = [
-    {"key": "cement_ppc",   "label": "PPC Cement",    "unit": "Bags", "kg_per_unit": 50},
-    {"key": "ggbs",         "label": "GGBS",          "unit": "Bags", "kg_per_unit": 50},
+    {"key": "concrete", "label": "Concrete", "unit": "m³", "product_field": "concrete_volume_m3"},
+    {"key": "steel",    "label": "Steel (HT Wire)", "unit": "Kg", "product_field": "steel_kg_per_unit"},
+    {"key": "jalli",    "label": "Jalli (Aggregate)", "unit": "Kg", "product_field": "jalli_kg_per_unit"},
 ]
 
-# Steel (HT wire) is NOT entered per batch — usage is known per product, so
-# each product gets a fixed "Steel (Kg/Unit)" figure (Admin > Product Cost
-# Configuration) and steel used = Nos x that figure, computed automatically.
-# It still needs its own price (Admin > RM Prices) and still counts toward
-# weight%, cost, and inventory tracking, alongside RAW_MATERIALS above.
-STEEL_MATERIAL = {"key": "steel", "label": "Steel (HT Wire)", "unit": "Kg", "kg_per_unit": 1}
-ALL_MATERIALS  = RAW_MATERIALS + [STEEL_MATERIAL]
-
-DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in ALL_MATERIALS}
-RM_LABELS = {m["key"]: f"{m['label']} (Rs./kg)" for m in ALL_MATERIALS}
+DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in RAW_MATERIALS}
+DEFAULT_RM_PRICES["concrete"] = 2500.0  # confirmed rate: Concrete Cost = Volume (m³) x 2500
+RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
-# Formula: Total Cost = RM + Labour + Transport + Power + EMI + DG + Admin, then + Misc%
+# Formula: Total Cost = RM (Concrete+Steel+Jalli) + Production + Loading/Unloading
+#                      + Power + Welding + EMI + DG + Admin, then + Misc%
 EMI_PER_ENTRY   = 20_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
 DG_PER_ENTRY    =  5_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
 ADMIN_PER_ENTRY =  8_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
 MISC_PCT        =   10.0  # % of all costs — placeholder, confirm with admin
 
 HUME_PIPE_DIAMETERS_MM = [150, 200, 250, 300, 450, 600, 750, 900, 1000, 1200]
+
+# Pipe barrel = hollow cylinder. Volume (m³) = pi/4 x (OD^2 - ID^2) x Length,
+# with ID/OD/Length all in metres. Length is fixed at 2.5m for every pipe;
+# OD = ID + 2 x barrel thickness.
+PIPE_LENGTH_M = 2.5
+
+
+def _concrete_volume_m3(diameter_mm, thickness_mm):
+    if not thickness_mm:
+        return 0.0
+    id_m = diameter_mm / 1000
+    od_m = (diameter_mm + 2 * thickness_mm) / 1000
+    return round(math.pi / 4 * (od_m ** 2 - id_m ** 2) * PIPE_LENGTH_M, 4)
+
+
+# Barrel thickness (mm) per (class, diameter) — client-supplied engineering
+# data. NP4 looks up NP3's thickness for the same diameter (and therefore
+# gets the same concrete volume) since it's the same physical pipe — this
+# covers NP4-150mm too even though it isn't listed separately below. Diameters
+# genuinely missing from a class (e.g. NP2 above 600mm) default to thickness 0
+# (concrete_volume_m3 = 0) until confirmed; fix in Admin before selling those.
+BARREL_THICKNESS_MM = {
+    ("NP2", 150): 25, ("NP2", 200): 25, ("NP2", 250): 25, ("NP2", 300): 30,
+    ("NP2", 450): 35, ("NP2", 600): 45, ("NP2", 900): 55,
+
+    ("NP3", 150): 30, ("NP3", 200): 30, ("NP3", 250): 30, ("NP3", 300): 40,
+    ("NP3", 450): 75, ("NP3", 600): 85, ("NP3", 750): 90, ("NP3", 900): 100,
+    ("NP3", 1000): 115, ("NP3", 1200): 120,
+
+    ("NP4", 200): 30, ("NP4", 250): 30, ("NP4", 300): 40, ("NP4", 450): 75,
+    ("NP4", 600): 85, ("NP4", 750): 90, ("NP4", 900): 100, ("NP4", 1000): 115,
+    ("NP4", 1200): 120,
+}
 
 # NP2/NP3 are actually produced and stocked. NP4 is NOT — it's the exact same
 # physical pipe as NP3, just sold/certified under a different class (and
@@ -71,32 +99,44 @@ def _joint_types_for(diameter_mm, cls):
         return ["Collar", "M/F"]
     return ["Socket & Spigot", "M/F"]  # NP3
 
-# All selling_price / labour / power / steel values below are placeholders
-# (0) — real rates must be entered via Admin > Product Cost Configuration
-# before profit figures mean anything. Kept as one flat dict (not nested by
-# diameter/class) so every product is independently editable there, same as
-# Ecostructures' PRODUCT_CONFIG pattern.
+# All rates below are placeholders (0) until entered via Admin > Product Cost
+# Configuration, except concrete_volume_m3 for pipes, which is pre-computed
+# from BARREL_THICKNESS_MM. Kept as one flat dict (not nested by
+# diameter/class) so every product is independently editable there.
 #
-# No "transport_per_block" here — real transport cost is already tracked in
-# the Dispatch module (truck, trip distance, diesel cost), so a second
-# per-unit transport rate at the production-cost level would double-count it.
+# No "transport" field — real transport cost is already tracked in the
+# Dispatch module (truck, trip distance, diesel cost), so a second per-unit
+# transport rate here would double-count it.
 #
-# steel_kg_per_unit: fixed Steel (HT wire) usage per unit of this product —
-# see STEEL_MATERIAL above. Steel used per DPR entry = Nos x this figure.
+# production_cost / loading_unloading_cost: renamed from labour_production /
+# labour_loading — same ₹/nos mechanic, clearer names.
+# welding_cost: new flat ₹/nos rate (joint welding, not a raw material).
+# concrete_volume_m3 / steel_kg_per_unit / jalli_kg_per_unit: fixed physical
+# quantity per unit — usage per DPR entry = Nos x this figure, at the
+# matching RM Prices rate (see RAW_MATERIALS above).
 def _blank_rates():
     return {
-        "selling_price":       0.0,
-        "labour_production":   0.0,
-        "labour_loading":      0.0,
-        "power_per_block":     0.0,
-        "steel_kg_per_unit":   0.0,
+        "selling_price":          0.0,
+        "production_cost":        0.0,
+        "loading_unloading_cost": 0.0,
+        "power_per_block":        0.0,
+        "welding_cost":           0.0,
+        "concrete_volume_m3":     0.0,
+        "steel_kg_per_unit":      0.0,
+        "jalli_kg_per_unit":      0.0,
     }
 
 PRODUCT_CONFIG = {}
 for _d in HUME_PIPE_DIAMETERS_MM:
     for _c in HUME_PIPE_SALE_CLASSES:
         _name = f"Hume Pipe {_d}mm {_c}"
-        PRODUCT_CONFIG[_name] = {"display": _name, **_blank_rates()}
+        _thickness_class = NP4_SHARES_CLASS if _c == "NP4" else _c
+        _thickness = BARREL_THICKNESS_MM.get((_thickness_class, _d), 0)
+        PRODUCT_CONFIG[_name] = {
+            "display": _name,
+            **_blank_rates(),
+            "concrete_volume_m3": _concrete_volume_m3(_d, _thickness),
+        }
 
 for _slab in ["Slab 7'", "Slab 8'", "Slab Design 7'"]:
     PRODUCT_CONFIG[_slab] = {"display": _slab, **_blank_rates()}
@@ -107,7 +147,7 @@ for _pillar in ["Pillar 8'", "Pillar 10'", "Pillar 12'", "Pillar 14'"]:
 PRODUCT_CONFIG["Fencing Pillar"] = {"display": "Fencing Pillar", **_blank_rates()}
 PRODUCT_CONFIG["PSC Pole"]       = {"display": "PSC Pole", **_blank_rates()}
 
-del _blank_rates, _d, _c, _name, _slab, _pillar
+del _blank_rates, _d, _c, _name, _slab, _pillar, _thickness_class, _thickness
 
 # ── SKUs vs. pricing keys ──────────────────────────────────────────────────────
 # Joint Type doesn't change price, but a Collar pipe and an M/F pipe of the
@@ -221,18 +261,20 @@ INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTS]
 
 del _d, _c, _joint, _sku, _disp_names, _np4_sku
 
-# Cement / GGBS / Steel inventory: opening qty as of INVENTORY_ANCHOR_DATE.
-# Current balance = opening + received (Gate Entry "In" log) - consumed
-# (summed from Production Entry — computed for Steel, entered for the rest).
-RM_INVENTORY_OPENING = {m["key"]: 0 for m in ALL_MATERIALS}
+# Steel / Jalli inventory: opening qty as of INVENTORY_ANCHOR_DATE. Current
+# balance = opening + received (Gate Entry "In" log) - consumed (computed
+# from Production Entry: Nos x the product's fixed per-unit figure). Concrete
+# isn't a separately purchased/stocked item (it's mixed on-site), so it has
+# no inventory balance — it's cost-only.
+RM_INVENTORY_OPENING = {"steel": 0, "jalli": 0}
 
 # ── Gate Entry (raw material / equipment / parts movement log) ───────────────
 GATE_CATEGORIES = ["Raw Material", "Plant Equipment & Parts", "Miscellaneous Parts"]
 GATE_DIRECTIONS = ["In", "Out"]
 GATE_UNITS      = ["Ton", "CFT", "Nos", "Kg", "Litre", "Bags", "Other"]
 
-# Nothing bulk/untracked for RI — cement, GGBS, and steel all get a running
-# balance via RM_INVENTORY_OPENING.
+# Nothing bulk/untracked for RI — Steel and Jalli both get a running balance
+# via RM_INVENTORY_OPENING.
 GATE_UNTRACKED_ITEMS = []
 
 GATE_RM_TRACKED_ITEMS = list(RM_INVENTORY_OPENING.keys())

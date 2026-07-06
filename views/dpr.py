@@ -2,16 +2,15 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, ALL_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
+from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
 from core.db import insert_production, get_rm_prices, get_production, delete_row, update_production, get_product_config
 from core.ui import flash, show_flashes
 
 _RM_COST_FIELDS = [
-    "rm_cost","labour_cost","power_cost",
+    "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost",
     "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
-    "total_wt_kg",
-] + [f"pct_{m['key']}" for m in ALL_MATERIALS] + [f"{m['key']}_qty" for m in ALL_MATERIALS]
+] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + [f"{m['key']}_cost" for m in RAW_MATERIALS]
 
 
 def show(PLOT):
@@ -29,20 +28,14 @@ def show(PLOT):
     with st.form("dpr_form", clear_on_submit=True):
         st.markdown('<div class="section-header">Basic Info</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
-        entry_date    = c1.date_input("Date", date.today())
-        product       = c2.selectbox("Product", PRODUCTION_PRODUCTS)
-        nos           = c3.number_input("Production (Nos.)", min_value=0, step=100)
+        entry_date = c1.date_input("Date", date.today())
+        product    = c2.selectbox("Product", PRODUCTION_PRODUCTS)
+        nos        = c3.number_input("Production (Nos.)", min_value=0, step=100)
 
         plant = st.radio("Plant", PLANTS, horizontal=True)
-
-        st.markdown('<div class="section-header">Raw Materials Used</div>', unsafe_allow_html=True)
-        rm_inputs = {}
-        rm_cols = st.columns(min(len(RAW_MATERIALS), 4))
-        for i, m in enumerate(RAW_MATERIALS):
-            step = 0.5 if m["unit"] == "Bags" else 10.0
-            rm_inputs[m["key"]] = rm_cols[i % len(rm_cols)].number_input(
-                f"{m['label']} ({m['unit']})", min_value=0.0, step=step, key=f"dpr_rm_{m['key']}"
-            )
+        st.caption("Concrete, Steel, and Jalli usage are computed automatically from this "
+                   "product's fixed per-unit figures (Admin > Product Cost Configuration) — "
+                   "nothing else to enter.")
 
         submitted = st.form_submit_button("✅ Submit & Calculate", type="primary", use_container_width=True)
 
@@ -52,7 +45,7 @@ def show(PLOT):
             return
 
         pricing_key = SKU_TO_PRICING_KEY.get(product, product)
-        result = calculate_production(pricing_key, nos, rm_inputs, rm, prod_cfg)
+        result = calculate_production(pricing_key, nos, rm, prod_cfg)
 
         record = {
             "date": str(entry_date), "product": product, "nos": nos,
@@ -69,42 +62,35 @@ def show(PLOT):
         if role == "production":
             return  # show nothing else to production operator
 
-        # ── RM % Breakdown ────────────────────────────────────────────────────
+        # ── Material Usage ─────────────────────────────────────────────────────
         st.markdown("---")
-        st.markdown('<div class="section-header">Raw Material Composition (%)</div>', unsafe_allow_html=True)
-        pct_data = {m["label"]: result[f"pct_{m['key']}"] for m in ALL_MATERIALS}
-        pct_cols = st.columns(len(pct_data))
-        for i, (mat, pct) in enumerate(pct_data.items()):
-            pct_cols[i].metric(f"% {mat}", f"{pct:.1f}%")
-        st.caption(f"Total weight: **{result['total_wt_kg']:,.1f} kg**")
-
-        nonzero = {k: v for k, v in pct_data.items() if v > 0}
-        if nonzero:
-            fig_pie = go.Figure(go.Pie(
-                labels=list(nonzero.keys()),
-                values=list(nonzero.values()),
-                hole=0.4,
-                textinfo="label+percent",
-                marker_colors=["#00C49A","#3B82F6","#FDBA44","#A78BFA","#FB7185","#34D399","#F97316","#F97316"],
-            ))
-            fig_pie.update_layout(**PLOT, height=280, showlegend=False)
-            st.plotly_chart(fig_pie, use_container_width=True)
+        st.markdown('<div class="section-header">Material Usage</div>', unsafe_allow_html=True)
+        m_cols = st.columns(len(RAW_MATERIALS))
+        for i, m in enumerate(RAW_MATERIALS):
+            qty = result[f"{m['key']}_qty"]
+            m_cols[i].metric(f"{m['label']} ({m['unit']})", f"{qty:,.2f}")
 
         # ── Cost Breakdown ────────────────────────────────────────────────────
         st.markdown('<div class="section-header">Cost Breakdown</div>', unsafe_allow_html=True)
 
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Raw Material",  f"₹{result['rm_cost']:,.0f}")
-        k2.metric("Labour",        f"₹{result['labour_cost']:,.0f}")
-        k3.metric("Power",         f"₹{result['power_cost']:,.0f}")
+        rm_cols = st.columns(len(RAW_MATERIALS))
+        for i, m in enumerate(RAW_MATERIALS):
+            cost = result[f"{m['key']}_cost"]
+            rm_cols[i].metric(m["label"], f"₹{cost:,.0f}")
 
-        k5, k6, k7, k8 = st.columns(4)
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Production",          f"₹{result['production_cost']:,.0f}")
+        k2.metric("Loading/Unloading",    f"₹{result['loading_unloading_cost']:,.0f}")
+        k3.metric("Power",                f"₹{result['power_cost']:,.0f}")
+
+        k4, k5, k6, k7 = st.columns(4)
+        k4.metric("Welding",            f"₹{result['welding_cost']:,.0f}")
         k5.metric("EMI",                f"₹{result['emi_cost']:,.0f}",   "Fixed/entry")
         k6.metric("DG Cost",            f"₹{result['dg_cost']:,.0f}",    "Fixed/entry")
         k7.metric("Admin Overheads",    f"₹{result['admin_cost']:,.0f}", "Fixed/entry")
-        k8.metric("Miscellaneous (10%)",f"₹{result['misc_cost']:,.0f}")
 
-        k9, k10 = st.columns(2)
+        k8, k9, k10 = st.columns(3)
+        k8.metric("Miscellaneous (10%)", f"₹{result['misc_cost']:,.0f}")
         k9.metric("Total Cost",  f"₹{result['total_cost']:,.0f}")
         k10.metric("Revenue",    f"₹{result['revenue']:,.0f}",
                    f"@ ₹{prod_cfg[pricing_key]['selling_price']}/nos")
@@ -117,15 +103,18 @@ def show(PLOT):
             delta_color=pcolor,
         )
 
-        labels = ["Raw Material","Labour","Power","EMI","DG","Admin","Misc"]
-        values = [
-            result["rm_cost"], result["labour_cost"], result["power_cost"],
-            result["emi_cost"], result["dg_cost"], result["admin_cost"], result["misc_cost"],
+        labels = [m["label"] for m in RAW_MATERIALS] + [
+            "Production","Loading/Unloading","Power","Welding","EMI","DG","Admin","Misc",
         ]
-        colors = ["#00C49A","#3B82F6","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9"]
+        values = [result[f"{m['key']}_cost"] for m in RAW_MATERIALS] + [
+            result["production_cost"], result["loading_unloading_cost"], result["power_cost"],
+            result["welding_cost"], result["emi_cost"], result["dg_cost"],
+            result["admin_cost"], result["misc_cost"],
+        ]
+        colors = ["#00C49A","#3B82F6","#FDBA44","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9","#27AE60","#D4A011"]
         fig_bar = go.Figure(go.Bar(
             x=labels, y=values,
-            marker_color=colors,
+            marker_color=colors[:len(labels)],
             text=[f"₹{v:,.0f}" for v in values],
             textposition="outside",
         ))
@@ -148,20 +137,20 @@ def show(PLOT):
         df = df.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
 
         show_cols = ["date","product","nos","plant",
-                     "rm_cost","labour_cost","power_cost",
+                     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost",
                      "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
-                     ] + [f"pct_{m['key']}" for m in ALL_MATERIALS]
+                     ] + [f"{m['key']}_qty" for m in RAW_MATERIALS]
         show_cols = [c for c in show_cols if c in df.columns]
         rename = {
             "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
-            "rm_cost":"RM Cost","labour_cost":"Labour",
-            "power_cost":"Power","emi_cost":"EMI",
+            "rm_cost":"RM Cost","production_cost":"Production","loading_unloading_cost":"Loading/Unloading",
+            "power_cost":"Power","welding_cost":"Welding","emi_cost":"EMI",
             "dg_cost":"DG","admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
             "profit":"Profit","profit_pct":"Profit %",
-            **{f"pct_{m['key']}": f"% {m['label']}" for m in ALL_MATERIALS},
+            **{f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS},
         }
-        sum_cols = [c for c in ["nos","revenue","rm_cost","labour_cost",
-                                 "power_cost","emi_cost","dg_cost","admin_cost","misc_cost",
+        sum_cols = [c for c in ["nos","revenue","rm_cost","production_cost","loading_unloading_cost",
+                                 "power_cost","welding_cost","emi_cost","dg_cost","admin_cost","misc_cost",
                                  "total_cost","profit"] if c in df.columns]
         col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
         interactive_table(df, key="dpr_rec", sum_cols=sum_cols, show_cols=show_cols,
@@ -201,20 +190,11 @@ def show(PLOT):
                                     index=PLANTS.index(row["plant"]) if row.get("plant") in PLANTS else 0,
                                     horizontal=True)
 
-                e_rm_inputs = {}
-                er_cols = st.columns(min(len(RAW_MATERIALS), 4))
-                for i, m in enumerate(RAW_MATERIALS):
-                    step = 0.5 if m["unit"] == "Bags" else 10.0
-                    e_rm_inputs[m["key"]] = er_cols[i % len(er_cols)].number_input(
-                        f"{m['label']} ({m['unit']})", min_value=0.0,
-                        value=float(row.get(f"{m['key']}_qty", 0) or 0), step=step,
-                    )
-
                 save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
 
             if save:
                 e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
-                result = calculate_production(e_pricing_key, e_nos, e_rm_inputs, rm, prod_cfg)
+                result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg)
                 updated = {
                     "date": str(e_date), "product": e_product, "nos": e_nos,
                     "plant": e_plant,

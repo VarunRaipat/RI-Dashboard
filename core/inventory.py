@@ -4,21 +4,18 @@ Current stock = opening + in - out since that date.
 """
 import pandas as pd
 from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING,
-                          PRODUCT_CONFIG, ALL_MATERIALS, GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
+                          PRODUCT_CONFIG, RAW_MATERIALS, GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
 from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries
 
 _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
-# Raw material key -> its production quantity column / unit-to-kg factor.
-# rm_prices and RM_INVENTORY_OPENING already use the same material key, so no
-# separate name-mapping table is needed (unlike the old hardcoded
-# "OPC 53" -> "cement_bags" style mapping this replaced). Includes Steel
-# even though its quantity is computed (Nos x steel_kg_per_unit) rather than
-# batch-entered — it still gets a running inventory balance like any other
-# material.
-_CONSUME_COL  = {m["key"]: f"{m['key']}_qty" for m in ALL_MATERIALS}
-_KG_PER_UNIT  = {m["key"]: m["kg_per_unit"] for m in ALL_MATERIALS}
-_RM_LABEL     = {m["key"]: m["label"] for m in ALL_MATERIALS}
+# Only materials with an inventory balance (RM_INVENTORY_OPENING — Steel and
+# Jalli, both already in Kg) get a consume-column/label mapping. Concrete
+# isn't separately purchased/stocked (mixed on-site), so it's cost-only and
+# has no entry here.
+_MATERIAL_BY_KEY = {m["key"]: m for m in RAW_MATERIALS}
+_CONSUME_COL = {k: f"{k}_qty" for k in RM_INVENTORY_OPENING}
+_RM_LABEL    = {k: _MATERIAL_BY_KEY[k]["label"] for k in RM_INVENTORY_OPENING}
 
 
 def _since_anchor(df, date_col="date"):
@@ -64,10 +61,10 @@ def finished_goods_summary():
 
 
 def rm_summary():
-    """Current stock — and its value at RM cost price — for every raw
-    material in RAW_MATERIALS. "Received" comes from Gate Entry ("In" log
-    rows for that item); "Consumed" comes from Production Entry's
-    "<key>_qty" columns."""
+    """Current stock — and its value at RM cost price — for Steel and Jalli
+    (both tracked in Kg). "Received" comes from Gate Entry ("In" log rows for
+    that item); "Consumed" comes from Production Entry's "<key>_qty" columns
+    (Nos x the product's fixed per-unit figure, computed automatically)."""
     df_prod = _since_anchor(get_production())
     df_gate = _since_anchor(get_gate_entries())
     rm_prices = get_rm_prices()
@@ -88,7 +85,7 @@ def rm_summary():
             "Received": received,
             "Consumed": consumed,
             "Current Stock": current_stock,
-            "Value (₹)": current_stock * _KG_PER_UNIT.get(material, 1) * price_per_kg,
+            "Value (₹)": current_stock * price_per_kg,
         })
     return pd.DataFrame(rows)
 
