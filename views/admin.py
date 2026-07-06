@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
-from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS
+from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
-    get_product_config, save_product_config, get_orders, update_order, update_dispatch,
+    get_product_config, save_product_config, get_pipe_diameter_config, save_pipe_diameter_config,
+    get_orders, update_order, update_dispatch,
     get_activity_log,
 )
 from core.ui import interactive_table, date_range_filter
@@ -69,65 +70,132 @@ def show(PLOT):
     # ── Tab 2: Product Config ─────────────────────────────────────────────────
     with tab2:
         st.markdown("### Product Cost Configuration")
-        st.caption("Edit selling price, production/loading/power/welding/jalli rates, and Concrete/Steel usage "
-                   "per product. Changes apply to all new DPR entries. "
-                   "(No Transport field — real transport cost is tracked in the Dispatch module.)")
 
-        cfg_all = get_product_config()
-        products = list(cfg_all.keys())
-        sel_prod = st.selectbox("Select Product to Edit", products, key="cfg_prod_sel")
-        cfg = cfg_all[sel_prod]
+        cfg_sub1, cfg_sub2 = st.tabs(["💲 Selling Price & Concrete", "📏 Pipe Diameter Rates"])
 
-        with st.form("product_cfg_form"):
-            cc1, cc2 = st.columns(2)
-            new_sell = cc1.number_input("Selling Price (Rs./nos)",         value=float(cfg["selling_price"]), min_value=0.0, step=0.5)
-            new_prod = cc2.number_input("Production Cost (Rs./nos)",       value=float(cfg.get("production_cost", 0)), min_value=0.0, step=0.05)
+        # For Hume Pipes, Production/Loading/Power/Welding/Jalli/Steel are the
+        # same for a given diameter regardless of class or Joint Type — set
+        # once per diameter in the second sub-tab. Only Selling Price and
+        # Concrete Volume vary by class, so they're edited per product here.
+        with cfg_sub1:
+            st.caption("Selling Price and Concrete Volume (m³) per product. Concrete Volume is "
+                       "pre-computed from diameter+barrel thickness for Hume Pipes. For pipes, "
+                       "Production/Loading/Power/Welding/Jalli/Steel are set once per diameter in "
+                       "the **Pipe Diameter Rates** tab — they don't vary by class or Joint Type.")
 
-            cc3, cc4 = st.columns(2)
-            new_lu   = cc3.number_input("Loading/Unloading Cost (Rs./nos)", value=float(cfg.get("loading_unloading_cost", 0)), min_value=0.0, step=0.05)
-            new_pw   = cc4.number_input("Power (Rs./nos)",                 value=float(cfg["power_per_block"]), min_value=0.0, step=0.05)
+            cfg_all = get_product_config()
+            products = list(cfg_all.keys())
+            sel_prod = st.selectbox("Select Product to Edit", products, key="cfg_prod_sel")
+            cfg = cfg_all[sel_prod]
+            is_pipe = sel_prod.startswith("Hume Pipe")
 
-            cc5, cc6 = st.columns(2)
-            new_weld  = cc5.number_input("Welding Cost (Rs./nos)",         value=float(cfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
-            new_jalli = cc6.number_input("Jalli — Cage Welding (Rs./nos)", value=float(cfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
+            with st.form("product_cfg_form"):
+                new_sell = st.number_input("Selling Price (Rs./nos)", value=float(cfg["selling_price"]), min_value=0.0, step=0.5)
 
-            st.markdown("**Raw material usage per unit** (Concrete m³ is pre-computed from diameter+barrel thickness for Hume Pipes)")
-            mc1, mc2 = st.columns(2)
-            new_concrete = mc1.number_input("Concrete (m³/Unit)", value=float(cfg.get("concrete_volume_m3", 0)), min_value=0.0, step=0.001, format="%.4f")
-            new_steel    = mc2.number_input("Steel — HT Wire (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+                payload = {"selling_price": new_sell}
 
-            st.caption(f"Fixed costs: EMI ₹20,000 · DG ₹5,000 · Admin ₹8,000 · Misc 10%")
+                if is_pipe:
+                    new_concrete = st.number_input(
+                        "Concrete (m³/Unit)", value=float(cfg.get("concrete_volume_m3", 0)),
+                        min_value=0.0, step=0.001, format="%.4f",
+                    )
+                    payload["concrete_volume_m3"] = new_concrete
+                else:
+                    cc1, cc2 = st.columns(2)
+                    new_prod = cc1.number_input("Production Cost (Rs./nos)",       value=float(cfg.get("production_cost", 0)), min_value=0.0, step=0.05)
+                    new_lu   = cc2.number_input("Loading/Unloading Cost (Rs./nos)", value=float(cfg.get("loading_unloading_cost", 0)), min_value=0.0, step=0.05)
 
-            if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
-                save_product_config(sel_prod, {
-                    "selling_price":          new_sell,
-                    "production_cost":        new_prod,
-                    "loading_unloading_cost": new_lu,
-                    "power_per_block":        new_pw,
-                    "welding_cost":           new_weld,
-                    "jalli_cost":             new_jalli,
-                    "concrete_volume_m3":     new_concrete,
-                    "steel_kg_per_unit":      new_steel,
+                    cc3, cc4 = st.columns(2)
+                    new_pw   = cc3.number_input("Power (Rs./nos)",                 value=float(cfg["power_per_block"]), min_value=0.0, step=0.05)
+                    new_weld = cc4.number_input("Welding Cost (Rs./nos)",          value=float(cfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+
+                    cc5, cc6 = st.columns(2)
+                    new_jalli    = cc5.number_input("Jalli — Cage Welding (Rs./nos)", value=float(cfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
+                    new_concrete = cc6.number_input("Concrete (m³/Unit)",             value=float(cfg.get("concrete_volume_m3", 0)), min_value=0.0, step=0.001, format="%.4f")
+
+                    new_steel = st.number_input("Steel — HT Wire (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+
+                    payload.update({
+                        "production_cost":        new_prod,
+                        "loading_unloading_cost": new_lu,
+                        "power_per_block":        new_pw,
+                        "welding_cost":            new_weld,
+                        "jalli_cost":              new_jalli,
+                        "concrete_volume_m3":      new_concrete,
+                        "steel_kg_per_unit":       new_steel,
+                    })
+
+                st.caption("Fixed costs: EMI ₹20,000 · DG ₹5,000 · Admin ₹8,000 · Misc 10%")
+
+                if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
+                    save_product_config(sel_prod, payload)
+                    st.success(f"✅ {sel_prod} config saved.")
+                    st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Current config — all products**")
+            rows = []
+            for prod, c in cfg_all.items():
+                row = {"Product": prod, "Sell (₹)": c["selling_price"], "Concrete (m³)": c.get("concrete_volume_m3", 0)}
+                if not prod.startswith("Hume Pipe"):
+                    row.update({
+                        "Production":     c.get("production_cost", 0),
+                        "Loading/Unload": c.get("loading_unloading_cost", 0),
+                        "Power":          c["power_per_block"],
+                        "Welding":        c.get("welding_cost", 0),
+                        "Jalli":          c.get("jalli_cost", 0),
+                        "Steel (Kg)":     c.get("steel_kg_per_unit", 0),
+                    })
+                rows.append(row)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        with cfg_sub2:
+            st.caption("These 6 rates apply to every class (NP2/NP3/NP4) and Joint Type at the "
+                       "selected diameter — set once per diameter, not per SKU.")
+
+            dia_cfg_all = get_pipe_diameter_config()
+            sel_dia = st.selectbox("Select Diameter (mm)", HUME_PIPE_DIAMETERS_MM, key="dia_cfg_sel")
+            dcfg = dia_cfg_all[sel_dia]
+
+            with st.form("pipe_dia_cfg_form"):
+                dc1, dc2 = st.columns(2)
+                d_prod = dc1.number_input("Production Cost (Rs./nos)",       value=float(dcfg.get("production_cost", 0)), min_value=0.0, step=0.05)
+                d_lu   = dc2.number_input("Loading/Unloading Cost (Rs./nos)", value=float(dcfg.get("loading_unloading_cost", 0)), min_value=0.0, step=0.05)
+
+                dc3, dc4 = st.columns(2)
+                d_pw   = dc3.number_input("Power (Rs./nos)",        value=float(dcfg.get("power_per_block", 0)), min_value=0.0, step=0.05)
+                d_weld = dc4.number_input("Welding Cost (Rs./nos)", value=float(dcfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
+
+                dc5, dc6 = st.columns(2)
+                d_jalli = dc5.number_input("Jalli — Cage Welding (Rs./nos)", value=float(dcfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
+                d_steel = dc6.number_input("Steel — HT Wire (Kg/Unit)",      value=float(dcfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+
+                if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
+                    save_pipe_diameter_config(sel_dia, {
+                        "production_cost":        d_prod,
+                        "loading_unloading_cost": d_lu,
+                        "power_per_block":        d_pw,
+                        "welding_cost":           d_weld,
+                        "jalli_cost":             d_jalli,
+                        "steel_kg_per_unit":      d_steel,
+                    })
+                    st.success(f"✅ {sel_dia}mm diameter rates saved.")
+                    st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Current rates — all diameters**")
+            drows = []
+            for d, c in dia_cfg_all.items():
+                drows.append({
+                    "Diameter (mm)":  d,
+                    "Production":     c.get("production_cost", 0),
+                    "Loading/Unload": c.get("loading_unloading_cost", 0),
+                    "Power":          c.get("power_per_block", 0),
+                    "Welding":        c.get("welding_cost", 0),
+                    "Jalli":          c.get("jalli_cost", 0),
+                    "Steel (Kg)":     c.get("steel_kg_per_unit", 0),
                 })
-                st.success(f"✅ {sel_prod} config saved.")
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("**Current config — all products**")
-        rows = []
-        for prod, c in cfg_all.items():
-            rows.append({
-                "Product":         prod,
-                "Sell (₹)":        c["selling_price"],
-                "Production":      c.get("production_cost", 0),
-                "Loading/Unload":  c.get("loading_unloading_cost", 0),
-                "Power":           c["power_per_block"],
-                "Welding":         c.get("welding_cost", 0),
-                "Jalli":           c.get("jalli_cost", 0),
-                "Concrete (m³)":   c.get("concrete_volume_m3", 0),
-                "Steel (Kg)":      c.get("steel_kg_per_unit", 0),
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(drows), use_container_width=True, hide_index=True)
 
     # ── Tab 3: All Production ─────────────────────────────────────────────────
     with tab3:

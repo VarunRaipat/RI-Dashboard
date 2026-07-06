@@ -4,7 +4,10 @@ import plotly.graph_objects as go
 from datetime import date
 from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
-from core.db import insert_production, get_rm_prices, get_production, delete_row, update_production, get_product_config
+from core.db import (
+    insert_production, get_rm_prices, get_production, delete_row, update_production,
+    get_product_config, get_pipe_diameter_config,
+)
 from core.ui import flash, show_flashes
 
 _RM_COST_FIELDS = [
@@ -24,6 +27,7 @@ def show(PLOT):
 
     rm = get_rm_prices()
     prod_cfg = get_product_config()
+    pipe_dia_cfg = get_pipe_diameter_config()
 
     with st.form("dpr_form", clear_on_submit=True):
         st.markdown('<div class="section-header">Basic Info</div>', unsafe_allow_html=True)
@@ -33,9 +37,9 @@ def show(PLOT):
         nos        = c3.number_input("Production (Nos.)", min_value=0, step=100)
 
         plant = st.radio("Plant", PLANTS, horizontal=True)
-        st.caption("Concrete, Steel, and Jalli usage are computed automatically from this "
-                   "product's fixed per-unit figures (Admin > Product Cost Configuration) — "
-                   "nothing else to enter.")
+        st.caption("Concrete, Steel, Jalli, Welding, Production, and Power costs are computed "
+                   "automatically from this product's fixed per-unit figures "
+                   "(Admin > Product Cost Configuration / Pipe Diameter Rates) — nothing else to enter.")
 
         submitted = st.form_submit_button("✅ Submit & Calculate", type="primary", use_container_width=True)
 
@@ -45,7 +49,7 @@ def show(PLOT):
             return
 
         pricing_key = SKU_TO_PRICING_KEY.get(product, product)
-        result = calculate_production(pricing_key, nos, rm, prod_cfg)
+        result = calculate_production(pricing_key, nos, rm, prod_cfg, pipe_diameter_config=pipe_dia_cfg)
 
         record = {
             "date": str(entry_date), "product": product, "nos": nos,
@@ -195,7 +199,7 @@ def show(PLOT):
 
             if save:
                 e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
-                result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg)
+                result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg, pipe_diameter_config=pipe_dia_cfg)
                 updated = {
                     "date": str(e_date), "product": e_product, "nos": e_nos,
                     "plant": e_plant,

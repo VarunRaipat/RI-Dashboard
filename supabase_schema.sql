@@ -71,11 +71,14 @@ CREATE TABLE IF NOT EXISTS rm_prices (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Per-product selling price / production / loading-unloading / power /
--- welding / jalli rates plus Concrete/Steel usage, edited live via
--- Admin > Product Cost Configuration. "product" must be unique so the app's
--- upsert (Prefer: resolution=merge-duplicates) works. No transport column —
--- real transport cost is tracked in the Dispatch module instead.
+-- Per-product Selling Price + Concrete Volume, edited live via
+-- Admin > Product Cost Configuration > Selling Price & Concrete. For
+-- non-pipe products this also carries Production/Loading/Power/Welding/
+-- Jalli/Steel (Hume Pipes get those from pipe_diameter_config instead,
+-- below, since they're shared across class+Joint Type at a given diameter).
+-- "product" must be unique so the app's upsert
+-- (Prefer: resolution=merge-duplicates) works. No transport column — real
+-- transport cost is tracked in the Dispatch module instead.
 CREATE TABLE IF NOT EXISTS product_config (
     id                      BIGSERIAL PRIMARY KEY,
     product                 TEXT UNIQUE NOT NULL,
@@ -86,6 +89,23 @@ CREATE TABLE IF NOT EXISTS product_config (
     welding_cost            REAL DEFAULT 0,
     jalli_cost              REAL DEFAULT 0,
     concrete_volume_m3      REAL DEFAULT 0,
+    steel_kg_per_unit       REAL DEFAULT 0,
+    created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Production/Loading-Unloading/Power/Welding/Jalli/Steel rates for Hume
+-- Pipes, keyed by diameter (mm) only — the same rate applies to every
+-- class (NP2/NP3/NP4) and Joint Type at that diameter, confirmed by the
+-- client. Edited via Admin > Product Cost Configuration > Pipe Diameter
+-- Rates. "diameter_mm" must be unique for the app's upsert to work.
+CREATE TABLE IF NOT EXISTS pipe_diameter_config (
+    id                      BIGSERIAL PRIMARY KEY,
+    diameter_mm             INTEGER UNIQUE NOT NULL,
+    production_cost         REAL DEFAULT 0,
+    loading_unloading_cost  REAL DEFAULT 0,
+    power_per_block         REAL DEFAULT 0,
+    welding_cost            REAL DEFAULT 0,
+    jalli_cost              REAL DEFAULT 0,
     steel_kg_per_unit       REAL DEFAULT 0,
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );
@@ -217,6 +237,23 @@ ALTER TABLE product_config ADD COLUMN IF NOT EXISTS welding_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS jalli_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS concrete_volume_m3 REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS steel_kg_per_unit REAL DEFAULT 0;
+
+-- ── Migration: Pipe Diameter Rates (shared across class + Joint Type) ───────
+-- New table — Production/Loading-Unloading/Power/Welding/Jalli/Steel for
+-- Hume Pipes now live here, keyed by diameter only, instead of being
+-- duplicated (and edited separately) across every NP2/NP3/NP4 pricing key.
+CREATE TABLE IF NOT EXISTS pipe_diameter_config (
+    id                      BIGSERIAL PRIMARY KEY,
+    diameter_mm             INTEGER UNIQUE NOT NULL,
+    production_cost         REAL DEFAULT 0,
+    loading_unloading_cost  REAL DEFAULT 0,
+    power_per_block         REAL DEFAULT 0,
+    welding_cost            REAL DEFAULT 0,
+    jalli_cost              REAL DEFAULT 0,
+    steel_kg_per_unit       REAL DEFAULT 0,
+    created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE pipe_diameter_config DISABLE ROW LEVEL SECURITY;
 
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via

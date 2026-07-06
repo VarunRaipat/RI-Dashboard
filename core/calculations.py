@@ -1,5 +1,6 @@
 from core.config import (
-    PRODUCT_CONFIG, RAW_MATERIALS, EMI_PER_ENTRY, DG_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
+    PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
+    EMI_PER_ENTRY, DG_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
 )
 
 
@@ -9,15 +10,26 @@ def calculate_production(
     rm_prices: dict,
     product_config: dict = None,
     raw_materials: list = None,
+    pipe_diameter_config: dict = None,
 ) -> dict:
     """
     Nothing is entered per DPR batch — Concrete and Steel each have a fixed
     per-unit quantity set on the product (see RAW_MATERIALS's product_field),
     so usage = Nos x that figure, and cost = usage x the matching RM Prices
     rate. Jalli (cage welding), Welding, Production, Loading/Unloading, and
-    Power are all flat Rs./nos rates on the product — not priced materials.
+    Power are all flat Rs./nos rates — not priced materials.
+
+    For Hume Pipes, those 6 flat rates come from pipe_diameter_config (keyed
+    by diameter only, since they don't vary by class or Joint Type), while
+    selling_price and concrete_volume_m3 come from product_config (keyed by
+    diameter+class, since those DO vary). Non-pipe products keep everything
+    in product_config as a single flat dict.
     """
-    cfg = (product_config or PRODUCT_CONFIG)[product]
+    cfg = dict((product_config or PRODUCT_CONFIG)[product])
+    diameter = PRICING_KEY_TO_DIAMETER_MM.get(product)
+    if diameter is not None:
+        shared = (pipe_diameter_config or PIPE_DIAMETER_CONFIG).get(diameter, {})
+        cfg = {**shared, **cfg}  # cfg's own selling_price/concrete_volume_m3 take precedence
     materials = raw_materials or RAW_MATERIALS
 
     def v(x):

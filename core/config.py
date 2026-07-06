@@ -98,10 +98,8 @@ def _joint_types_for(diameter_mm, cls):
         return ["Collar", "M/F"]
     return ["Socket & Spigot", "M/F"]  # NP3
 
-# All rates below are placeholders (0) until entered via Admin > Product Cost
-# Configuration, except concrete_volume_m3 for pipes, which is pre-computed
-# from BARREL_THICKNESS_MM. Kept as one flat dict (not nested by
-# diameter/class) so every product is independently editable there.
+# All rates below are placeholders (0) until entered via Admin, except
+# concrete_volume_m3 for pipes, which is pre-computed from BARREL_THICKNESS_MM.
 #
 # No "transport" field — real transport cost is already tracked in the
 # Dispatch module (truck, trip distance, diesel cost), so a second per-unit
@@ -126,15 +124,41 @@ def _blank_rates():
         "steel_kg_per_unit":      0.0,
     }
 
+# For Hume Pipes, Production/Loading-Unloading/Power/Welding/Jalli/Steel are
+# the same for a given diameter regardless of class (NP2/NP3/NP4) or Joint
+# Type (confirmed) — so those 6 rates are set ONCE per diameter here (Admin >
+# Pipe Diameter Rates), instead of being duplicated/edited separately across
+# every class+joint SKU. Only Selling Price and Concrete Volume genuinely
+# vary by class (different price points / wall thickness), so those stay in
+# PRODUCT_CONFIG, keyed by diameter+class as before.
+_PIPE_DIAMETER_FIELDS = [
+    "production_cost", "loading_unloading_cost", "power_per_block",
+    "welding_cost", "jalli_cost", "steel_kg_per_unit",
+]
+
+def _blank_diameter_rates():
+    return {f: 0.0 for f in _PIPE_DIAMETER_FIELDS}
+
+PIPE_DIAMETER_CONFIG = {d: _blank_diameter_rates() for d in HUME_PIPE_DIAMETERS_MM}
+
+# pipe pricing key ("Hume Pipe {d}mm {c}") -> diameter, so calculate_production()
+# knows which PIPE_DIAMETER_CONFIG row to pull the shared rates from.
+PRICING_KEY_TO_DIAMETER_MM = {
+    f"Hume Pipe {d}mm {c}": d
+    for d in HUME_PIPE_DIAMETERS_MM for c in HUME_PIPE_SALE_CLASSES
+}
+
 PRODUCT_CONFIG = {}
 for _d in HUME_PIPE_DIAMETERS_MM:
     for _c in HUME_PIPE_SALE_CLASSES:
         _name = f"Hume Pipe {_d}mm {_c}"
         _thickness_class = NP4_SHARES_CLASS if _c == "NP4" else _c
         _thickness = BARREL_THICKNESS_MM.get((_thickness_class, _d), 0)
+        # Only selling_price + concrete_volume_m3 live here for pipes — the
+        # other 6 rates come from PIPE_DIAMETER_CONFIG at calculation time.
         PRODUCT_CONFIG[_name] = {
             "display": _name,
-            **_blank_rates(),
+            "selling_price": 0.0,
             "concrete_volume_m3": _concrete_volume_m3(_d, _thickness),
         }
 

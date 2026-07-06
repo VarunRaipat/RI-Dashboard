@@ -401,6 +401,12 @@ _PRODUCT_CFG_FIELDS = ["selling_price","production_cost","loading_unloading_cost
 
 @st.cache_data(ttl=60)
 def get_product_config():
+    """Pipe entries in PRODUCT_CONFIG only carry selling_price/concrete_volume_m3
+    (their other 6 rates live in pipe_diameter_config instead — see
+    calculate_production()), so the overlay below only copies a field if the
+    product's own base config already has that key. Without this guard, a
+    pipe's product_config row would still return the other columns' table
+    DEFAULT 0 and silently zero out its real diameter-shared rates."""
     from core.config import PRODUCT_CONFIG
     result = {k: dict(v) for k, v in PRODUCT_CONFIG.items()}
     if _use_supabase():
@@ -410,7 +416,7 @@ def get_product_config():
                 prod = row.get("product")
                 if prod in result:
                     for f in _PRODUCT_CFG_FIELDS:
-                        if row.get(f) is not None:
+                        if f in result[prod] and row.get(f) is not None:
                             result[prod][f] = float(row[f])
     else:
         try:
@@ -421,7 +427,7 @@ def get_product_config():
                 prod = row.get("product")
                 if prod in result:
                     for f in _PRODUCT_CFG_FIELDS:
-                        if pd.notna(row.get(f)):
+                        if f in result[prod] and pd.notna(row.get(f)):
                             result[prod][f] = float(row[f])
         except Exception:
             pass
