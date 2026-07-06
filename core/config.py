@@ -44,8 +44,18 @@ ADMIN_PER_ENTRY =  8_000  # Rs. fixed per DPR entry — placeholder, confirm wit
 MISC_PCT        =   10.0  # % of all costs — placeholder, confirm with admin
 
 HUME_PIPE_DIAMETERS_MM = [150, 200, 250, 300, 450, 600, 750, 900, 1000, 1200]
-HUME_PIPE_CLASSES      = ["NP2", "NP3"]
-JOINT_TYPES             = ["Collar", "Socket & Spigot", "M/F"]
+
+# NP2/NP3 are actually produced and stocked. NP4 is NOT — it's the exact same
+# physical pipe as NP3, just sold/certified under a different class (and
+# possibly a different price), so NP4 never appears as a DPR production
+# option, but does appear as a sellable Sales Order / Dispatch product,
+# drawing down the matching NP3 SKU's inventory when sold (see
+# INVENTORY_PRODUCTS below).
+HUME_PIPE_PRODUCTION_CLASSES = ["NP2", "NP3"]
+HUME_PIPE_SALE_CLASSES       = ["NP2", "NP3", "NP4"]
+NP4_SHARES_CLASS             = "NP3"
+
+JOINT_TYPES = ["Collar", "Socket & Spigot", "M/F"]
 
 # Which Joint Types are actually manufactured for a given diameter+class —
 # used to narrow the Joint Type dropdown per product on the Sales Order line
@@ -84,7 +94,7 @@ def _blank_rates():
 
 PRODUCT_CONFIG = {}
 for _d in HUME_PIPE_DIAMETERS_MM:
-    for _c in HUME_PIPE_CLASSES:
+    for _c in HUME_PIPE_SALE_CLASSES:
         _name = f"Hume Pipe {_d}mm {_c}"
         PRODUCT_CONFIG[_name] = {"display": _name, **_blank_rates()}
 
@@ -107,9 +117,12 @@ del _blank_rates, _d, _c, _name, _slab, _pillar
 # diameter+class name (so admin only sets one price per diameter+class, not
 # once per joint type). SKU_TO_PRICING_KEY resolves a SKU back to the
 # PRODUCT_CONFIG entry to charge/cost it against.
+#
+# Built across HUME_PIPE_SALE_CLASSES (NP2/NP3/NP4) since all three are
+# sellable — NP4 just isn't a production option (see PRODUCTION_PRODUCTS).
 HUME_PIPE_JOINT_TYPES = {
     f"Hume Pipe {d}mm {c}": _joint_types_for(d, c)
-    for d in HUME_PIPE_DIAMETERS_MM for c in HUME_PIPE_CLASSES
+    for d in HUME_PIPE_DIAMETERS_MM for c in HUME_PIPE_SALE_CLASSES
 }
 
 _PIPE_SKUS = [
@@ -117,14 +130,23 @@ _PIPE_SKUS = [
     for base, joints in HUME_PIPE_JOINT_TYPES.items()
     for joint in joints
 ]
+_PIPE_SKUS_PRODUCTION = [
+    f"Hume Pipe {d}mm {c} ({joint})"
+    for d in HUME_PIPE_DIAMETERS_MM
+    for c in HUME_PIPE_PRODUCTION_CLASSES
+    for joint in _joint_types_for(d, c)
+]
 _NON_PIPE_PRODUCTS = [p for p in PRODUCT_CONFIG if not p.startswith("Hume Pipe")]
 
 SKU_TO_PRICING_KEY = {sku: sku.rsplit(" (", 1)[0] for sku in _PIPE_SKUS}
 SKU_TO_PRICING_KEY.update({p: p for p in _NON_PIPE_PRODUCTS})
 
-PRODUCTION_PRODUCTS = _PIPE_SKUS + _NON_PIPE_PRODUCTS
-ORDER_PRODUCTS      = _PIPE_SKUS + _NON_PIPE_PRODUCTS
-DISPATCH_PRODUCTS   = _PIPE_SKUS + _NON_PIPE_PRODUCTS
+# NP4 is not a DPR option — production is always logged as NP3 (or NP2).
+PRODUCTION_PRODUCTS = _PIPE_SKUS_PRODUCTION + _NON_PIPE_PRODUCTS
+# NP4 IS sellable — Sales Orders / Dispatch can select it, and it draws down
+# the matching NP3 SKU's stock (see INVENTORY_PRODUCTS below).
+ORDER_PRODUCTS    = _PIPE_SKUS + _NON_PIPE_PRODUCTS
+DISPATCH_PRODUCTS = _PIPE_SKUS + _NON_PIPE_PRODUCTS
 
 HUME_PIPE_PRODUCTS = list(_PIPE_SKUS)
 
@@ -175,13 +197,29 @@ LOAN_OBLIGATIONS = []
 # start at 0 (fresh app, no history yet).
 INVENTORY_ANCHOR_DATE = str(date.today())
 
-INVENTORY_PRODUCTS = [
-    # canonical name, production name, dispatch/order name, opening qty
-    # Built from the SKU list (not PRODUCT_CONFIG) so Collar and M/F pipes of
-    # the same diameter+class are tracked as separate stock, even though they
-    # share one price.
-    (p, p, p, 0) for p in PRODUCTION_PRODUCTS
-]
+# canonical name, production name, dispatch/order name(s), opening qty
+# Built from the SKU list (not PRODUCT_CONFIG) so Collar and M/F pipes of the
+# same diameter+class are tracked as separate stock, even though they share
+# one price. dispatch/order name is a tuple when more than one sellable SKU
+# should draw down this same row — specifically, an NP4 SKU is folded into
+# its matching NP3 row (same diameter+joint) since NP4 isn't separately
+# produced or stocked; selling it consumes NP3's physical stock.
+INVENTORY_PRODUCTS = []
+for _d in HUME_PIPE_DIAMETERS_MM:
+    for _c in HUME_PIPE_PRODUCTION_CLASSES:
+        for _joint in _joint_types_for(_d, _c):
+            _sku = f"Hume Pipe {_d}mm {_c} ({_joint})"
+            _disp_names = [_sku]
+            if _c == NP4_SHARES_CLASS:
+                _np4_sku = f"Hume Pipe {_d}mm NP4 ({_joint})"
+                if _np4_sku in _PIPE_SKUS:
+                    _disp_names.append(_np4_sku)
+            INVENTORY_PRODUCTS.append(
+                (_sku, _sku, tuple(_disp_names) if len(_disp_names) > 1 else _sku, 0)
+            )
+INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTS]
+
+del _d, _c, _joint, _sku, _disp_names, _np4_sku
 
 # Cement / GGBS / Steel inventory: opening qty as of INVENTORY_ANCHOR_DATE.
 # Current balance = opening + received (Gate Entry "In" log) - consumed

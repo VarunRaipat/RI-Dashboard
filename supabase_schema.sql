@@ -198,3 +198,23 @@ ALTER TABLE production     ADD COLUMN IF NOT EXISTS steel_qty REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS pct_steel REAL DEFAULT 0;
 ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS steel REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS steel_kg_per_unit REAL DEFAULT 0;
+
+-- ── Row Level Security ───────────────────────────────────────────────────────
+-- Supabase enables RLS by default on new tables. This app authenticates via
+-- its own login screen (not Supabase Auth) and talks to Supabase with one
+-- shared API key for every operation, so an RLS policy would just block all
+-- reads/writes with a "new row violates row-level security policy" error
+-- (Postgres code 42501) and provide no real benefit. Disable it on every
+-- app table — always run this on a fresh project, right after creating the
+-- tables above.
+ALTER TABLE production         DISABLE ROW LEVEL SECURITY;
+ALTER TABLE dispatch           DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rm_prices          DISABLE ROW LEVEL SECURITY;
+ALTER TABLE product_config     DISABLE ROW LEVEL SECURITY;
+ALTER TABLE orders             DISABLE ROW LEVEL SECURITY;
+ALTER TABLE vendor_transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE loan_payments      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE quality_control    DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rm_purchases       DISABLE ROW LEVEL SECURITY;
+ALTER TABLE gate_entries       DISABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_log       DISABLE ROW LEVEL SECURITY;

@@ -29,6 +29,15 @@ def _since_anchor(df, date_col="date"):
     return df[df[date_col] >= _ANCHOR]
 
 
+def _matches_product(series, disp_name):
+    """disp_name is normally one SKU, but can be a tuple of SKUs that all
+    draw down the same physical stock (e.g. an NP4 pipe sold against its
+    matching NP3 SKU's inventory) — handle both."""
+    if isinstance(disp_name, (list, tuple, set)):
+        return series.isin(disp_name)
+    return series == disp_name
+
+
 def finished_goods_summary():
     """Current stock — and its value at selling price — for every product
     in INVENTORY_PRODUCTS, as of today."""
@@ -39,7 +48,7 @@ def finished_goods_summary():
     for canonical, prod_name, disp_name, opening in INVENTORY_PRODUCTS:
         produced = float(df_prod.loc[df_prod["product"] == prod_name, "nos"].sum()) \
             if prod_name and df_prod is not None and not df_prod.empty else 0.0
-        dispatched = float(df_disp.loc[df_disp["product"] == disp_name, "qty_dispatched"].sum()) \
+        dispatched = float(df_disp.loc[_matches_product(df_disp["product"], disp_name), "qty_dispatched"].sum()) \
             if df_disp is not None and not df_disp.empty else 0.0
         current_stock = opening + produced - dispatched
         selling_price = PRODUCT_CONFIG.get(prod_name, {}).get("selling_price", 0) if prod_name else 0
@@ -107,7 +116,7 @@ def daily_breakdown(canonical_name, start, end):
     if not df_disp.empty:
         df_disp = df_disp.copy()
         df_disp["date"] = pd.to_datetime(df_disp["date"], errors="coerce")
-        df_disp = df_disp[df_disp["product"] == disp_name]
+        df_disp = df_disp[_matches_product(df_disp["product"], disp_name)]
         if not df_disp.empty:
             daily_disp = df_disp.groupby("date")["qty_dispatched"].sum()
 
