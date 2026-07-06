@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM
+from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
     get_product_config, save_product_config, get_pipe_diameter_config, save_pipe_diameter_config,
@@ -91,6 +91,9 @@ def show(PLOT):
 
             with st.form("product_cfg_form"):
                 new_sell = st.number_input("Selling Price (Rs./nos)", value=float(cfg["selling_price"]), min_value=0.0, step=0.5)
+                st.caption(f"Invoice total incl. {GST_PCT:.0f}% GST: ₹{cfg['selling_price'] * (1 + GST_PCT/100):,.2f}/nos "
+                           f"— GST is collected from the customer but owed to the government, so it's shown here for "
+                           f"reference only and never counted as profit.")
 
                 payload = {"selling_price": new_sell}
 
@@ -130,10 +133,14 @@ def show(PLOT):
                     st.rerun()
 
             st.markdown("---")
-            st.markdown("**Current config — all products**")
+            st.markdown(f"**Current config — all products** (Sell incl. GST = Sell x {1 + GST_PCT/100:.2f}, reference only)")
             rows = []
             for prod, c in cfg_all.items():
-                row = {"Product": prod, "Sell (₹)": c["selling_price"], "Concrete (m³)": c.get("concrete_volume_m3", 0)}
+                row = {
+                    "Product": prod, "Sell (₹)": c["selling_price"],
+                    "Sell incl. GST (₹)": round(c["selling_price"] * (1 + GST_PCT / 100), 2),
+                    "Concrete (m³)": c.get("concrete_volume_m3", 0),
+                }
                 if not prod.startswith("Hume Pipe"):
                     row.update({
                         "Production":     c.get("production_cost", 0),

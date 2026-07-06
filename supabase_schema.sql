@@ -41,6 +41,20 @@ CREATE TABLE IF NOT EXISTS production (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- One row per DPR submission (batch) — total Cement/GGBS bags consumed that
+-- day, not tied to any single product line. Used for inventory
+-- reconciliation only (see core/inventory.py's rm_summary()) — doesn't
+-- affect cost/profit, which is based on Concrete Volume instead.
+CREATE TABLE IF NOT EXISTS rm_usage (
+    id              BIGSERIAL PRIMARY KEY,
+    date            TEXT    NOT NULL,
+    cement_bags     REAL DEFAULT 0,
+    ggbs_bags       REAL DEFAULT 0,
+    remarks         TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
+
 CREATE TABLE IF NOT EXISTS dispatch (
     id              BIGSERIAL PRIMARY KEY,
     date            TEXT    NOT NULL,
@@ -253,6 +267,19 @@ CREATE TABLE IF NOT EXISTS pipe_diameter_config (
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE pipe_diameter_config DISABLE ROW LEVEL SECURITY;
+
+-- ── Migration: Cement/GGBS batch usage (inventory reconciliation only) ──────
+-- New table — DPR now asks for the day's total Cement/GGBS bags consumed,
+-- separate from any single product line. Doesn't affect cost/profit.
+CREATE TABLE IF NOT EXISTS rm_usage (
+    id              BIGSERIAL PRIMARY KEY,
+    date            TEXT    NOT NULL,
+    cement_bags     REAL DEFAULT 0,
+    ggbs_bags       REAL DEFAULT 0,
+    remarks         TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
 
 -- ── Migration: Power becomes a flat Rs.1,000/entry cost ─────────────────────
 -- Power_per_block columns (if they exist from an earlier version) are left

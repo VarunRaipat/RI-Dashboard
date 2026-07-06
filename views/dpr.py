@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 from datetime import date
 from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
 from core.db import (
-    insert_production, get_rm_prices, get_production, delete_row, update_production,
+    insert_production, insert_rm_usage, get_rm_prices, get_production, delete_row, update_production,
     get_product_config, get_pipe_diameter_config,
 )
 from core.ui import flash, show_flashes
@@ -14,6 +13,11 @@ _RM_COST_FIELDS = [
     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
     "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
 ] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + [f"{m['key']}_cost" for m in RAW_MATERIALS]
+
+
+def _init_lines():
+    if "dpr_lines" not in st.session_state:
+        st.session_state.dpr_lines = 1
 
 
 def show(PLOT):
@@ -28,103 +32,102 @@ def show(PLOT):
     rm = get_rm_prices()
     prod_cfg = get_product_config()
     pipe_dia_cfg = get_pipe_diameter_config()
+    _init_lines()
 
-    with st.form("dpr_form", clear_on_submit=True):
-        st.markdown('<div class="section-header">Basic Info</div>', unsafe_allow_html=True)
-        c1, c2, c3 = st.columns(3)
-        entry_date = c1.date_input("Date", date.today())
-        product    = c2.selectbox("Product", PRODUCTION_PRODUCTS)
-        nos        = c3.number_input("Production (Nos.)", min_value=0, step=100)
+    st.markdown('<div class="section-header">Basic Info</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    entry_date = c1.date_input("Date", date.today(), key="dpr_date")
+    plant      = c2.radio("Plant", PLANTS, horizontal=True, key="dpr_plant")
 
-        plant = st.radio("Plant", PLANTS, horizontal=True)
-        st.caption("Concrete, Steel, Jalli, Welding, Production, and Power costs are computed "
-                   "automatically from this product's fixed per-unit figures "
-                   "(Admin > Product Cost Configuration / Pipe Diameter Rates) — nothing else to enter.")
+    st.markdown('<div class="section-header">Products Made Today</div>', unsafe_allow_html=True)
+    st.caption("Add one line per pipe/product made today. Concrete, Steel, Jalli, Welding, "
+               "Production, and Power costs are computed automatically from each product's fixed "
+               "per-unit figures (Admin > Product Cost Configuration / Pipe Diameter Rates).")
 
-        submitted = st.form_submit_button("✅ Submit & Calculate", type="primary", use_container_width=True)
+    n_lines = st.session_state.dpr_lines
+    header_cols = st.columns([3, 2, 1])
+    header_cols[0].markdown("**Product**")
+    header_cols[1].markdown("**Nos.**")
 
-    if submitted:
-        if nos <= 0:
-            st.error("Production (Nos.) must be greater than 0.")
-            return
+    for i in range(n_lines):
+        cols = st.columns([3, 2, 1])
+        cols[0].selectbox("Product", PRODUCTION_PRODUCTS, key=f"dpr_prod_{i}", label_visibility="collapsed")
+        cols[1].number_input("Nos.", min_value=0, step=100, key=f"dpr_nos_{i}", label_visibility="collapsed")
+        if n_lines > 1:
+            if cols[2].button("✕", key=f"dpr_rem_{i}"):
+                for j in range(i, n_lines - 1):
+                    st.session_state[f"dpr_prod_{j}"] = st.session_state.get(f"dpr_prod_{j+1}", PRODUCTION_PRODUCTS[0])
+                    st.session_state[f"dpr_nos_{j}"]  = st.session_state.get(f"dpr_nos_{j+1}", 0)
+                st.session_state.dpr_lines = n_lines - 1
+                st.rerun()
 
-        pricing_key = SKU_TO_PRICING_KEY.get(product, product)
-        result = calculate_production(pricing_key, nos, rm, prod_cfg, pipe_diameter_config=pipe_dia_cfg)
+    if st.button("➕ Add Product", key="dpr_add_line"):
+        st.session_state.dpr_lines += 1
+        st.rerun()
 
-        record = {
-            "date": str(entry_date), "product": product, "nos": nos,
-            "plant": plant,
-            **{k: result[k] for k in _RM_COST_FIELDS},
-        }
-        insert_production(record)
-        st.toast("✅ DPR entry saved!")
-        st.markdown(
-            '<div class="success-box">✅ <b>DPR saved successfully!</b></div>',
-            unsafe_allow_html=True,
-        )
+    st.markdown('<div class="section-header">Raw Materials Used Today</div>', unsafe_allow_html=True)
+    st.caption("Total Cement and GGBS bags consumed today, across all products above — for "
+               "inventory reconciliation only (doesn't affect cost/profit, which uses Concrete "
+               "Volume instead).")
+    rmc1, rmc2 = st.columns(2)
+    cement_bags = rmc1.number_input("Cement Used (Bags)", min_value=0.0, step=0.5, key="dpr_cement_bags")
+    ggbs_bags   = rmc2.number_input("GGBS Used (Bags)",    min_value=0.0, step=0.5, key="dpr_ggbs_bags")
 
-        if role == "production":
-            return  # show nothing else to production operator
+    st.markdown("")
+    if st.button("✅ Submit & Calculate", type="primary", use_container_width=True, key="dpr_submit"):
+        saved_rows = []
+        for i in range(st.session_state.dpr_lines):
+            nos = st.session_state.get(f"dpr_nos_{i}", 0) or 0
+            if nos <= 0:
+                continue
+            product = st.session_state.get(f"dpr_prod_{i}", PRODUCTION_PRODUCTS[0])
+            pricing_key = SKU_TO_PRICING_KEY.get(product, product)
+            result = calculate_production(pricing_key, nos, rm, prod_cfg, pipe_diameter_config=pipe_dia_cfg)
+            record = {
+                "date": str(entry_date), "product": product, "nos": nos,
+                "plant": plant,
+                **{k: result[k] for k in _RM_COST_FIELDS},
+            }
+            insert_production(record)
+            saved_rows.append({
+                "Product": product, "Nos.": nos, "Revenue": result["revenue"],
+                "Total Cost": result["total_cost"], "Profit": result["profit"], "Profit %": result["profit_pct"],
+            })
 
-        # ── Material Usage ─────────────────────────────────────────────────────
-        st.markdown("---")
-        st.markdown('<div class="section-header">Material Usage</div>', unsafe_allow_html=True)
-        m_cols = st.columns(len(RAW_MATERIALS))
-        for i, m in enumerate(RAW_MATERIALS):
-            qty = result[f"{m['key']}_qty"]
-            m_cols[i].metric(f"{m['label']} ({m['unit']})", f"{qty:,.2f}")
+        if not saved_rows:
+            st.error("Enter Nos. > 0 for at least one product line.")
+        else:
+            if cement_bags > 0 or ggbs_bags > 0:
+                insert_rm_usage({
+                    "date": str(entry_date), "cement_bags": cement_bags, "ggbs_bags": ggbs_bags,
+                })
 
-        # ── Cost Breakdown ────────────────────────────────────────────────────
-        st.markdown('<div class="section-header">Cost Breakdown</div>', unsafe_allow_html=True)
+            st.toast("✅ DPR entry saved!")
+            st.markdown(
+                f'<div class="success-box">✅ <b>{len(saved_rows)} product line(s) saved for {entry_date}!</b></div>',
+                unsafe_allow_html=True,
+            )
 
-        rm_cols = st.columns(len(RAW_MATERIALS))
-        for i, m in enumerate(RAW_MATERIALS):
-            cost = result[f"{m['key']}_cost"]
-            rm_cols[i].metric(m["label"], f"₹{cost:,.0f}")
+            # Reset line widgets for the next entry
+            for i in range(st.session_state.dpr_lines):
+                for k in (f"dpr_prod_{i}", f"dpr_nos_{i}"):
+                    if k in st.session_state:
+                        del st.session_state[k]
+            st.session_state.dpr_lines = 1
+            for k in ("dpr_cement_bags", "dpr_ggbs_bags"):
+                if k in st.session_state:
+                    del st.session_state[k]
 
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Production",           f"₹{result['production_cost']:,.0f}")
-        k2.metric("Loading/Unloading",     f"₹{result['loading_unloading_cost']:,.0f}")
-        k3.metric("Power",                 f"₹{result['power_cost']:,.0f}")
-        k4.metric("Welding",                f"₹{result['welding_cost']:,.0f}")
+            if role != "production":
+                st.markdown('<div class="section-header">Saved Entries — Summary</div>', unsafe_allow_html=True)
+                summary_df = pd.DataFrame(saved_rows)
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                s1, s2, s3 = st.columns(3)
+                s1.metric("Total Nos.", f"{summary_df['Nos.'].sum():,.0f}")
+                s2.metric("Total Revenue", f"₹{summary_df['Revenue'].sum():,.0f}")
+                s3.metric("Total Profit", f"₹{summary_df['Profit'].sum():,.0f}")
 
-        k5, k6, k7, k8 = st.columns(4)
-        k5.metric("Jalli (Cage Welding)", f"₹{result['jalli_cost']:,.0f}")
-        k6.metric("EMI",                f"₹{result['emi_cost']:,.0f}",   "Fixed/entry")
-        k7.metric("DG Cost",            f"₹{result['dg_cost']:,.0f}",    "Fixed/entry")
-        k8.metric("Admin Overheads",    f"₹{result['admin_cost']:,.0f}", "Fixed/entry")
-
-        k9, k10, k11 = st.columns(3)
-        k9.metric("Miscellaneous (10%)", f"₹{result['misc_cost']:,.0f}")
-        k10.metric("Total Cost",  f"₹{result['total_cost']:,.0f}")
-        k11.metric("Revenue",    f"₹{result['revenue']:,.0f}",
-                   f"@ ₹{prod_cfg[pricing_key]['selling_price']}/nos")
-
-        pcolor = "normal" if result["profit"] >= 0 else "inverse"
-        st.metric(
-            "Profit",
-            f"₹{result['profit']:,.0f}",
-            f"{result['profit_pct']:.1f}%  {'✅ Profit' if result['profit']>=0 else '❌ Loss'}",
-            delta_color=pcolor,
-        )
-
-        labels = [m["label"] for m in RAW_MATERIALS] + [
-            "Production","Loading/Unloading","Power","Welding","Jalli","EMI","DG","Admin","Misc",
-        ]
-        values = [result[f"{m['key']}_cost"] for m in RAW_MATERIALS] + [
-            result["production_cost"], result["loading_unloading_cost"], result["power_cost"],
-            result["welding_cost"], result["jalli_cost"], result["emi_cost"], result["dg_cost"],
-            result["admin_cost"], result["misc_cost"],
-        ]
-        colors = ["#00C49A","#3B82F6","#FDBA44","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9","#27AE60","#D4A011","#14B8A6"]
-        fig_bar = go.Figure(go.Bar(
-            x=labels, y=values,
-            marker_color=colors[:len(labels)],
-            text=[f"₹{v:,.0f}" for v in values],
-            textposition="outside",
-        ))
-        fig_bar.update_layout(**PLOT, height=300, yaxis_title="Rs.", showlegend=False)
-        st.plotly_chart(fig_bar, use_container_width=True)
+            st.rerun()
 
     if role == "production":
         return
@@ -162,6 +165,24 @@ def show(PLOT):
                           rename=rename, col_config=col_cfg)
     else:
         st.info("No entries yet. Submit your first DPR above.")
+
+    # ── Recent RM usage (Cement/GGBS) ──────────────────────────────────────────
+    st.markdown('<div class="section-header">Recent Cement/GGBS Usage</div>', unsafe_allow_html=True)
+    from core.db import get_rm_usage
+    df_rmu = get_rm_usage()
+    if not df_rmu.empty:
+        df_rmu["date"] = pd.to_datetime(df_rmu["date"], errors="coerce")
+        df_rmu = df_rmu[(df_rmu["date"] >= pd.Timestamp(dpr_start)) & (df_rmu["date"] <= pd.Timestamp(dpr_end))]
+        df_rmu = df_rmu.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+        show_cols_rmu = [c for c in ["date", "cement_bags", "ggbs_bags", "remarks"] if c in df_rmu.columns]
+        interactive_table(
+            df_rmu, key="dpr_rmu", show_cols=show_cols_rmu,
+            sum_cols=[c for c in ["cement_bags", "ggbs_bags"] if c in df_rmu.columns],
+            rename={"date": "Date", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)", "remarks": "Remarks"},
+            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+        )
+    else:
+        st.info("No Cement/GGBS usage recorded yet.")
 
     # ── Edit entry ────────────────────────────────────────────────────────────
     with st.expander("✏️ Edit a DPR Entry"):

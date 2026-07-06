@@ -297,7 +297,21 @@ del _d, _c, _joint, _sku, _disp_names, _np4_sku
 # isn't a separately purchased/stocked item (it's mixed on-site), so it has
 # no inventory balance — it's cost-only. Jalli is cage welding (a labour/
 # process cost, not a raw material), so it has no inventory balance either.
-RM_INVENTORY_OPENING = {"steel": 0}
+#
+# Cement (PPC) and GGBS are tracked here too, for inventory reconciliation
+# only — DPR now also asks for the day's total Cement/GGBS bags consumed
+# (see views/dpr.py), separately from the per-product Concrete costing
+# above. "Consumed" for these two comes from the rm_usage table (one row per
+# DPR submission, not tied to any single product), not from a production
+# table column.
+RM_INVENTORY_OPENING = {"steel": 0, "cement_ppc": 0, "ggbs": 0}
+CEMENT_GGBS_KG_PER_BAG = 50
+
+# Labels for every RM_INVENTORY_OPENING key — covers RAW_MATERIALS entries
+# (steel) plus the inventory-only entries (cement_ppc, ggbs) that aren't
+# priced/costed materials, just tracked for stock reconciliation.
+INVENTORY_MATERIAL_LABELS = {m["key"]: m["label"] for m in RAW_MATERIALS}
+INVENTORY_MATERIAL_LABELS.update({"cement_ppc": "PPC Cement", "ggbs": "GGBS"})
 
 # ── Gate Entry (raw material / equipment / parts movement log) ───────────────
 GATE_CATEGORIES = ["Raw Material", "Plant Equipment & Parts", "Miscellaneous Parts"]

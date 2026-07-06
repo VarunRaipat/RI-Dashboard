@@ -4,18 +4,20 @@ Current stock = opening + in - out since that date.
 """
 import pandas as pd
 from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING,
-                          PRODUCT_CONFIG, RAW_MATERIALS, GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
-from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries
+                          PRODUCT_CONFIG, INVENTORY_MATERIAL_LABELS,
+                          GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
+from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage
 
 _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
-# Only materials with an inventory balance (RM_INVENTORY_OPENING — Steel and
-# Jalli, both already in Kg) get a consume-column/label mapping. Concrete
-# isn't separately purchased/stocked (mixed on-site), so it's cost-only and
-# has no entry here.
-_MATERIAL_BY_KEY = {m["key"]: m for m in RAW_MATERIALS}
-_CONSUME_COL = {k: f"{k}_qty" for k in RM_INVENTORY_OPENING}
-_RM_LABEL    = {k: _MATERIAL_BY_KEY[k]["label"] for k in RM_INVENTORY_OPENING}
+_RM_LABEL = INVENTORY_MATERIAL_LABELS
+
+# Steel's consumption is computed automatically (Nos x product's steel_kg_per_unit,
+# summed from the production table's steel_qty column). Cement/GGBS aren't tied to
+# any single product — they're the day's total batch usage entered once per DPR
+# submission (see views/dpr.py), summed from the rm_usage table instead.
+_PRODUCTION_CONSUME_COL = {"steel": "steel_qty"}
+_RM_USAGE_CONSUME_COL   = {"cement_ppc": "cement_bags", "ggbs": "ggbs_bags"}
 
 
 def _since_anchor(df, date_col="date"):
@@ -61,18 +63,25 @@ def finished_goods_summary():
 
 
 def rm_summary():
-    """Current stock — and its value at RM cost price — for Steel and Jalli
-    (both tracked in Kg). "Received" comes from Gate Entry ("In" log rows for
-    that item); "Consumed" comes from Production Entry's "<key>_qty" columns
-    (Nos x the product's fixed per-unit figure, computed automatically)."""
+    """Current stock — and its value at RM cost price — for Steel, Cement,
+    and GGBS. "Received" comes from Gate Entry ("In" log rows for that item).
+    "Consumed" comes from the production table for Steel (Nos x the
+    product's fixed per-unit figure), or from the rm_usage table for
+    Cement/GGBS (the day's total batch usage, entered once per DPR
+    submission rather than tied to a single product)."""
     df_prod = _since_anchor(get_production())
+    df_usage = _since_anchor(get_rm_usage())
     df_gate = _since_anchor(get_gate_entries())
     rm_prices = get_rm_prices()
 
     rows = []
     for material, opening in RM_INVENTORY_OPENING.items():
-        col = _CONSUME_COL[material]
-        consumed = float(df_prod[col].sum()) if df_prod is not None and not df_prod.empty and col in df_prod.columns else 0.0
+        if material in _PRODUCTION_CONSUME_COL:
+            col = _PRODUCTION_CONSUME_COL[material]
+            consumed = float(df_prod[col].sum()) if df_prod is not None and not df_prod.empty and col in df_prod.columns else 0.0
+        else:
+            col = _RM_USAGE_CONSUME_COL.get(material)
+            consumed = float(df_usage[col].sum()) if col and df_usage is not None and not df_usage.empty and col in df_usage.columns else 0.0
         received = 0.0
         if df_gate is not None and not df_gate.empty and "item" in df_gate.columns:
             in_mask = (df_gate["item"] == material) & (df_gate["direction"] == "In")

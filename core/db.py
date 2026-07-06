@@ -140,6 +140,14 @@ def init_db():
         profit REAL DEFAULT 0, profit_pct REAL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS rm_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        cement_bags REAL DEFAULT 0,
+        ggbs_bags REAL DEFAULT 0,
+        remarks TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     CREATE TABLE IF NOT EXISTS dispatch (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL, challan_no TEXT, di_no TEXT, bill_no TEXT,
@@ -296,6 +304,40 @@ def insert_production(data):
     else: _sqlite_insert("production", data)
     _invalidate_cache()
     log_activity("create", "DPR Entry", f"{data.get('product','')} · {data.get('nos','')} nos · {data.get('plant','')}")
+
+
+def insert_rm_usage(data):
+    """One row per DPR submission (batch) — Cement/GGBS bags consumed that
+    day, not tied to any single product line (see views/dpr.py)."""
+    if _use_supabase(): _sb_insert("rm_usage", data)
+    else: _sqlite_insert("rm_usage", data)
+    _invalidate_cache()
+    log_activity("create", "DPR Entry", f"RM usage: cement {data.get('cement_bags','')} bags, ggbs {data.get('ggbs_bags','')} bags")
+
+
+@st.cache_data(ttl=30)
+def get_rm_usage(start=None, end=None):
+    if _use_supabase():
+        params = {"select": "*", "order": "date.desc,id.desc", "limit": 5000}
+        if start: params["date"] = f"gte.{start}"
+        r = requests.get(_sb_url("rm_usage"), headers=_headers(), params=params)
+        if r.status_code != 200:
+            return pd.DataFrame()
+        data = r.json()
+        if start and end:
+            data = [row for row in data if start <= row.get("date", "") <= end]
+        return pd.DataFrame(data) if data else pd.DataFrame()
+    else:
+        try:
+            con = _conn()
+            q = "SELECT * FROM rm_usage"
+            if start and end:
+                q += f" WHERE date >= '{start}' AND date <= '{end}'"
+            q += " ORDER BY date DESC, id DESC"
+            df = pd.read_sql(q, con); con.close()
+            return df
+        except Exception:
+            return pd.DataFrame()
 
 
 def insert_dispatch(data):
