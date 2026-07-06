@@ -2,16 +2,16 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
+from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, ALL_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
 from core.db import insert_production, get_rm_prices, get_production, delete_row, update_production, get_product_config
 from core.ui import flash, show_flashes
 
 _RM_COST_FIELDS = [
-    "rm_cost","labour_cost","transport_cost","power_cost",
+    "rm_cost","labour_cost","power_cost",
     "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
     "total_wt_kg",
-] + [f"pct_{m['key']}" for m in RAW_MATERIALS] + [f"{m['key']}_qty" for m in RAW_MATERIALS]
+] + [f"pct_{m['key']}" for m in ALL_MATERIALS] + [f"{m['key']}_qty" for m in ALL_MATERIALS]
 
 
 def show(PLOT):
@@ -72,7 +72,7 @@ def show(PLOT):
         # ── RM % Breakdown ────────────────────────────────────────────────────
         st.markdown("---")
         st.markdown('<div class="section-header">Raw Material Composition (%)</div>', unsafe_allow_html=True)
-        pct_data = {m["label"]: result[f"pct_{m['key']}"] for m in RAW_MATERIALS}
+        pct_data = {m["label"]: result[f"pct_{m['key']}"] for m in ALL_MATERIALS}
         pct_cols = st.columns(len(pct_data))
         for i, (mat, pct) in enumerate(pct_data.items()):
             pct_cols[i].metric(f"% {mat}", f"{pct:.1f}%")
@@ -93,11 +93,10 @@ def show(PLOT):
         # ── Cost Breakdown ────────────────────────────────────────────────────
         st.markdown('<div class="section-header">Cost Breakdown</div>', unsafe_allow_html=True)
 
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3 = st.columns(3)
         k1.metric("Raw Material",  f"₹{result['rm_cost']:,.0f}")
         k2.metric("Labour",        f"₹{result['labour_cost']:,.0f}")
-        k3.metric("Transport",     f"₹{result['transport_cost']:,.0f}")
-        k4.metric("Power",         f"₹{result['power_cost']:,.0f}")
+        k3.metric("Power",         f"₹{result['power_cost']:,.0f}")
 
         k5, k6, k7, k8 = st.columns(4)
         k5.metric("EMI",                f"₹{result['emi_cost']:,.0f}",   "Fixed/entry")
@@ -118,13 +117,12 @@ def show(PLOT):
             delta_color=pcolor,
         )
 
-        labels = ["Raw Material","Labour","Transport","Power","EMI","DG","Admin","Misc"]
+        labels = ["Raw Material","Labour","Power","EMI","DG","Admin","Misc"]
         values = [
-            result["rm_cost"], result["labour_cost"],
-            result["transport_cost"], result["power_cost"],
+            result["rm_cost"], result["labour_cost"], result["power_cost"],
             result["emi_cost"], result["dg_cost"], result["admin_cost"], result["misc_cost"],
         ]
-        colors = ["#00C49A","#3B82F6","#FDBA44","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9"]
+        colors = ["#00C49A","#3B82F6","#A78BFA","#F97316","#22D3EE","#FB7185","#E879F9"]
         fig_bar = go.Figure(go.Bar(
             x=labels, y=values,
             marker_color=colors,
@@ -150,19 +148,19 @@ def show(PLOT):
         df = df.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
 
         show_cols = ["date","product","nos","plant",
-                     "rm_cost","labour_cost","transport_cost","power_cost",
+                     "rm_cost","labour_cost","power_cost",
                      "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
-                     ] + [f"pct_{m['key']}" for m in RAW_MATERIALS]
+                     ] + [f"pct_{m['key']}" for m in ALL_MATERIALS]
         show_cols = [c for c in show_cols if c in df.columns]
         rename = {
             "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
             "rm_cost":"RM Cost","labour_cost":"Labour",
-            "transport_cost":"Transport","power_cost":"Power","emi_cost":"EMI",
+            "power_cost":"Power","emi_cost":"EMI",
             "dg_cost":"DG","admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
             "profit":"Profit","profit_pct":"Profit %",
-            **{f"pct_{m['key']}": f"% {m['label']}" for m in RAW_MATERIALS},
+            **{f"pct_{m['key']}": f"% {m['label']}" for m in ALL_MATERIALS},
         }
-        sum_cols = [c for c in ["nos","revenue","rm_cost","labour_cost","transport_cost",
+        sum_cols = [c for c in ["nos","revenue","rm_cost","labour_cost",
                                  "power_cost","emi_cost","dg_cost","admin_cost","misc_cost",
                                  "total_cost","profit"] if c in df.columns]
         col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}

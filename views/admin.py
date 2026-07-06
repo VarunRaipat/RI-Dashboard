@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS
+from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, ALL_MATERIALS
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
     get_product_config, save_product_config, get_orders, update_order, update_dispatch,
@@ -47,7 +47,7 @@ def show(PLOT):
         # Show price history
         from core.db import _use_supabase, _sb_url, _headers, _conn
         import requests as _req
-        _hist_cols = ["effective_date"] + [m["key"] for m in RAW_MATERIALS]
+        _hist_cols = ["effective_date"] + [m["key"] for m in ALL_MATERIALS]
         try:
             if _use_supabase():
                 r = _req.get(_sb_url("rm_prices"), headers=_headers(), params={
@@ -69,7 +69,8 @@ def show(PLOT):
     # ── Tab 2: Product Config ─────────────────────────────────────────────────
     with tab2:
         st.markdown("### Product Cost Configuration")
-        st.caption("Edit selling price, labour, transport, power per product. Changes apply to all new DPR entries.")
+        st.caption("Edit selling price, labour, power, and steel usage per product. Changes apply to all new DPR entries. "
+                   "(No Transport field — real transport cost is tracked in the Dispatch module.)")
 
         cfg_all = get_product_config()
         products = list(cfg_all.keys())
@@ -83,9 +84,10 @@ def show(PLOT):
 
             cc3, cc4 = st.columns(2)
             new_ll     = cc3.number_input("Labour Loading (Rs./nos)",    value=float(cfg["labour_loading"]),      min_value=0.0, step=0.05)
-            new_tp     = cc4.number_input("Transport (Rs./nos)",         value=float(cfg["transport_per_block"]), min_value=0.0, step=0.05)
+            new_pw     = cc4.number_input("Power (Rs./nos)",             value=float(cfg["power_per_block"]),     min_value=0.0, step=0.05)
 
-            new_pw     = st.number_input("Power (Rs./nos)",              value=float(cfg["power_per_block"]),     min_value=0.0, step=0.05)
+            new_steel  = st.number_input("Steel — HT Wire (Kg/Unit)",    value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1,
+                                         help="Fixed kg of steel per unit produced. Steel used per DPR entry = Nos x this figure — not entered per batch.")
 
             st.caption(f"Total Labour = ₹{new_lp + new_ll:.2f}/nos · Fixed costs: EMI ₹20,000 · DG ₹5,000 · Admin ₹8,000 · Misc 10%")
 
@@ -94,8 +96,8 @@ def show(PLOT):
                     "selling_price":       new_sell,
                     "labour_production":   new_lp,
                     "labour_loading":      new_ll,
-                    "transport_per_block": new_tp,
                     "power_per_block":     new_pw,
+                    "steel_kg_per_unit":   new_steel,
                 })
                 st.success(f"✅ {sel_prod} config saved.")
                 st.rerun()
@@ -109,8 +111,8 @@ def show(PLOT):
                 "Sell (₹)":  c["selling_price"],
                 "Labour Prod":c["labour_production"],
                 "Labour L/U": c["labour_loading"],
-                "Transport":  c["transport_per_block"],
                 "Power":      c["power_per_block"],
+                "Steel (Kg/Unit)": c.get("steel_kg_per_unit", 0),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 

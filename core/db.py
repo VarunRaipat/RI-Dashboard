@@ -130,18 +130,14 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL, product TEXT NOT NULL, nos REAL NOT NULL,
         plant TEXT, operator_name TEXT,
-        cement_ppc_qty REAL DEFAULT 0, ggbs_qty REAL DEFAULT 0,
-        ht_wire_3mm_qty REAL DEFAULT 0, ht_wire_3_5mm_qty REAL DEFAULT 0,
-        ht_wire_4mm_qty REAL DEFAULT 0, ht_wire_5_5mm_qty REAL DEFAULT 0,
+        cement_ppc_qty REAL DEFAULT 0, ggbs_qty REAL DEFAULT 0, steel_qty REAL DEFAULT 0,
         rm_cost REAL DEFAULT 0, labour_cost REAL DEFAULT 0,
-        transport_cost REAL DEFAULT 0, power_cost REAL DEFAULT 0,
+        power_cost REAL DEFAULT 0,
         emi_cost REAL DEFAULT 0, dg_cost REAL DEFAULT 0, admin_cost REAL DEFAULT 0, misc_cost REAL DEFAULT 0,
         total_cost REAL DEFAULT 0, revenue REAL DEFAULT 0,
         profit REAL DEFAULT 0, profit_pct REAL DEFAULT 0,
         total_wt_kg REAL DEFAULT 0,
-        pct_cement_ppc REAL DEFAULT 0, pct_ggbs REAL DEFAULT 0,
-        pct_ht_wire_3mm REAL DEFAULT 0, pct_ht_wire_3_5mm REAL DEFAULT 0,
-        pct_ht_wire_4mm REAL DEFAULT 0, pct_ht_wire_5_5mm REAL DEFAULT 0,
+        pct_cement_ppc REAL DEFAULT 0, pct_ggbs REAL DEFAULT 0, pct_steel REAL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
     CREATE TABLE IF NOT EXISTS dispatch (
@@ -157,9 +153,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS rm_prices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         effective_date TEXT NOT NULL,
-        cement_ppc REAL DEFAULT 0, ggbs REAL DEFAULT 0,
-        ht_wire_3mm REAL DEFAULT 0, ht_wire_3_5mm REAL DEFAULT 0,
-        ht_wire_4mm REAL DEFAULT 0, ht_wire_5_5mm REAL DEFAULT 0,
+        cement_ppc REAL DEFAULT 0, ggbs REAL DEFAULT 0, steel REAL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
     CREATE TABLE IF NOT EXISTS product_config (
@@ -168,8 +162,8 @@ def init_db():
         selling_price REAL DEFAULT 0,
         labour_production REAL DEFAULT 0,
         labour_loading REAL DEFAULT 0,
-        transport_per_block REAL DEFAULT 0,
         power_per_block REAL DEFAULT 0,
+        steel_kg_per_unit REAL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
     CREATE TABLE IF NOT EXISTS vendor_transactions (
@@ -387,7 +381,7 @@ def save_rm_prices(prices):
     log_activity("update", "Admin", "RM prices updated")
 
 
-_PRODUCT_CFG_FIELDS = ["selling_price","labour_production","labour_loading","transport_per_block","power_per_block"]
+_PRODUCT_CFG_FIELDS = ["selling_price","labour_production","labour_loading","power_per_block","steel_kg_per_unit"]
 
 
 @st.cache_data(ttl=60)

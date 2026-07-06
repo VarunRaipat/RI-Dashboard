@@ -4,7 +4,7 @@ Current stock = opening + in - out since that date.
 """
 import pandas as pd
 from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING,
-                          PRODUCT_CONFIG, RAW_MATERIALS, GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
+                          PRODUCT_CONFIG, ALL_MATERIALS, GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
 from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries
 
 _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
@@ -12,10 +12,13 @@ _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 # Raw material key -> its production quantity column / unit-to-kg factor.
 # rm_prices and RM_INVENTORY_OPENING already use the same material key, so no
 # separate name-mapping table is needed (unlike the old hardcoded
-# "OPC 53" -> "cement_bags" style mapping this replaced).
-_CONSUME_COL  = {m["key"]: f"{m['key']}_qty" for m in RAW_MATERIALS}
-_KG_PER_UNIT  = {m["key"]: m["kg_per_unit"] for m in RAW_MATERIALS}
-_RM_LABEL     = {m["key"]: m["label"] for m in RAW_MATERIALS}
+# "OPC 53" -> "cement_bags" style mapping this replaced). Includes Steel
+# even though its quantity is computed (Nos x steel_kg_per_unit) rather than
+# batch-entered — it still gets a running inventory balance like any other
+# material.
+_CONSUME_COL  = {m["key"]: f"{m['key']}_qty" for m in ALL_MATERIALS}
+_KG_PER_UNIT  = {m["key"]: m["kg_per_unit"] for m in ALL_MATERIALS}
+_RM_LABEL     = {m["key"]: m["label"] for m in ALL_MATERIALS}
 
 
 def _since_anchor(df, date_col="date"):

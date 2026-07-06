@@ -1,5 +1,5 @@
 from core.config import (
-    PRODUCT_CONFIG, RAW_MATERIALS, EMI_PER_ENTRY, DG_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
+    PRODUCT_CONFIG, RAW_MATERIALS, STEEL_MATERIAL, EMI_PER_ENTRY, DG_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
 )
 
 
@@ -12,18 +12,26 @@ def calculate_production(
     raw_materials: list = None,
 ) -> dict:
     """
-    rm_used: {material_key: qty_in_native_unit} — e.g. {"cement_ppc": 40, "ht_wire_3mm": 25}.
+    rm_used: {material_key: qty_in_native_unit} for batch-entered materials
+    only — e.g. {"cement_ppc": 40, "ggbs": 10}. Steel is NOT passed in here:
+    it's computed as Nos x the product's fixed steel_kg_per_unit and merged
+    in below, since steel usage is known per product rather than measured
+    per batch.
+
     Iterates over `raw_materials` (defaults to config.RAW_MATERIALS) so adding
-    or renaming a raw material for a different company/product line only
-    requires editing that config list, not this function.
+    or renaming a batch-entered material for a different company/product
+    line only requires editing that config list, not this function.
     """
     cfg = (product_config or PRODUCT_CONFIG)[product]
-    materials = raw_materials or RAW_MATERIALS
+    materials = list(raw_materials or RAW_MATERIALS) + [STEEL_MATERIAL]
 
     def v(x):
         return float(x or 0)
 
-    weights_kg = {m["key"]: v(rm_used.get(m["key"], 0)) * m["kg_per_unit"] for m in materials}
+    full_rm_used = dict(rm_used)
+    full_rm_used[STEEL_MATERIAL["key"]] = v(cfg.get("steel_kg_per_unit", 0)) * v(nos)
+
+    weights_kg = {m["key"]: v(full_rm_used.get(m["key"], 0)) * m["kg_per_unit"] for m in materials}
     total_wt   = sum(weights_kg.values())
 
     def pct(w):
@@ -34,14 +42,16 @@ def calculate_production(
 
     rm_cost = sum(weights_kg[k] * rm_prices.get(k, 0) for k in weights_kg)
 
-    labour_cost    = (cfg["labour_production"] + cfg["labour_loading"]) * v(nos)
-    transport_cost = cfg["transport_per_block"] * v(nos)
-    power_cost     = cfg["power_per_block"]     * v(nos)
-    emi_cost   = float(EMI_PER_ENTRY)    # fixed Rs./entry
-    dg_cost    = float(DG_PER_ENTRY)     # fixed Rs./entry
-    admin_cost = float(ADMIN_PER_ENTRY)  # fixed Rs./entry
+    # No transport term here — real transport cost is tracked separately in
+    # the Dispatch module (truck, trip distance, diesel), so a per-unit
+    # transport rate at the production-cost level would double-count it.
+    labour_cost = (cfg["labour_production"] + cfg["labour_loading"]) * v(nos)
+    power_cost  = cfg["power_per_block"] * v(nos)
+    emi_cost    = float(EMI_PER_ENTRY)    # fixed Rs./entry
+    dg_cost     = float(DG_PER_ENTRY)     # fixed Rs./entry
+    admin_cost  = float(ADMIN_PER_ENTRY)  # fixed Rs./entry
 
-    sub_total  = rm_cost + labour_cost + transport_cost + power_cost + emi_cost + dg_cost + admin_cost
+    sub_total  = rm_cost + labour_cost + power_cost + emi_cost + dg_cost + admin_cost
     misc_cost  = sub_total * (MISC_PCT / 100)
     total_cost = sub_total + misc_cost
 
@@ -52,7 +62,6 @@ def calculate_production(
     costs = {
         "rm_cost":        round(rm_cost, 2),
         "labour_cost":    round(labour_cost, 2),
-        "transport_cost": round(transport_cost, 2),
         "power_cost":     round(power_cost, 2),
         "emi_cost":       round(emi_cost, 2),
         "dg_cost":        round(dg_cost, 2),
@@ -65,7 +74,7 @@ def calculate_production(
     }
     costs.update(rm_pct)
     for m in materials:
-        costs[f"{m['key']}_qty"] = round(v(rm_used.get(m["key"], 0)), 3)
+        costs[f"{m['key']}_qty"] = round(v(full_rm_used.get(m["key"], 0)), 3)
     return costs
 
 

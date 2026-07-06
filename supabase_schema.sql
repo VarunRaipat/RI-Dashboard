@@ -1,8 +1,15 @@
 -- Run this in Supabase SQL Editor (supabase.com → your project → SQL Editor)
 --
--- Raw material columns below (cement_ppc_qty, ggbs_qty, ht_wire_*_qty / pct_*)
--- match core/config.py's RAW_MATERIALS list. If you add/rename a raw material
--- there, add/rename the matching "<key>_qty" and "pct_<key>" columns here too.
+-- Raw material columns below (cement_ppc_qty, ggbs_qty, steel_qty / pct_*)
+-- match core/config.py's ALL_MATERIALS list (RAW_MATERIALS, batch-entered,
+-- plus Steel, computed from Nos x steel_kg_per_unit). If you add/rename a
+-- material there, add/rename the matching "<key>_qty" and "pct_<key>"
+-- columns here too.
+--
+-- If you already ran an earlier version of this file against a live
+-- project, don't re-run the CREATE TABLE statements below (IF NOT EXISTS
+-- makes them no-ops anyway) — instead scroll to the "Migration: Steel"
+-- block near the end of this file and run just that.
 
 CREATE TABLE IF NOT EXISTS production (
     id              BIGSERIAL PRIMARY KEY,
@@ -13,13 +20,9 @@ CREATE TABLE IF NOT EXISTS production (
     operator_name   TEXT,
     cement_ppc_qty      REAL DEFAULT 0,
     ggbs_qty            REAL DEFAULT 0,
-    ht_wire_3mm_qty     REAL DEFAULT 0,
-    ht_wire_3_5mm_qty   REAL DEFAULT 0,
-    ht_wire_4mm_qty     REAL DEFAULT 0,
-    ht_wire_5_5mm_qty   REAL DEFAULT 0,
+    steel_qty           REAL DEFAULT 0,
     rm_cost         REAL DEFAULT 0,
     labour_cost     REAL DEFAULT 0,
-    transport_cost  REAL DEFAULT 0,
     power_cost      REAL DEFAULT 0,
     emi_cost        REAL DEFAULT 0,
     dg_cost         REAL DEFAULT 0,
@@ -32,10 +35,7 @@ CREATE TABLE IF NOT EXISTS production (
     total_wt_kg     REAL DEFAULT 0,
     pct_cement_ppc      REAL DEFAULT 0,
     pct_ggbs            REAL DEFAULT 0,
-    pct_ht_wire_3mm     REAL DEFAULT 0,
-    pct_ht_wire_3_5mm   REAL DEFAULT 0,
-    pct_ht_wire_4mm     REAL DEFAULT 0,
-    pct_ht_wire_5_5mm   REAL DEFAULT 0,
+    pct_steel           REAL DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -66,24 +66,22 @@ CREATE TABLE IF NOT EXISTS rm_prices (
     effective_date  TEXT    NOT NULL,
     cement_ppc      REAL DEFAULT 0,
     ggbs            REAL DEFAULT 0,
-    ht_wire_3mm     REAL DEFAULT 0,
-    ht_wire_3_5mm   REAL DEFAULT 0,
-    ht_wire_4mm     REAL DEFAULT 0,
-    ht_wire_5_5mm   REAL DEFAULT 0,
+    steel           REAL DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Per-product selling price / labour / transport / power overrides, edited
--- live via Admin > Product Cost Configuration. "product" must be unique so
--- the app's upsert (Prefer: resolution=merge-duplicates) works.
+-- Per-product selling price / labour / power / steel overrides, edited live
+-- via Admin > Product Cost Configuration. "product" must be unique so the
+-- app's upsert (Prefer: resolution=merge-duplicates) works. No transport
+-- column — real transport cost is tracked in the Dispatch module instead.
 CREATE TABLE IF NOT EXISTS product_config (
     id                    BIGSERIAL PRIMARY KEY,
     product               TEXT UNIQUE NOT NULL,
     selling_price         REAL DEFAULT 0,
     labour_production     REAL DEFAULT 0,
     labour_loading        REAL DEFAULT 0,
-    transport_per_block   REAL DEFAULT 0,
     power_per_block       REAL DEFAULT 0,
+    steel_kg_per_unit     REAL DEFAULT 0,
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -191,3 +189,12 @@ CREATE TABLE IF NOT EXISTS activity_log (
     detail     TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Migration: Steel replaces the 4 HT wire gauges; Transport removed ────────
+-- Run this block if your project was already set up before this change —
+-- it's safe to run even with existing data (old ht_wire_*/transport_* columns
+-- are left in place, just unused; nothing is dropped).
+ALTER TABLE production     ADD COLUMN IF NOT EXISTS steel_qty REAL DEFAULT 0;
+ALTER TABLE production     ADD COLUMN IF NOT EXISTS pct_steel REAL DEFAULT 0;
+ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS steel REAL DEFAULT 0;
+ALTER TABLE product_config ADD COLUMN IF NOT EXISTS steel_kg_per_unit REAL DEFAULT 0;

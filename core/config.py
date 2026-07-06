@@ -19,17 +19,22 @@ USERS = {
 #   label        — human-readable name shown in forms/tables
 #   unit         — "Bags" or "Kg" — what the operator actually enters
 #   kg_per_unit  — conversion to kg for weight-% breakdown (1 if already kg)
+# These are entered per DPR batch (actual consumption varies run to run).
 RAW_MATERIALS = [
     {"key": "cement_ppc",   "label": "PPC Cement",    "unit": "Bags", "kg_per_unit": 50},
     {"key": "ggbs",         "label": "GGBS",          "unit": "Bags", "kg_per_unit": 50},
-    {"key": "ht_wire_3mm",  "label": "HT Wire 3 mm",  "unit": "Kg",   "kg_per_unit": 1},
-    {"key": "ht_wire_3_5mm","label": "HT Wire 3.5 mm","unit": "Kg",   "kg_per_unit": 1},
-    {"key": "ht_wire_4mm",  "label": "HT Wire 4 mm",  "unit": "Kg",   "kg_per_unit": 1},
-    {"key": "ht_wire_5_5mm","label": "HT Wire 5.5 mm","unit": "Kg",   "kg_per_unit": 1},
 ]
 
-DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in RAW_MATERIALS}
-RM_LABELS = {m["key"]: f"{m['label']} (Rs./kg)" for m in RAW_MATERIALS}
+# Steel (HT wire) is NOT entered per batch — usage is known per product, so
+# each product gets a fixed "Steel (Kg/Unit)" figure (Admin > Product Cost
+# Configuration) and steel used = Nos x that figure, computed automatically.
+# It still needs its own price (Admin > RM Prices) and still counts toward
+# weight%, cost, and inventory tracking, alongside RAW_MATERIALS above.
+STEEL_MATERIAL = {"key": "steel", "label": "Steel (HT Wire)", "unit": "Kg", "kg_per_unit": 1}
+ALL_MATERIALS  = RAW_MATERIALS + [STEEL_MATERIAL]
+
+DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in ALL_MATERIALS}
+RM_LABELS = {m["key"]: f"{m['label']} (Rs./kg)" for m in ALL_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
 # Formula: Total Cost = RM + Labour + Transport + Power + EMI + DG + Admin, then + Misc%
@@ -57,18 +62,25 @@ def _joint_types_for(diameter_mm, cls):
         return ["Collar", "M/F"]
     return ["Socket & Spigot", "M/F"]  # NP3
 
-# All selling_price / labour / transport / power values below are placeholders
+# All selling_price / labour / power / steel values below are placeholders
 # (0) — real rates must be entered via Admin > Product Cost Configuration
 # before profit figures mean anything. Kept as one flat dict (not nested by
 # diameter/class) so every product is independently editable there, same as
 # Ecostructures' PRODUCT_CONFIG pattern.
+#
+# No "transport_per_block" here — real transport cost is already tracked in
+# the Dispatch module (truck, trip distance, diesel cost), so a second
+# per-unit transport rate at the production-cost level would double-count it.
+#
+# steel_kg_per_unit: fixed Steel (HT wire) usage per unit of this product —
+# see STEEL_MATERIAL above. Steel used per DPR entry = Nos x this figure.
 def _blank_rates():
     return {
         "selling_price":       0.0,
         "labour_production":   0.0,
         "labour_loading":      0.0,
-        "transport_per_block": 0.0,
         "power_per_block":     0.0,
+        "steel_kg_per_unit":   0.0,
     }
 
 PRODUCT_CONFIG = {}
@@ -172,18 +184,18 @@ INVENTORY_PRODUCTS = [
     (p, p, p, 0) for p in PRODUCTION_PRODUCTS
 ]
 
-# Cement / GGBS / HT Wire bag & coil inventory: opening qty as of
-# INVENTORY_ANCHOR_DATE. Current balance = opening + received (Gate Entry
-# "In" log) - consumed (summed from Production Entry).
-RM_INVENTORY_OPENING = {m["key"]: 0 for m in RAW_MATERIALS}
+# Cement / GGBS / Steel inventory: opening qty as of INVENTORY_ANCHOR_DATE.
+# Current balance = opening + received (Gate Entry "In" log) - consumed
+# (summed from Production Entry — computed for Steel, entered for the rest).
+RM_INVENTORY_OPENING = {m["key"]: 0 for m in ALL_MATERIALS}
 
 # ── Gate Entry (raw material / equipment / parts movement log) ───────────────
 GATE_CATEGORIES = ["Raw Material", "Plant Equipment & Parts", "Miscellaneous Parts"]
 GATE_DIRECTIONS = ["In", "Out"]
 GATE_UNITS      = ["Ton", "CFT", "Nos", "Kg", "Litre", "Bags", "Other"]
 
-# Nothing bulk/untracked for RI — cement, GGBS, and all HT wire gauges get a
-# running balance via RM_INVENTORY_OPENING.
+# Nothing bulk/untracked for RI — cement, GGBS, and steel all get a running
+# balance via RM_INVENTORY_OPENING.
 GATE_UNTRACKED_ITEMS = []
 
 GATE_RM_TRACKED_ITEMS = list(RM_INVENTORY_OPENING.keys())
