@@ -88,19 +88,34 @@ PRODUCT_CONFIG["PSC Pole"]       = {"display": "PSC Pole", **_blank_rates()}
 
 del _blank_rates, _d, _c, _name, _slab, _pillar
 
-PRODUCTION_PRODUCTS = list(PRODUCT_CONFIG.keys())
-ORDER_PRODUCTS      = list(PRODUCT_CONFIG.keys())
-DISPATCH_PRODUCTS   = list(PRODUCT_CONFIG.keys())
-
-# Joint Type only applies to Hume Pipes — used to show/hide that field on the
-# Sales Order line and DPR entry without affecting price (spec only).
-HUME_PIPE_PRODUCTS = [p for p in PRODUCT_CONFIG if p.startswith("Hume Pipe")]
-
-# product name -> allowed Joint Types for that specific diameter+class.
+# ── SKUs vs. pricing keys ──────────────────────────────────────────────────────
+# Joint Type doesn't change price, but a Collar pipe and an M/F pipe of the
+# same diameter+class ARE physically different stock — so each Joint Type
+# variant is its own SKU (used for DPR entry, Sales Order lines, Dispatch,
+# and Inventory tracking), while PRODUCT_CONFIG above stays keyed by the base
+# diameter+class name (so admin only sets one price per diameter+class, not
+# once per joint type). SKU_TO_PRICING_KEY resolves a SKU back to the
+# PRODUCT_CONFIG entry to charge/cost it against.
 HUME_PIPE_JOINT_TYPES = {
     f"Hume Pipe {d}mm {c}": _joint_types_for(d, c)
     for d in HUME_PIPE_DIAMETERS_MM for c in HUME_PIPE_CLASSES
 }
+
+_PIPE_SKUS = [
+    f"{base} ({joint})"
+    for base, joints in HUME_PIPE_JOINT_TYPES.items()
+    for joint in joints
+]
+_NON_PIPE_PRODUCTS = [p for p in PRODUCT_CONFIG if not p.startswith("Hume Pipe")]
+
+SKU_TO_PRICING_KEY = {sku: sku.rsplit(" (", 1)[0] for sku in _PIPE_SKUS}
+SKU_TO_PRICING_KEY.update({p: p for p in _NON_PIPE_PRODUCTS})
+
+PRODUCTION_PRODUCTS = _PIPE_SKUS + _NON_PIPE_PRODUCTS
+ORDER_PRODUCTS      = _PIPE_SKUS + _NON_PIPE_PRODUCTS
+DISPATCH_PRODUCTS   = _PIPE_SKUS + _NON_PIPE_PRODUCTS
+
+HUME_PIPE_PRODUCTS = list(_PIPE_SKUS)
 
 TRUCKS    = ["2821", "1669", "4879", "8391", "Other"]
 DRIVERS   = ["Peter","Ladhu","Islam","Bhadiya","Sukra","Debu","Kaila","Sahdeo","Tinku","Nimiya","Yashwant","Raghunath","Karan","Other"]
@@ -152,7 +167,10 @@ INVENTORY_ANCHOR_DATE = str(date.today())
 
 INVENTORY_PRODUCTS = [
     # canonical name, production name, dispatch/order name, opening qty
-    (p, p, p, 0) for p in PRODUCT_CONFIG
+    # Built from the SKU list (not PRODUCT_CONFIG) so Collar and M/F pipes of
+    # the same diameter+class are tracked as separate stock, even though they
+    # share one price.
+    (p, p, p, 0) for p in PRODUCTION_PRODUCTS
 ]
 
 # Cement / GGBS / HT Wire bag & coil inventory: opening qty as of

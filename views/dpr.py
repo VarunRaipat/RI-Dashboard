@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, OPERATORS, PLANTS
+from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, OPERATORS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
 from core.db import insert_production, get_rm_prices, get_production, delete_row, update_production, get_product_config
 from core.ui import flash, show_flashes
@@ -53,7 +53,8 @@ def show(PLOT):
             st.error("Production (Nos.) must be greater than 0.")
             return
 
-        result = calculate_production(product, nos, rm_inputs, rm, prod_cfg)
+        pricing_key = SKU_TO_PRICING_KEY.get(product, product)
+        result = calculate_production(pricing_key, nos, rm_inputs, rm, prod_cfg)
 
         record = {
             "date": str(entry_date), "product": product, "nos": nos,
@@ -109,7 +110,7 @@ def show(PLOT):
         k9, k10 = st.columns(2)
         k9.metric("Total Cost",  f"₹{result['total_cost']:,.0f}")
         k10.metric("Revenue",    f"₹{result['revenue']:,.0f}",
-                   f"@ ₹{prod_cfg[product]['selling_price']}/nos")
+                   f"@ ₹{prod_cfg[pricing_key]['selling_price']}/nos")
 
         pcolor = "normal" if result["profit"] >= 0 else "inverse"
         st.metric(
@@ -220,7 +221,8 @@ def show(PLOT):
                 save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
 
             if save:
-                result = calculate_production(e_product, e_nos, e_rm_inputs, rm, prod_cfg)
+                e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
+                result = calculate_production(e_pricing_key, e_nos, e_rm_inputs, rm, prod_cfg)
                 updated = {
                     "date": str(e_date), "product": e_product, "nos": e_nos,
                     "plant": e_plant, "operator_name": e_op,

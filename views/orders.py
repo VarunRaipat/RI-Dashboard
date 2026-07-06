@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, JOINT_TYPES, HUME_PIPE_PRODUCTS, HUME_PIPE_JOINT_TYPES
+from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
 from core.pdf import generate_dispatch_instruction
 from core.ui import client_name_field, flash, show_flashes
@@ -242,7 +242,11 @@ def show(PLOT):
 
     for i in range(n_lines):
         cols = st.columns([3, 2, 2, 2, 1])
-        line_prod = cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"ord_prod_{i}", label_visibility="collapsed")
+        # Joint Type is baked into the product name itself for Hume Pipes
+        # (e.g. "Hume Pipe 300mm NP2 (Collar)") since Collar/M-F/Socket&Spigot
+        # variants of the same diameter+class are separate physical stock,
+        # even though they share one price (see SKU_TO_PRICING_KEY).
+        cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"ord_prod_{i}", label_visibility="collapsed")
         cols[1].number_input("Qty", min_value=0.0, step=100.0,   key=f"ord_qty_{i}",   label_visibility="collapsed")
         cols[2].number_input("Rate", min_value=0.0, step=0.5, key=f"ord_rate_{i}", label_visibility="collapsed")
         # Live total — plain markdown (not a keyed widget) so it always reflects
@@ -260,19 +264,8 @@ def show(PLOT):
                     st.session_state[f"ord_prod_{j}"]  = st.session_state.get(f"ord_prod_{j+1}",  ORDER_PRODUCTS[0])
                     st.session_state[f"ord_qty_{j}"]   = st.session_state.get(f"ord_qty_{j+1}",   0)
                     st.session_state[f"ord_rate_{j}"]  = st.session_state.get(f"ord_rate_{j+1}",  0.0)
-                    st.session_state[f"ord_joint_{j}"] = st.session_state.get(f"ord_joint_{j+1}", JOINT_TYPES[0])
                 st.session_state.order_lines = n_lines - 1
                 st.rerun()
-
-        # Joint Type is a spec, not a price driver — only relevant for Hume Pipes,
-        # and only the types actually manufactured for that diameter+class.
-        if line_prod in HUME_PIPE_PRODUCTS:
-            allowed_joints = HUME_PIPE_JOINT_TYPES.get(line_prod, JOINT_TYPES)
-            jkey = f"ord_joint_{i}"
-            if st.session_state.get(jkey) not in allowed_joints:
-                st.session_state[jkey] = allowed_joints[0]
-            jcols = st.columns([3, 4])
-            jcols[0].selectbox("Joint Type", allowed_joints, key=jkey)
 
     ca, cb = st.columns([1, 5])
     if ca.button("➕ Add Product", key="ord_add_line"):
@@ -323,18 +316,16 @@ def show(PLOT):
                     continue
                 prod        = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
                 total_final = round(qty_v * rate_v, 2)
-                joint_type = st.session_state.get(f"ord_joint_{i}", "") if prod in HUME_PIPE_PRODUCTS else ""
                 insert_order({
                     **common_fields,
                     "di_no":            di_no_final,
                     "factory":          FACTORIES[0],
                     "product":          prod,
-                    "joint_type":       joint_type,
                     "qty_ordered":      qty_v,
                     "rate":             rate_v,
                     "total_amount":     total_final,
                 })
-                pdf_lines.append({"product": prod, "joint_type": joint_type, "qty_ordered": qty_v, "rate": rate_v, "total_amount": total_final})
+                pdf_lines.append({"product": prod, "qty_ordered": qty_v, "rate": rate_v, "total_amount": total_final})
                 saved += 1
             if saved:
                 pdf_header = dict(common_fields)
