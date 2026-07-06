@@ -18,7 +18,7 @@ def _get_today_stats(d):
     return get_production(d, d)
 
 st.set_page_config(
-    page_title="RI Ops",
+    page_title="RI",
     page_icon="🏗️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -417,7 +417,7 @@ if st.session_state.role is None:
         st.image("assets/Logo.png", width=240)
         st.markdown("""
         <div style='text-align:center; margin:16px 0 20px;'>
-            <div style='font-size:1.50rem; font-weight:800; letter-spacing:-0.02em; color:#F2EDED;'>RI OPS</div>
+            <div style='font-size:1.50rem; font-weight:800; letter-spacing:-0.02em; color:#F2EDED;'>RI</div>
             <div style='font-size:0.68rem; font-weight:600; letter-spacing:0.16em;
                  text-transform:uppercase; color:#5A4848; margin-top:4px;'>
                 Manufacturing Portal · Sign In
@@ -467,7 +467,7 @@ ROLE_BADGE = {
 with st.sidebar:
     st.markdown('<div class="sb-header">', unsafe_allow_html=True)
     st.image("assets/Logo.png", use_container_width=True)
-    st.markdown('<div class="sb-sub">RI Ops · Manufacturing Portal</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sb-sub">RI · Manufacturing Portal</div></div>', unsafe_allow_html=True)
 
     st.markdown(f"""
     <div class="sb-user">
@@ -532,7 +532,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(
         "<div style='font-size:0.62rem;color:#243A50;letter-spacing:0.08em;"
-        "text-align:center;margin-bottom:8px'>RI OPS · RAMESHWARAM INDUSTRIES</div>",
+        "text-align:center;margin-bottom:8px'>RI · RAMESHWARAM INDUSTRIES</div>",
         unsafe_allow_html=True,
     )
     if st.button("Sign Out", use_container_width=True):

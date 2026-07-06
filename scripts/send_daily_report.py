@@ -1,5 +1,5 @@
 """
-Daily RI Ops report — runs via GitHub Actions every evening at 8pm IST.
+Daily RI report — runs via GitHub Actions every evening at 8pm IST.
 Fetches today's production + dispatch from Supabase and emails the owner.
 """
 import os
@@ -89,7 +89,7 @@ def build_email():
         <!-- Header -->
         <tr>
           <td style="padding:28px 32px 20px;border-bottom:1px solid rgba(139,36,40,0.15);">
-            <div style="font-size:22px;font-weight:800;color:#F2EDED;letter-spacing:-0.02em;">RI OPS</div>
+            <div style="font-size:22px;font-weight:800;color:#F2EDED;letter-spacing:-0.02em;">RI</div>
             <div style="font-size:11px;color:#5A4848;letter-spacing:0.14em;text-transform:uppercase;margin-top:3px;">Daily Operations Report</div>
             <div style="font-size:12px;color:#7A6565;margin-top:6px;">{formatted_date}</div>
           </td>
@@ -157,7 +157,7 @@ def build_email():
         <!-- Footer -->
         <tr>
           <td style="padding:16px 32px;border-top:1px solid rgba(139,36,40,0.12);text-align:center;">
-            <div style="font-size:10px;color:#3A2A2A;letter-spacing:0.12em;text-transform:uppercase;">RI OPS · RAMESHWARAM INDUSTRIES · Automated Daily Report</div>
+            <div style="font-size:10px;color:#3A2A2A;letter-spacing:0.12em;text-transform:uppercase;">RI · RAMESHWARAM INDUSTRIES · Automated Daily Report</div>
           </td>
         </tr>
 
@@ -172,11 +172,11 @@ def build_email():
 
 def send_email(html, no_prod):
     subject_flag = "⚠️ No Production" if no_prod else "✅"
-    subject = f"{subject_flag} RI Ops Daily Report — {date.today().strftime('%d %b %Y')}"
+    subject = f"{subject_flag} RI Daily Report — {date.today().strftime('%d %b %Y')}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = f"RI Ops Reports <{GMAIL_USER}>"
+    msg["From"]    = f"RI Reports <{GMAIL_USER}>"
     msg["To"]      = TO_EMAIL
     msg.attach(MIMEText(html, "html"))
 

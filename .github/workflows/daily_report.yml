@@ -1,4 +1,4 @@
-name: RI Ops Daily Report
+name: RI Daily Report
 
 on:
   schedule:

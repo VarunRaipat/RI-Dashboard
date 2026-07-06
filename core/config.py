@@ -120,7 +120,6 @@ HUME_PIPE_PRODUCTS = list(_PIPE_SKUS)
 TRUCKS    = ["2821", "1669", "4879", "8391", "Other"]
 DRIVERS   = ["Peter","Ladhu","Islam","Bhadiya","Sukra","Debu","Kaila","Sahdeo","Tinku","Nimiya","Yashwant","Raghunath","Karan","Other"]
 CLIENTS   = ["Other"]                               # TODO: seed with known clients as they come in
-OPERATORS = ["Operator 1", "Operator 2"]            # TODO: replace with real operator names
 
 PAYMENT_MODES = ["Cash", "Bank Transfer", "Credit", "GPAY", "PhonePe", "Other"]
 

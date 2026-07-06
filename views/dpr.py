@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, OPERATORS, PLANTS, SKU_TO_PRICING_KEY
+from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
 from core.db import insert_production, get_rm_prices, get_production, delete_row, update_production, get_product_config
 from core.ui import flash, show_flashes
@@ -33,9 +33,7 @@ def show(PLOT):
         product       = c2.selectbox("Product", PRODUCTION_PRODUCTS)
         nos           = c3.number_input("Production (Nos.)", min_value=0, step=100)
 
-        c4, c5 = st.columns(2)
-        plant         = c4.radio("Plant", PLANTS, horizontal=True)
-        operator_name = c5.selectbox("Operator Name", OPERATORS)
+        plant = st.radio("Plant", PLANTS, horizontal=True)
 
         st.markdown('<div class="section-header">Raw Materials Used</div>', unsafe_allow_html=True)
         rm_inputs = {}
@@ -58,7 +56,7 @@ def show(PLOT):
 
         record = {
             "date": str(entry_date), "product": product, "nos": nos,
-            "plant": plant, "operator_name": operator_name,
+            "plant": plant,
             **{k: result[k] for k in _RM_COST_FIELDS},
         }
         insert_production(record)
@@ -151,14 +149,14 @@ def show(PLOT):
         df = df[(df["date"] >= pd.Timestamp(dpr_start)) & (df["date"] <= pd.Timestamp(dpr_end))]
         df = df.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
 
-        show_cols = ["date","product","nos","plant","operator_name",
+        show_cols = ["date","product","nos","plant",
                      "rm_cost","labour_cost","transport_cost","power_cost",
                      "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
                      ] + [f"pct_{m['key']}" for m in RAW_MATERIALS]
         show_cols = [c for c in show_cols if c in df.columns]
         rename = {
             "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
-            "operator_name":"Operator","rm_cost":"RM Cost","labour_cost":"Labour",
+            "rm_cost":"RM Cost","labour_cost":"Labour",
             "transport_cost":"Transport","power_cost":"Power","emi_cost":"EMI",
             "dg_cost":"DG","admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
             "profit":"Profit","profit_pct":"Profit %",
@@ -201,13 +199,9 @@ def show(PLOT):
                                           if row["product"] in PRODUCTION_PRODUCTS else 0)
                 e_nos     = ec3.number_input("Nos.", min_value=0, value=int(row["nos"]), step=100)
 
-                ec4, ec5 = st.columns(2)
-                e_plant = ec4.radio("Plant", PLANTS,
+                e_plant = st.radio("Plant", PLANTS,
                                     index=PLANTS.index(row["plant"]) if row.get("plant") in PLANTS else 0,
                                     horizontal=True)
-                e_op    = ec5.selectbox("Operator Name", OPERATORS,
-                                        index=OPERATORS.index(row["operator_name"])
-                                        if row.get("operator_name") in OPERATORS else 0)
 
                 e_rm_inputs = {}
                 er_cols = st.columns(min(len(RAW_MATERIALS), 4))
@@ -225,7 +219,7 @@ def show(PLOT):
                 result = calculate_production(e_pricing_key, e_nos, e_rm_inputs, rm, prod_cfg)
                 updated = {
                     "date": str(e_date), "product": e_product, "nos": e_nos,
-                    "plant": e_plant, "operator_name": e_op,
+                    "plant": e_plant,
                     **{k: result[k] for k in _RM_COST_FIELDS},
                 }
                 update_production(row_id, updated)

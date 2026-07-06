@@ -780,27 +780,6 @@ def show(PLOT):
                     use_container_width=True, hide_index=True,
                 )
 
-        if not df_prod_all.empty:
-            st.markdown("---")
-            st.markdown('<div class="section-header">Operator-wise Output</div>', unsafe_allow_html=True)
-            op = df_prod_all.groupby("operator_name").agg(
-                Shifts  =("date",       "nunique"),
-                Nos     =("nos",        "sum"),
-                Revenue =("revenue",    "sum"),
-                Profit  =("profit",     "sum"),
-            ).reset_index().sort_values("Nos", ascending=False)
-            op["Revenue (L)"]  = (op["Revenue"] / LAKH).round(2)
-            op["Profit (L)"]   = (op["Profit"]  / LAKH).round(2)
-            op["Avg Profit %"] = op.apply(
-                lambda r: round(r["Profit"] / r["Revenue"] * 100, 1) if r["Revenue"] else 0, axis=1
-            )
-            op["Nos/Shift"]    = (op["Nos"] / op["Shifts"]).round(0).astype(int)
-            st.dataframe(
-                op[["operator_name","Shifts","Nos","Nos/Shift","Revenue (L)","Profit (L)","Avg Profit %"]]
-                .rename(columns={"operator_name":"Operator"}),
-                use_container_width=True, hide_index=True,
-            )
-
         if not df_prod_all.empty and "plant" in df_prod_all.columns:
             st.markdown("---")
             st.markdown('<div class="section-header">Plant Performance</div>', unsafe_allow_html=True)
