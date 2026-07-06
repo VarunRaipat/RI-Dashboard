@@ -169,6 +169,17 @@ def init_db():
         steel_kg_per_unit REAL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS pipe_diameter_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        diameter_mm INTEGER UNIQUE NOT NULL,
+        production_cost REAL DEFAULT 0,
+        loading_unloading_cost REAL DEFAULT 0,
+        power_per_block REAL DEFAULT 0,
+        welding_cost REAL DEFAULT 0,
+        jalli_cost REAL DEFAULT 0,
+        steel_kg_per_unit REAL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     CREATE TABLE IF NOT EXISTS vendor_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
@@ -417,12 +428,75 @@ def get_product_config():
     return result
 
 
+_PIPE_DIAMETER_FIELDS = ["production_cost","loading_unloading_cost","power_per_block",
+                         "welding_cost","jalli_cost","steel_kg_per_unit"]
+
+
+@st.cache_data(ttl=60)
+def get_pipe_diameter_config():
+    """Production/Loading-Unloading/Power/Welding/Jalli/Steel rates for Hume
+    Pipes, keyed by diameter (mm) only — shared across every class/Joint Type
+    SKU at that diameter. See core/config.py's PIPE_DIAMETER_CONFIG."""
+    from core.config import PIPE_DIAMETER_CONFIG
+    result = {d: dict(v) for d, v in PIPE_DIAMETER_CONFIG.items()}
+    if _use_supabase():
+        r = requests.get(_sb_url("pipe_diameter_config"), headers=_headers(), params={"select": "*", "limit": 100})
+        if r.status_code == 200:
+            for row in r.json():
+                d = row.get("diameter_mm")
+                if d in result:
+                    for f in _PIPE_DIAMETER_FIELDS:
+                        if row.get(f) is not None:
+                            result[d][f] = float(row[f])
+    else:
+        try:
+            con = _conn()
+            df = pd.read_sql("SELECT * FROM pipe_diameter_config", con)
+            con.close()
+            for _, row in df.iterrows():
+                d = int(row.get("diameter_mm"))
+                if d in result:
+                    for f in _PIPE_DIAMETER_FIELDS:
+                        if pd.notna(row.get(f)):
+                            result[d][f] = float(row[f])
+        except Exception:
+            pass
+    return result
+
+
+def save_pipe_diameter_config(diameter_mm, data):
+    payload = {"diameter_mm": diameter_mm, **data}
+    if _use_supabase():
+        r = requests.post(
+            _sb_url("pipe_diameter_config"),
+            headers={**_headers(), "Prefer": "resolution=merge-duplicates"},
+            params={"on_conflict": "diameter_mm"},
+            json=payload,
+        )
+        if r.status_code not in (200, 201):
+            raise Exception(f"Save failed: {r.text}")
+    else:
+        con = _conn()
+        cols = ", ".join(payload.keys())
+        ph   = ", ".join("?" for _ in payload)
+        con.execute(
+            f"INSERT INTO pipe_diameter_config ({cols}) VALUES ({ph}) "
+            f"ON CONFLICT(diameter_mm) DO UPDATE SET "
+            + ", ".join(f"{k} = excluded.{k}" for k in data),
+            list(payload.values()),
+        )
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Admin", f"Pipe diameter config updated: {diameter_mm}mm")
+
+
 def save_product_config(product, data):
     payload = {"product": product, **data}
     if _use_supabase():
         r = requests.post(
             _sb_url("product_config"),
             headers={**_headers(), "Prefer": "resolution=merge-duplicates"},
+            params={"on_conflict": "product"},
             json=payload,
         )
         if r.status_code not in (200, 201):
