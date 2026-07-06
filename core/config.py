@@ -40,7 +40,22 @@ MISC_PCT        =   10.0  # % of all costs — placeholder, confirm with admin
 
 HUME_PIPE_DIAMETERS_MM = [150, 200, 250, 300, 450, 600, 750, 900, 1000, 1200]
 HUME_PIPE_CLASSES      = ["NP2", "NP3", "NP4"]
-JOINT_TYPES             = ["Collar", "Socket & Spigot", "M&F"]
+JOINT_TYPES             = ["Collar", "Socket & Spigot", "M/F"]
+
+# Which Joint Types are actually manufactured for a given diameter+class —
+# used to narrow the Joint Type dropdown per product on the Sales Order line
+# (Joint Type is still a spec only, not a price driver). Rule, as confirmed:
+#   NP2, 150-600mm  -> Collar or M/F
+#   NP2, 750-1200mm -> M/F only
+#   NP3, 150-600mm  -> Socket & Spigot or M/F
+#   NP3, 750-1200mm -> M/F only
+#   NP4, all sizes   -> M/F only
+def _joint_types_for(diameter_mm, cls):
+    if cls == "NP4" or diameter_mm > 600:
+        return ["M/F"]
+    if cls == "NP2":
+        return ["Collar", "M/F"]
+    return ["Socket & Spigot", "M/F"]  # NP3
 
 # All selling_price / labour / transport / power values below are placeholders
 # (0) — real rates must be entered via Admin > Product Cost Configuration
@@ -81,9 +96,15 @@ DISPATCH_PRODUCTS   = list(PRODUCT_CONFIG.keys())
 # Sales Order line and DPR entry without affecting price (spec only).
 HUME_PIPE_PRODUCTS = [p for p in PRODUCT_CONFIG if p.startswith("Hume Pipe")]
 
-TRUCKS    = ["Truck 1", "Truck 2", "Other"]        # TODO: replace with real truck numbers
-DRIVERS   = ["Driver 1", "Driver 2", "Other"]       # TODO: replace with real driver names
-CLIENTS   = ["Other"]                               # TODO: seed with known clients if useful
+# product name -> allowed Joint Types for that specific diameter+class.
+HUME_PIPE_JOINT_TYPES = {
+    f"Hume Pipe {d}mm {c}": _joint_types_for(d, c)
+    for d in HUME_PIPE_DIAMETERS_MM for c in HUME_PIPE_CLASSES
+}
+
+TRUCKS    = ["2821", "1669", "4879", "8391", "Other"]
+DRIVERS   = ["Peter","Ladhu","Islam","Bhadiya","Sukra","Debu","Kaila","Sahdeo","Tinku","Nimiya","Yashwant","Raghunath","Karan","Other"]
+CLIENTS   = ["Other"]                               # TODO: seed with known clients as they come in
 OPERATORS = ["Operator 1", "Operator 2"]            # TODO: replace with real operator names
 
 PAYMENT_MODES = ["Cash", "Bank Transfer", "Credit", "GPAY", "PhonePe", "Other"]

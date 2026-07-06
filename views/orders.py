@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, JOINT_TYPES, HUME_PIPE_PRODUCTS
+from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, JOINT_TYPES, HUME_PIPE_PRODUCTS, HUME_PIPE_JOINT_TYPES
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
 from core.pdf import generate_dispatch_instruction
 from core.ui import client_name_field, flash, show_flashes
@@ -264,10 +264,15 @@ def show(PLOT):
                 st.session_state.order_lines = n_lines - 1
                 st.rerun()
 
-        # Joint Type is a spec, not a price driver — only relevant for Hume Pipes.
+        # Joint Type is a spec, not a price driver — only relevant for Hume Pipes,
+        # and only the types actually manufactured for that diameter+class.
         if line_prod in HUME_PIPE_PRODUCTS:
+            allowed_joints = HUME_PIPE_JOINT_TYPES.get(line_prod, JOINT_TYPES)
+            jkey = f"ord_joint_{i}"
+            if st.session_state.get(jkey) not in allowed_joints:
+                st.session_state[jkey] = allowed_joints[0]
             jcols = st.columns([3, 4])
-            jcols[0].selectbox("Joint Type", JOINT_TYPES, key=f"ord_joint_{i}")
+            jcols[0].selectbox("Joint Type", allowed_joints, key=jkey)
 
     ca, cb = st.columns([1, 5])
     if ca.button("➕ Add Product", key="ord_add_line"):
