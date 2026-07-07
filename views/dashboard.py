@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, timedelta
-from core.db import get_production, get_dispatch, get_orders, get_quality
+from core.db import get_production, get_dispatch, get_orders
 from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS
 
 LAKH = 100_000
@@ -644,91 +644,6 @@ def show(PLOT):
                 .rename(columns={"client_name":"Client"}),
                 use_container_width=True, hide_index=True,
             )
-
-    # ── Quality Control ───────────────────────────────────────────────────────
-    with st.expander("🧪 Quality Control — Compressive Strength", expanded=True):
-        df_qc = get_quality()
-        if df_qc.empty:
-            st.info("No quality test records yet.")
-        else:
-            df_qc["test_date"]    = pd.to_datetime(df_qc["test_date"],    errors="coerce")
-            df_qc["casting_date"] = pd.to_datetime(df_qc["casting_date"], errors="coerce")
-            df_qc["curing_days"]  = (df_qc["test_date"] - df_qc["casting_date"]).dt.days
-
-            qc_mask = (df_qc["test_date"] >= pd.Timestamp(start)) & (df_qc["test_date"] <= pd.Timestamp(end))
-            df_qc_p = df_qc[qc_mask].copy()
-
-            if df_qc_p.empty:
-                st.info("No quality test records for the selected period.")
-            else:
-                q1, q2, q3, q4 = st.columns(4)
-                q1.metric("Tests in Period",   f"{len(df_qc_p)}")
-                q2.metric("Avg Strength",      f"{df_qc_p['average'].mean():.2f} N/mm²")
-                q3.metric("Min Strength",      f"{df_qc_p['average'].min():.2f} N/mm²")
-                q4.metric("Max Strength",      f"{df_qc_p['average'].max():.2f} N/mm²")
-
-                # Bucket each test by curing age — standard concrete testing ages.
-                def _curing_bucket(d):
-                    if d <= 10:  return "7-Day"
-                    if d <= 20:  return "14-Day"
-                    return "28-Day"
-                df_qc_p["age_group"] = df_qc_p["curing_days"].apply(_curing_bucket)
-
-                QC_COLORS = ["#00C49A", "#3B82F6", "#FDBA44", "#A78BFA", "#FB7185",
-                             "#34D399", "#F97316", "#22D3EE"]
-
-                st.markdown('<div class="section-header">Strength by Curing Age</div>', unsafe_allow_html=True)
-                age_tabs = st.tabs(["7-Day", "14-Day", "28-Day"])
-                for age_label, age_tab in zip(["7-Day", "14-Day", "28-Day"], age_tabs):
-                    with age_tab:
-                        df_age = df_qc_p[df_qc_p["age_group"] == age_label]
-                        if df_age.empty:
-                            st.info(f"No {age_label} results in the selected period.")
-                            continue
-
-                        a1, a2, a3, a4 = st.columns(4)
-                        a1.metric("Tests",        f"{len(df_age)}")
-                        a2.metric("Avg Strength", f"{df_age['average'].mean():.2f} N/mm²")
-                        a3.metric("Min Strength", f"{df_age['average'].min():.2f} N/mm²")
-                        a4.metric("Max Strength", f"{df_age['average'].max():.2f} N/mm²")
-
-                        fig_age = go.Figure()
-                        for i, prod in enumerate(sorted(df_age["product"].dropna().unique())):
-                            pdata = df_age[df_age["product"] == prod].sort_values("test_date")
-                            fig_age.add_trace(go.Scatter(
-                                x=pdata["test_date"], y=pdata["average"],
-                                mode="lines+markers", name=prod,
-                                line=dict(color=QC_COLORS[i % len(QC_COLORS)], width=2),
-                                marker=dict(size=7),
-                                hovertemplate="<b>%{x|%d %b %Y}</b><br>Avg: %{y:.2f} N/mm²<extra>" + prod + "</extra>",
-                            ))
-                        fig_age.update_layout(**PLOT, height=300, xaxis_title="Test Date",
-                                              yaxis_title="Avg Compressive Strength (N/mm²)",
-                                              hovermode="x unified")
-                        st.plotly_chart(fig_age, use_container_width=True)
-
-                        age_summary = (
-                            df_age.groupby("product")
-                            .agg(Tests=("id","count"), Avg=("average","mean"),
-                                 Min=("average","min"), Max=("average","max"))
-                            .round(2).reset_index()
-                            .rename(columns={"product":"Product","Avg":"Avg (N/mm²)",
-                                             "Min":"Min (N/mm²)","Max":"Max (N/mm²)"})
-                        )
-                        st.dataframe(age_summary, use_container_width=True, hide_index=True)
-
-                st.markdown('<div class="section-header">Summary by Product — Period (All Ages)</div>', unsafe_allow_html=True)
-                qc_summary = (
-                    df_qc_p.groupby("product")
-                    .agg(Tests=("id","count"), Avg=("average","mean"),
-                         Min=("average","min"), Max=("average","max"),
-                         Avg_Curing=("curing_days","mean"))
-                    .round(2).reset_index()
-                    .rename(columns={"product":"Product","Avg":"Avg (N/mm²)",
-                                     "Min":"Min (N/mm²)","Max":"Max (N/mm²)",
-                                     "Avg_Curing":"Avg Curing (days)"})
-                )
-                st.dataframe(qc_summary, use_container_width=True, hide_index=True)
 
     # ── Advanced Analytics ────────────────────────────────────────────────────
     with st.expander("🔍 Advanced Analytics", expanded=False):

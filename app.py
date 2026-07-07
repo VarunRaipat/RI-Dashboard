@@ -209,7 +209,6 @@ html, body, [class*="css"], button, input, select, textarea,
 .sb-badge-production { background: rgba(39,174,96,0.14); color: #27AE60; border: 1px solid rgba(39,174,96,0.25); }
 .sb-badge-dispatch   { background: rgba(212,160,17,0.14); color: #D4A011; border: 1px solid rgba(212,160,17,0.25); }
 .sb-badge-viewer     { background: rgba(59,130,246,0.14); color: #3B82F6; border: 1px solid rgba(59,130,246,0.25); }
-.sb-badge-quality    { background: rgba(139,92,246,0.14); color: #A78BFA; border: 1px solid rgba(139,92,246,0.25); }
 
 /* ── Success / warn / info boxes ── */
 .success-box {
@@ -461,7 +460,6 @@ ROLE_BADGE = {
     "production": "sb-badge-production",
     "dispatch":   "sb-badge-dispatch",
     "viewer":     "sb-badge-viewer",
-    "quality":    "sb-badge-quality",
 }
 
 with st.sidebar:
@@ -517,8 +515,6 @@ with st.sidebar:
         pages.append("🚚  Dispatch Entry")
     if role in ("admin", "viewer"):
         pages.append("🤖  Assistant")
-    if role in ("admin", "viewer", "quality", "dispatch"):
-        pages.append("🧪  Quality Control")
     if role in ("admin", "dispatch", "viewer"):
         pages.append("🏭  Inventory")
     if role in ("admin", "dispatch", "viewer"):
@@ -557,8 +553,6 @@ elif page == "📊  Dashboard":
     from views.dashboard import show; show(PLOT)
 elif page == "🤖  Assistant":
     from views.chat import show; show(PLOT)
-elif page == "🧪  Quality Control":
-    from views.quality import show; show(PLOT)
 elif page == "🏭  Inventory":
     from views.inventory import show; show(PLOT)
 elif page == "🚧  Gate Entry":

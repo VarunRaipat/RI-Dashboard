@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES
+from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
+from core.calculations import gst_split
 from core.pdf import generate_dispatch_instruction
 from core.ui import client_name_field, flash, show_flashes
 from core.sequencing import next_sequence_number, is_duplicate
@@ -219,6 +220,10 @@ def show(PLOT):
     office = j2.text_input("Office",  value=_cv("office"), key=f"ord_office_{_ck}")
     gstin  = j3.text_input("GSTIN",   value=_cv("gstin"),  key=f"ord_gstin_{_ck}")
 
+    _gst_default = str(hdr_row.get("gst_applicable", False)).lower() in ("true", "1") if hdr_row is not None else False
+    gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate for every line below",
+                                  value=_gst_default, key="ord_gst_applicable")
+
     st.caption("*Client Name, Client Type, Payment Mode, and Sale Type are required.")
 
     delivery_addr = st.text_input("Site Address", value=_cv("delivery_address"), key=f"ord_addr_{_ck}")
@@ -231,14 +236,17 @@ def show(PLOT):
 
     # ── Product lines ─────────────────────────────────────────────────────────
     st.markdown("**Product Lines**")
-    st.caption("Add one line per product. Rate is all-inclusive.")
+    if gst_applicable:
+        st.caption(f"Add one line per product. Rate is GST-exclusive — GST @{GST_PCT:.0f}% is added to each line's total.")
+    else:
+        st.caption("Add one line per product. Rate is all-inclusive.")
 
     n_lines = st.session_state.order_lines
     header_cols = st.columns([3, 2, 2, 2, 1])
     header_cols[0].markdown("**Product**")
     header_cols[1].markdown("**Qty Ordered**")
     header_cols[2].markdown("**Rate (₹/nos)**")
-    header_cols[3].markdown("**Total (₹)**")
+    header_cols[3].markdown(f"**Total incl. GST (₹)**" if gst_applicable else "**Total (₹)**")
 
     for i in range(n_lines):
         cols = st.columns([3, 2, 2, 2, 1])
@@ -253,8 +261,9 @@ def show(PLOT):
         # the current Qty/Rate instead of a stale value from a previous rerun.
         qty_v  = st.session_state.get(f"ord_qty_{i}", 0) or 0
         rate_v = st.session_state.get(f"ord_rate_{i}", 0.0) or 0.0
+        _, _line_total = gst_split(float(qty_v) * float(rate_v), gst_applicable)
         cols[3].markdown(
-            f"<div style='padding:9px 0;font-weight:600;'>₹{float(qty_v) * float(rate_v):,.2f}</div>",
+            f"<div style='padding:9px 0;font-weight:600;'>₹{_line_total:,.2f}</div>",
             unsafe_allow_html=True,
         )
         if n_lines > 1:
@@ -306,6 +315,7 @@ def show(PLOT):
                 "site_person":      site_person,
                 "site_phone":       site_phone,
                 "remarks":          st.session_state.get("ord_remarks", ""),
+                "gst_applicable":   gst_applicable,
             }
             saved = 0
             pdf_lines = []
@@ -314,8 +324,8 @@ def show(PLOT):
                 rate_v = float(st.session_state.get(f"ord_rate_{i}", 0.0) or 0.0)
                 if qty_v <= 0:
                     continue
-                prod        = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
-                total_final = round(qty_v * rate_v, 2)
+                prod = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
+                gst_amt, total_final = gst_split(qty_v * rate_v, gst_applicable)
                 insert_order({
                     **common_fields,
                     "di_no":            di_no_final,
@@ -324,8 +334,10 @@ def show(PLOT):
                     "qty_ordered":      qty_v,
                     "rate":             rate_v,
                     "total_amount":     total_final,
+                    "gst_amount":       gst_amt,
                 })
-                pdf_lines.append({"product": prod, "qty_ordered": qty_v, "rate": rate_v, "total_amount": total_final})
+                pdf_lines.append({"product": prod, "qty_ordered": qty_v, "rate": rate_v,
+                                   "total_amount": total_final, "gst_amount": gst_amt})
                 saved += 1
             if saved:
                 pdf_header = dict(common_fields)
@@ -363,6 +375,8 @@ def show(PLOT):
         total_ordered=("total_amount","sum"),
         qty_ordered  =("qty_ordered","sum"),
     )
+    if "gst_amount" in df_orders.columns:
+        _agg["gst_amount"] = ("gst_amount", "sum")
     if "client_type" in df_orders.columns:
         _agg["client_type"] = ("client_type", "first")
     if "sale_type" in df_orders.columns:
@@ -395,24 +409,24 @@ def show(PLOT):
 
     from core.ui import table_by_sale_type
 
-    for col in ["total_ordered","dispatched_value","pending_value","qty_ordered","dispatched_qty","pending_qty"]:
+    for col in ["total_ordered","dispatched_value","pending_value","qty_ordered","dispatched_qty","pending_qty","gst_amount"]:
         if col in di_summary.columns:
             di_summary[col] = di_summary[col].round(0).astype(int)
 
     show_cols = ["di_no","order_date","client_name","client_type","sale_type","products","Status",
                  "qty_ordered","dispatched_qty","pending_qty",
-                 "total_ordered","dispatched_value","pending_value","challans"]
+                 "total_ordered","gst_amount","dispatched_value","pending_value","challans"]
     show_cols = [c for c in show_cols if c in di_summary.columns]
     rename_map = {
         "di_no":"DI No.","order_date":"Date","client_name":"Client",
         "client_type":"Client Type","sale_type":"Sale Type",
         "products":"Products","qty_ordered":"Ord Qty","dispatched_qty":"Disp Qty",
-        "pending_qty":"Pending Qty","total_ordered":"Order Val (₹)",
+        "pending_qty":"Pending Qty","total_ordered":"Order Val (₹)","gst_amount":"GST (₹)",
         "dispatched_value":"Disp Val (₹)","pending_value":"Pending Val (₹)",
         "challans":"Challans",
     }
     sum_cols = [c for c in ["qty_ordered","dispatched_qty","pending_qty",
-                             "total_ordered","dispatched_value","pending_value"]
+                             "total_ordered","gst_amount","dispatched_value","pending_value"]
                 if c in di_summary.columns] if role != "headoffice" else None
     col_cfg = {"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
 
@@ -470,7 +484,8 @@ def show(PLOT):
             "site_phone":       hdr.get("site_phone", ""),
             "remarks":          hdr.get("remarks", ""),
         }
-        pdf_lines2 = di_rows[["product", "qty_ordered", "rate", "total_amount"]].to_dict("records")
+        _pdf_cols2 = ["product", "qty_ordered", "rate", "total_amount"] + (["gst_amount"] if "gst_amount" in di_rows.columns else [])
+        pdf_lines2 = di_rows[_pdf_cols2].to_dict("records")
         dispatched_map = {
             row["product"]: {"qty": row["dispatched_qty"], "value": row["dispatched_value"]}
             for _, row in di_disps.iterrows()
@@ -524,7 +539,13 @@ def show(PLOT):
                                          index=ORDER_PRODUCTS.index(erow["product"]) if erow.get("product") in ORDER_PRODUCTS else 0)
                 e_qty    = epr2.number_input("Qty Ordered", value=float(erow.get("qty_ordered",0) or 0), min_value=0.0, step=100.0)
                 e_rate   = epr3.number_input("Rate",        value=float(erow.get("rate",0) or 0), min_value=0.0, step=0.5)
-                e_total  = epr4.number_input("Total Amt",   value=float(erow.get("total_amount",0) or 0), min_value=0.0, step=1000.0)
+                e_total  = epr4.number_input("Total Amt (incl. GST if any)", value=float(erow.get("total_amount",0) or 0), min_value=0.0, step=1000.0)
+
+                egst1, egst2 = st.columns(2)
+                _e_gst_default = str(erow.get("gst_applicable", False)).lower() in ("true", "1")
+                e_gst_applicable = egst1.checkbox(f"Include GST (@{GST_PCT:.0f}%)", value=_e_gst_default)
+                e_gst_amount     = egst2.number_input("GST Amount (₹)", value=float(erow.get("gst_amount", 0) or 0), min_value=0.0, step=100.0)
+
                 epay1, epay2 = st.columns(2)
                 e_pay    = epay1.selectbox("Payment Mode", PAYMENT_MODES,
                                         index=PAYMENT_MODES.index(erow["mode_of_payment"]) if erow.get("mode_of_payment") in PAYMENT_MODES else 0)
@@ -542,6 +563,7 @@ def show(PLOT):
                         "delivery_address": e_addr, "site_person": e_site_person, "site_phone": e_site_phone,
                         "product": e_prod, "qty_ordered": e_qty, "rate": e_rate,
                         "total_amount": e_total if e_total > 0 else round(e_qty * e_rate, 2),
+                        "gst_applicable": e_gst_applicable, "gst_amount": e_gst_amount,
                         "mode_of_payment": e_pay, "sale_type": e_stype, "remarks": e_rem,
                     })
                     flash("✅ Order line updated!")

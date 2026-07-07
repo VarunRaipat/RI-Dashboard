@@ -4,11 +4,10 @@ from datetime import date
 # ── Users & Roles ─────────────────────────────────────────────────────────────
 USERS = {
     "admin":      {"password": "***REMOVED***",     "role": "admin",      "name": "Admin"},
-    "production": {"password": "ri@prod2024",  "role": "production", "name": "Production Operator"},
-    "dispatch":   {"password": "ri@disp2024",  "role": "dispatch",   "name": "Dispatch Operator"},
-    "headoffice": {"password": "***REMOVED***2024",    "role": "headoffice", "name": "Head Office"},
-    "viewer":     {"password": "ri@view2024",  "role": "viewer",     "name": "Viewer"},
-    "quality":    {"password": "ri@quality",   "role": "quality",    "name": "Quality Control"},
+    "production": {"password": "***REMOVED***",   "role": "production", "name": "Production Operator"},
+    "dispatch":   {"password": "***REMOVED***",   "role": "dispatch",   "name": "Dispatch Operator"},
+    "headoffice": {"password": "***REMOVED***",        "role": "headoffice", "name": "Head Office"},
+    "viewer":     {"password": "***REMOVED***",    "role": "viewer",     "name": "Viewer"},
 }
 
 # ── Raw materials: single source of truth ─────────────────────────────────────
@@ -22,7 +21,7 @@ USERS = {
 #   product_field  — the PRODUCT_CONFIG key holding the per-unit quantity
 RAW_MATERIALS = [
     {"key": "concrete", "label": "Concrete", "unit": "m³", "product_field": "concrete_volume_m3"},
-    {"key": "steel",    "label": "Steel (HT Wire)", "unit": "Kg", "product_field": "steel_kg_per_unit"},
+    {"key": "steel",    "label": "Steel", "unit": "Kg", "product_field": "steel_kg_per_unit"},
 ]
 
 DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in RAW_MATERIALS}

@@ -121,6 +121,8 @@ def init_db():
         qty_ordered REAL DEFAULT 0,
         rate REAL DEFAULT 0,
         total_amount REAL DEFAULT 0,
+        gst_applicable INTEGER DEFAULT 0,
+        gst_amount REAL DEFAULT 0,
         delivery_date TEXT,
         sale_type TEXT DEFAULT 'Sale A',
         remarks TEXT,
@@ -154,6 +156,7 @@ def init_db():
         client_name TEXT, delivery_address TEXT, product TEXT,
         qty_ordered REAL DEFAULT 0, qty_dispatched REAL DEFAULT 0,
         rate REAL DEFAULT 0, dispatch_value REAL DEFAULT 0,
+        gst_applicable INTEGER DEFAULT 0, gst_amount REAL DEFAULT 0,
         trip_distance REAL DEFAULT 0, truck_no TEXT, driver_name TEXT,
         remarks TEXT, form_filled_by TEXT, sale_type TEXT DEFAULT 'Sale A',
         created_at TEXT DEFAULT (datetime('now','localtime'))
@@ -207,18 +210,6 @@ def init_db():
         remarks TEXT,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
-    CREATE TABLE IF NOT EXISTS quality_control (
-        id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        test_date    TEXT NOT NULL,
-        casting_date TEXT NOT NULL,
-        product      TEXT NOT NULL,
-        sample_1     REAL DEFAULT 0,
-        sample_2     REAL DEFAULT 0,
-        sample_3     REAL DEFAULT 0,
-        average      REAL DEFAULT 0,
-        remarks      TEXT,
-        created_at   TEXT DEFAULT (datetime('now','localtime'))
-    );
     CREATE TABLE IF NOT EXISTS rm_purchases (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         date       TEXT NOT NULL,
@@ -251,6 +242,17 @@ def init_db():
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
     """)
+    # Lightweight migration for columns added after a table already existed —
+    # CREATE TABLE IF NOT EXISTS above only helps fresh databases.
+    for table, col, decl in [
+        ("orders", "gst_applicable", "INTEGER DEFAULT 0"),
+        ("orders", "gst_amount", "REAL DEFAULT 0"),
+        ("dispatch", "gst_applicable", "INTEGER DEFAULT 0"),
+        ("dispatch", "gst_amount", "REAL DEFAULT 0"),
+    ]:
+        existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        if col not in existing:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
     con.commit()
     con.close()
 
@@ -587,7 +589,7 @@ def update_dispatch(row_id, data):
     log_activity("update", "Dispatch", detail)
 
 
-_MODULE_LABELS = {"production": "DPR Entry", "dispatch": "Dispatch", "quality_control": "Quality Control"}
+_MODULE_LABELS = {"production": "DPR Entry", "dispatch": "Dispatch"}
 
 
 def delete_row(table, row_id):
@@ -821,64 +823,3 @@ def delete_gate_entry(row_id):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("delete", "Gate Entry", f"ID {row_id}")
-
-
-# ── Quality Control ───────────────────────────────────────────────────────────
-def insert_quality(data):
-    if _use_supabase(): _sb_insert("quality_control", data)
-    else: _sqlite_insert("quality_control", data)
-    _invalidate_cache()
-    log_activity("create", "Quality Control", f"{data.get('product','')} · {data.get('test_date','')}")
-
-
-@st.cache_data(ttl=30)
-def get_quality():
-    if _use_supabase():
-        r = requests.get(
-            _sb_url("quality_control"), headers=_headers(),
-            params={"select": "*", "order": "test_date.desc,id.desc", "limit": 5000},
-        )
-        if r.status_code != 200:
-            return pd.DataFrame()
-        data = r.json()
-        return pd.DataFrame(data) if data else pd.DataFrame()
-    else:
-        try:
-            con = _conn()
-            df = pd.read_sql(
-                "SELECT * FROM quality_control ORDER BY test_date DESC, id DESC", con)
-            con.close()
-            return df
-        except Exception:
-            return pd.DataFrame()
-
-
-def update_quality(row_id, data):
-    if _use_supabase():
-        _sb_update("quality_control", row_id, data)
-    else:
-        con = _conn()
-        sets = ", ".join(f"{k} = ?" for k in data)
-        con.execute(f"UPDATE quality_control SET {sets} WHERE id = ?", list(data.values()) + [row_id])
-        con.commit(); con.close()
-    _invalidate_cache()
-    log_activity("update", "Quality Control", f"ID {row_id}")
-
-
-def bulk_insert_quality(records):
-    """Insert multiple QC records. Returns count inserted."""
-    if not records:
-        return 0
-    if _use_supabase():
-        r = requests.post(
-            _sb_url("quality_control"),
-            headers={**_headers(), "Prefer": "return=minimal"},
-            json=records,
-        )
-        if r.status_code not in (200, 201):
-            raise Exception(f"Supabase bulk insert failed: {r.text}")
-    else:
-        for rec in records:
-            _sqlite_insert("quality_control", rec)
-    _invalidate_cache()
-    return len(records)

@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS dispatch (
     qty_dispatched  REAL DEFAULT 0,
     rate            REAL DEFAULT 0,
     dispatch_value  REAL DEFAULT 0,
+    gst_applicable  BOOLEAN DEFAULT false,
+    gst_amount      REAL DEFAULT 0,
     trip_distance   REAL DEFAULT 0,
     truck_no        TEXT,
     driver_name     TEXT,
@@ -144,6 +146,8 @@ CREATE TABLE IF NOT EXISTS orders (
     qty_ordered       REAL DEFAULT 0,
     rate              REAL DEFAULT 0,
     total_amount      REAL DEFAULT 0,
+    gst_applicable    BOOLEAN DEFAULT false,
+    gst_amount        REAL DEFAULT 0,
     delivery_date     TEXT,
     sale_type         TEXT DEFAULT 'Sale A',
     remarks           TEXT,
@@ -251,6 +255,16 @@ ALTER TABLE product_config ADD COLUMN IF NOT EXISTS welding_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS jalli_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS concrete_volume_m3 REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS steel_kg_per_unit REAL DEFAULT 0;
+
+-- ── Migration: GST option on Sales Orders / Dispatch Entry ──────────────────
+-- Run this block if your project already has orders/dispatch tables —
+-- adds an "Include GST (18%)" toggle per line. total_amount / dispatch_value
+-- become GST-inclusive when gst_applicable is true; gst_amount is the GST
+-- portion of that total, kept separately for reporting.
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN DEFAULT false;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS gst_amount REAL DEFAULT 0;
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN DEFAULT false;
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS gst_amount REAL DEFAULT 0;
 
 -- ── Migration: Pipe Diameter Rates (shared across class + Joint Type) ───────
 -- New table — Production/Loading-Unloading/Welding/Jalli/Steel for Hume

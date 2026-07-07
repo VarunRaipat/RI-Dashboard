@@ -1,6 +1,6 @@
 from core.config import (
     PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
-    EMI_PER_ENTRY, DG_PER_ENTRY, POWER_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
+    EMI_PER_ENTRY, DG_PER_ENTRY, POWER_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT, GST_PCT,
 )
 
 
@@ -81,3 +81,11 @@ def calculate_production(
 
 def dispatch_value(qty: float, rate: float) -> float:
     return round(float(qty or 0) * float(rate or 0), 2)
+
+
+def gst_split(base_amount: float, gst_applicable: bool) -> tuple:
+    """Given a GST-exclusive base amount (qty x rate), return
+    (gst_amount, total_incl_gst) — gst_amount is 0 when not applicable."""
+    base = float(base_amount or 0)
+    gst_amount = round(base * GST_PCT / 100, 2) if gst_applicable else 0.0
+    return gst_amount, round(base + gst_amount, 2)

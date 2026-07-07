@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES
-from core.calculations import dispatch_value
+from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT
+from core.calculations import dispatch_value, gst_split
 from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
 from core.ui import client_name_field, flash, show_flashes
 from core.sequencing import next_sequence_number, is_duplicate
@@ -94,7 +94,9 @@ def _show_dispatch_operator():
         cd, ce, cf = st.columns(3)
         qty_ordered    = cd.number_input("Qty Ordered",              min_value=0,   step=100)
         qty_dispatched = ce.number_input("Qty Dispatched (Challan)", min_value=0,   step=100)
-        rate           = cf.number_input("Rate All Inc. (₹/nos.)",   min_value=0.0, step=0.5)
+        rate           = cf.number_input("Rate (₹/nos.)",            min_value=0.0, step=0.5)
+
+        gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate")
 
         cg, ch, ci, cj = st.columns(4)
         truck_no       = cg.selectbox("Truck No.", TRUCKS)
@@ -113,14 +115,16 @@ def _show_dispatch_operator():
         elif rate <= 0:
             st.error("Rate must be > 0.")
         else:
-            d_value = dispatch_value(qty_dispatched, rate)
+            base_value = dispatch_value(qty_dispatched, rate)
+            gst_amt, d_value = gst_split(base_value, gst_applicable)
             insert_dispatch({
                 "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
                 "bill_no": None, "sale_type": sale_type,
                 "client_name": client_name, "delivery_address": delivery_addr,
                 "product": product, "qty_ordered": qty_ordered,
                 "qty_dispatched": qty_dispatched, "rate": rate,
-                "dispatch_value": d_value, "trip_distance": trip_distance,
+                "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                "trip_distance": trip_distance,
                 "truck_no": truck_no, "driver_name": driver_name,
                 "remarks": remarks, "form_filled_by": form_filled_by,
             })
@@ -129,7 +133,7 @@ def _show_dispatch_operator():
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Qty Dispatched", f"{int(qty_dispatched):,} nos")
             m2.metric("Rate",           f"₹{rate:.2f}/nos")
-            m3.metric("Dispatch Value", f"₹{d_value:,.0f}")
+            m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
             m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
 
 
@@ -334,7 +338,9 @@ def show(PLOT):
             cd, ce, cf = st.columns(3)
             qty_ordered    = cd.number_input("Qty Ordered",              min_value=0,   step=100)
             qty_dispatched = ce.number_input("Qty Dispatched (Challan)", min_value=0,   step=100)
-            rate           = cf.number_input("Rate All Inc. (₹/nos.)",   min_value=0.0, step=0.5)
+            rate           = cf.number_input("Rate (₹/nos.)",            min_value=0.0, step=0.5)
+
+            gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_main_gst")
 
             cg, ch, ci, cj = st.columns(4)
             truck_no       = cg.selectbox("Truck No.", TRUCKS)
@@ -353,11 +359,12 @@ def show(PLOT):
             elif rate <= 0:
                 st.error("Rate must be > 0.")
             else:
-                d_value = dispatch_value(qty_dispatched, rate)
+                base_value = dispatch_value(qty_dispatched, rate)
+                gst_amt, d_value = gst_split(base_value, gst_applicable)
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Qty Dispatched", f"{int(qty_dispatched):,} nos")
                 m2.metric("Rate",           f"₹{rate:.2f}/nos")
-                m3.metric("Dispatch Value", f"₹{d_value:,.0f}")
+                m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
                 m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
                 insert_dispatch({
                     "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
@@ -366,7 +373,8 @@ def show(PLOT):
                     "client_name": client_name, "delivery_address": delivery_addr,
                     "product": product, "qty_ordered": qty_ordered,
                     "qty_dispatched": qty_dispatched, "rate": rate,
-                    "dispatch_value": d_value, "trip_distance": trip_distance,
+                    "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                    "trip_distance": trip_distance,
                     "truck_no": truck_no, "driver_name": driver_name,
                     "remarks": remarks, "form_filled_by": form_filled_by,
                 })
@@ -390,15 +398,15 @@ def show(PLOT):
     from core.ui import table_by_sale_type
 
     show_cols = ["date","challan_no","bill_no","sale_type","client_name","product",
-                 "qty_dispatched","dispatch_value","truck_no","driver_name","trip_distance","remarks"]
+                 "qty_dispatched","dispatch_value","gst_amount","truck_no","driver_name","trip_distance","remarks"]
     show_cols = [c for c in show_cols if c in df.columns]
     rename_map = {
         "date":"Date","challan_no":"Challan","bill_no":"Bill No.","sale_type":"Sale Type",
         "client_name":"Client","product":"Product",
-        "qty_dispatched":"Qty","dispatch_value":"Value (₹)",
+        "qty_dispatched":"Qty","dispatch_value":"Value (₹)","gst_amount":"GST (₹)",
         "truck_no":"Truck","driver_name":"Driver","trip_distance":"Dist km","remarks":"Remarks",
     }
-    sum_cols = [c for c in ["qty_dispatched","dispatch_value","trip_distance"] if c in df.columns]
+    sum_cols = [c for c in ["qty_dispatched","dispatch_value","gst_amount","trip_distance"] if c in df.columns]
     col_cfg  = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
 
     pending_mask = _pending_mask(df)
@@ -451,6 +459,9 @@ def show(PLOT):
             e_qty_d  = eh.number_input("Qty Dispatched", value=float(erow.get("qty_dispatched",0) or 0), min_value=0.0, step=100.0)
             e_rate   = ei.number_input("Rate (₹/nos.)",  value=float(erow.get("rate",0) or 0), min_value=0.0, step=0.5)
 
+            _e_gst_default = str(erow.get("gst_applicable", False)).lower() in ("true", "1")
+            e_gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", value=_e_gst_default)
+
             ej, ek, el = st.columns(3)
             e_truck  = ej.text_input("Truck No.",    value=str(erow.get("truck_no","") or ""))
             e_driver = ek.text_input("Driver Name",  value=str(erow.get("driver_name","") or ""))
@@ -466,13 +477,15 @@ def show(PLOT):
                 st.caption(f"Bill No.: **{erow.get('bill_no','—') or '—'}** (only accounts team can edit)")
 
             if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
-                new_dv = round(float(e_qty_d) * float(e_rate), 2)
+                new_base = round(float(e_qty_d) * float(e_rate), 2)
+                new_gst, new_dv = gst_split(new_base, e_gst_applicable)
                 payload = {
                     "date": str(e_date), "challan_no": e_challan, "di_no": e_di,
                     "client_name": e_client, "delivery_address": e_addr, "product": e_prod,
                     "sale_type": e_stype,
                     "qty_ordered": e_qty_o, "qty_dispatched": e_qty_d, "rate": e_rate,
-                    "dispatch_value": new_dv, "trip_distance": e_dist,
+                    "dispatch_value": new_dv, "gst_applicable": e_gst_applicable, "gst_amount": new_gst,
+                    "trip_distance": e_dist,
                     "truck_no": e_truck, "driver_name": e_driver, "remarks": e_rem,
                 }
                 if can_bill and e_bill is not None:

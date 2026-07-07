@@ -144,34 +144,47 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     story.append(Spacer(1, 7 * mm))
 
     # ── Product lines table ─────────────────────────────────────────────────
-    has_pending = dispatched is not None
+    has_pending  = dispatched is not None
+    has_gst      = any(float(line.get("gst_amount", 0) or 0) > 0 for line in lines)
     head = ["PRODUCT", "QTY ORDERED"]
     if has_pending:
         head += ["DISPATCHED", "PENDING"]
-    head += ["RATE (RS.)", "TOTAL (RS.)"]
+    head += ["RATE (RS.)"]
+    if has_gst:
+        head += ["GST (RS.)"]
+    head += ["TOTAL (RS.)"]
 
     rows = [head]
     total_amount = 0.0
+    total_gst    = 0.0
     total_qty    = 0.0
     for line in lines:
         prod   = line.get("product", "")
         qty    = float(line.get("qty_ordered", 0) or 0)
         rate   = float(line.get("rate", 0) or 0)
         amt    = float(line.get("total_amount", 0) or 0)
+        gst    = float(line.get("gst_amount", 0) or 0)
         total_amount += amt
+        total_gst    += gst
         total_qty    += qty
         row = [prod, f"{qty:,.0f}"]
         if has_pending:
             d = (dispatched or {}).get(prod, {"qty": 0})
             d_qty = float(d.get("qty", 0) or 0)
             row += [f"{d_qty:,.0f}", f"{max(qty - d_qty, 0):,.0f}"]
-        row += [f"{rate:,.2f}", f"{amt:,.2f}"]
+        row += [f"{rate:,.2f}"]
+        if has_gst:
+            row += [f"{gst:,.2f}"]
+        row += [f"{amt:,.2f}"]
         rows.append(row)
 
     total_row = ["TOTAL", f"{total_qty:,.0f}"]
     if has_pending:
         total_row += ["", ""]
-    total_row += ["", f"{total_amount:,.2f}"]
+    total_row += [""]
+    if has_gst:
+        total_row += [f"{total_gst:,.2f}"]
+    total_row += [f"{total_amount:,.2f}"]
     rows.append(total_row)
 
     n_cols = len(head)

@@ -1,12 +1,16 @@
 import streamlit as st
 import pandas as pd
-from core.config import DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT
+from core.config import (
+    DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT,
+    PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES,
+)
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
     get_product_config, save_product_config, get_pipe_diameter_config, save_pipe_diameter_config,
     get_orders, update_order, update_dispatch,
-    get_activity_log,
+    get_activity_log, insert_production, insert_dispatch,
 )
+from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import interactive_table, date_range_filter
 
 LAKH = 100_000
@@ -114,7 +118,7 @@ def show(PLOT):
 
                     cc5, cc6 = st.columns(2)
                     new_concrete = cc5.number_input("Concrete (m³/Unit)",         value=float(cfg.get("concrete_volume_m3", 0)), min_value=0.0, step=0.001, format="%.4f")
-                    new_steel    = cc6.number_input("Steel — HT Wire (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+                    new_steel    = cc6.number_input("Steel (Kg/Unit)", value=float(cfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
 
                     payload.update({
                         "production_cost":        new_prod,
@@ -170,7 +174,7 @@ def show(PLOT):
                 d_weld  = dc3.number_input("Welding Cost (Rs./nos)",           value=float(dcfg.get("welding_cost", 0)), min_value=0.0, step=0.05)
                 d_jalli = dc4.number_input("Jalli — Cage Welding (Rs./nos)",   value=float(dcfg.get("jalli_cost", 0)), min_value=0.0, step=0.05)
 
-                d_steel = st.number_input("Steel — HT Wire (Kg/Unit)", value=float(dcfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
+                d_steel = st.number_input("Steel (Kg/Unit)", value=float(dcfg.get("steel_kg_per_unit", 0)), min_value=0.0, step=0.1)
 
                 if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
                     save_pipe_diameter_config(sel_dia, {
@@ -229,6 +233,59 @@ def show(PLOT):
                 delete_row("production", int(del_id))
                 st.success(f"Record {del_id} deleted.")
                 st.rerun()
+
+        # ── Import from CSV ──────────────────────────────────────────────────
+        st.markdown("---")
+        with st.expander("⬆️ Import Production (DPR) from CSV"):
+            st.caption(
+                "Required columns: **date, product, nos**. Optional: **plant** "
+                f"(defaults to \"{PLANTS[0]}\"). `product` must exactly match a product name "
+                "from DPR Entry (e.g. \"Hume Pipe 300mm NP3 (Socket & Spigot)\"). Costs are "
+                "auto-calculated the same way as a manual DPR entry."
+            )
+            prod_file = st.file_uploader("CSV file", type=["csv"], key="prod_import_file")
+            if prod_file is not None:
+                try:
+                    imp_df = pd.read_csv(prod_file)
+                except Exception as e:
+                    st.error(f"Could not read CSV: {e}")
+                    imp_df = None
+
+                if imp_df is not None:
+                    imp_df.columns = [c.strip().lower() for c in imp_df.columns]
+                    missing = [c for c in ("date", "product", "nos") if c not in imp_df.columns]
+                    if missing:
+                        st.error(f"Missing required column(s): {', '.join(missing)}")
+                    else:
+                        bad_products = sorted(set(imp_df["product"].astype(str)) - set(PRODUCTION_PRODUCTS))
+                        if bad_products:
+                            st.error("Unknown product name(s) — must match DPR Entry exactly: "
+                                      + ", ".join(bad_products))
+                        else:
+                            st.markdown(f"**Preview — {len(imp_df)} row(s)**")
+                            st.dataframe(imp_df.head(20), use_container_width=True, hide_index=True)
+                            if st.button(f"✅ Import {len(imp_df)} Production Row(s)", type="primary", key="prod_import_btn"):
+                                rm = get_rm_prices()
+                                prod_cfg_i = get_product_config()
+                                pipe_dia_cfg_i = get_pipe_diameter_config()
+                                imported = 0
+                                for _, r in imp_df.iterrows():
+                                    nos = float(r["nos"])
+                                    if nos <= 0:
+                                        continue
+                                    product = str(r["product"])
+                                    plant = str(r["plant"]).strip() if "plant" in imp_df.columns and pd.notna(r.get("plant")) and str(r.get("plant")).strip() else PLANTS[0]
+                                    pricing_key = SKU_TO_PRICING_KEY.get(product, product)
+                                    result = calculate_production(pricing_key, nos, rm, prod_cfg_i, pipe_diameter_config=pipe_dia_cfg_i)
+                                    record = {
+                                        "date": str(pd.to_datetime(r["date"]).date()),
+                                        "product": product, "nos": nos, "plant": plant,
+                                        **result,
+                                    }
+                                    insert_production(record)
+                                    imported += 1
+                                st.success(f"✅ Imported {imported} production row(s).")
+                                st.rerun()
 
     # ── Tab 4: All Dispatch ───────────────────────────────────────────────────
     with tab4:
@@ -332,6 +389,71 @@ def show(PLOT):
                     st.rerun()
                 else:
                     st.error("Type exactly DELETE to confirm.")
+
+        # ── Import from CSV ──────────────────────────────────────────────────
+        st.markdown("---")
+        with st.expander("⬆️ Import Dispatch Challans from CSV"):
+            st.caption(
+                "Required columns: **date, challan_no, product, qty_dispatched, rate**. Optional: "
+                "**di_no, bill_no, sale_type, client_name, delivery_address, qty_ordered, "
+                "trip_distance, truck_no, driver_name, remarks, form_filled_by, gst_applicable** "
+                "(yes/no — defaults to no). `product` must exactly match a Dispatch Entry product name, "
+                "`sale_type` must be one of: " + ", ".join(SALE_TYPES) + f" (defaults to \"{SALE_TYPES[0]}\")."
+            )
+            disp_file = st.file_uploader("CSV file", type=["csv"], key="disp_import_file")
+            if disp_file is not None:
+                try:
+                    dimp_df = pd.read_csv(disp_file)
+                except Exception as e:
+                    st.error(f"Could not read CSV: {e}")
+                    dimp_df = None
+
+                if dimp_df is not None:
+                    dimp_df.columns = [c.strip().lower() for c in dimp_df.columns]
+                    missing = [c for c in ("date", "challan_no", "product", "qty_dispatched", "rate")
+                               if c not in dimp_df.columns]
+                    if missing:
+                        st.error(f"Missing required column(s): {', '.join(missing)}")
+                    else:
+                        bad_products = sorted(set(dimp_df["product"].astype(str)) - set(DISPATCH_PRODUCTS))
+                        if bad_products:
+                            st.error("Unknown product name(s) — must match Dispatch Entry exactly: "
+                                      + ", ".join(bad_products))
+                        else:
+                            st.markdown(f"**Preview — {len(dimp_df)} row(s)**")
+                            st.dataframe(dimp_df.head(20), use_container_width=True, hide_index=True)
+                            if st.button(f"✅ Import {len(dimp_df)} Dispatch Row(s)", type="primary", key="disp_import_btn"):
+                                imported = 0
+                                for _, r in dimp_df.iterrows():
+                                    qty_d = float(r["qty_dispatched"])
+                                    rate  = float(r["rate"])
+                                    if qty_d <= 0:
+                                        continue
+                                    sale_type_v = str(r["sale_type"]).strip() if "sale_type" in dimp_df.columns and pd.notna(r.get("sale_type")) and str(r.get("sale_type")).strip() else SALE_TYPES[0]
+                                    gst_flag = str(r.get("gst_applicable", "")).strip().lower() in ("yes", "true", "1") if "gst_applicable" in dimp_df.columns else False
+                                    base_value = dispatch_value(qty_d, rate)
+                                    gst_amt, d_value = gst_split(base_value, gst_flag)
+
+                                    def _opt(col):
+                                        return str(r[col]) if col in dimp_df.columns and pd.notna(r.get(col)) else None
+
+                                    record = {
+                                        "date": str(pd.to_datetime(r["date"]).date()),
+                                        "challan_no": str(r["challan_no"]), "di_no": _opt("di_no"),
+                                        "bill_no": _opt("bill_no"), "sale_type": sale_type_v,
+                                        "client_name": _opt("client_name"), "delivery_address": _opt("delivery_address"),
+                                        "product": str(r["product"]),
+                                        "qty_ordered": float(r["qty_ordered"]) if "qty_ordered" in dimp_df.columns and pd.notna(r.get("qty_ordered")) else qty_d,
+                                        "qty_dispatched": qty_d, "rate": rate,
+                                        "dispatch_value": d_value, "gst_applicable": gst_flag, "gst_amount": gst_amt,
+                                        "trip_distance": float(r["trip_distance"]) if "trip_distance" in dimp_df.columns and pd.notna(r.get("trip_distance")) else 0.0,
+                                        "truck_no": _opt("truck_no"), "driver_name": _opt("driver_name"),
+                                        "remarks": _opt("remarks"), "form_filled_by": _opt("form_filled_by"),
+                                    }
+                                    insert_dispatch(record)
+                                    imported += 1
+                                st.success(f"✅ Imported {imported} dispatch row(s).")
+                                st.rerun()
 
     # ── Tab 5: Merge Client Names ─────────────────────────────────────────────
     with tab5:
