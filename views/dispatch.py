@@ -82,8 +82,8 @@ def _show_dispatch_operator():
         # Keyed to the value itself so a fixed key doesn't "stick" to a
         # stale number from an earlier Sale Type selection.
         challan_no = c2.text_input("Challan No.", value=str(next_challan),
-                                   key=f"disp_op_challan_{next_challan}", disabled=True,
-                                   help="Auto-generated: next number for the selected Sale Type.")
+                                   key=f"disp_op_challan_{next_challan}",
+                                   help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
         di_no      = c3.text_input("DI No.")
 
         ca, cb, cc = st.columns(3)
@@ -324,8 +324,8 @@ def show(PLOT):
             # Keyed to the value itself so a fixed key doesn't "stick" to a
             # stale number from an earlier Sale Type selection.
             challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
-                                       key=f"disp_main_challan_{next_challan_main}", disabled=True,
-                                       help="Auto-generated: next number for the selected Sale Type.")
+                                       key=f"disp_main_challan_{next_challan_main}",
+                                       help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
             di_no      = c3.text_input("DI No.")
             bill_no    = c4.text_input("Bill No.") if can_bill else None
 
