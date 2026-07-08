@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, timedelta
 from core.db import get_production, get_dispatch, get_orders
-from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS
+from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG
 
 LAKH = 100_000
 
@@ -294,15 +294,28 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             fig4.update_layout(**PLOT, height=300, xaxis_title="%")
             st.plotly_chart(fig4, use_container_width=True)
 
-        st.markdown('<div class="section-header">Raw Material Usage</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Raw Material Usage — Produced vs Dispatched</div>', unsafe_allow_html=True)
         rm_cols  = [f"{m['key']}_qty" for m in RAW_MATERIALS]
         rm_labels = {f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS}
         rm_avail = [c for c in rm_cols if c in df_prod.columns]
         if rm_avail:
             rm_df = df_prod[rm_avail].sum().reset_index()
-            rm_df.columns = ["Material","Total"]
+            rm_df.columns = ["Material","Produced"]
             rm_df["Material"] = rm_df["Material"].map(rm_labels)
-            rm_df["Total"]    = rm_df["Total"].round(1)
+            rm_df["Produced"] = rm_df["Produced"].round(1)
+
+            # Dispatch side has no stored m³/Kg — derive it from qty_dispatched x
+            # each product's fixed per-unit figure (same source production uses).
+            dispatched_totals = {}
+            if df_disp is not None and not df_disp.empty:
+                for m in RAW_MATERIALS:
+                    field = m["product_field"]
+                    per_unit = df_disp["product"].map(
+                        lambda p: PRODUCT_CONFIG.get(SKU_TO_PRICING_KEY.get(p, p), {}).get(field, 0)
+                    )
+                    dispatched_totals[f"{m['key']}_qty"] = (df_disp["qty_dispatched"] * per_unit).sum()
+
+            rm_df["Dispatched"] = [round(dispatched_totals.get(c, 0), 1) for c in rm_avail]
             st.dataframe(rm_df, use_container_width=True, hide_index=True)
 
 

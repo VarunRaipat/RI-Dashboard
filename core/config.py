@@ -5,9 +5,9 @@ from datetime import date
 USERS = {
     "admin":      {"password": "***REMOVED***",     "role": "admin",      "name": "Admin"},
     "production": {"password": "***REMOVED***",   "role": "production", "name": "Production Operator"},
-    "dispatch":   {"password": "***REMOVED***",   "role": "dispatch",   "name": "Dispatch Operator"},
     "headoffice": {"password": "***REMOVED***",        "role": "headoffice", "name": "Head Office"},
     "viewer":     {"password": "***REMOVED***",    "role": "viewer",     "name": "Viewer"},
+    "factory":    {"password": "***REMOVED***",   "role": "factory",    "name": "Factory"},
 }
 
 # ── Raw materials: single source of truth ─────────────────────────────────────

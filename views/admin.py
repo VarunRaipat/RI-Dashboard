@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import pandas as pd
 from core.config import (
@@ -252,7 +253,7 @@ def show(PLOT):
                     imp_df = None
 
                 if imp_df is not None:
-                    imp_df.columns = [c.strip().lower() for c in imp_df.columns]
+                    imp_df.columns = [re.sub(r"[\s\-]+", "_", c.strip().lower()) for c in imp_df.columns]
                     missing = [c for c in ("date", "product", "nos") if c not in imp_df.columns]
                     if missing:
                         st.error(f"Missing required column(s): {', '.join(missing)}")
@@ -409,7 +410,7 @@ def show(PLOT):
                     dimp_df = None
 
                 if dimp_df is not None:
-                    dimp_df.columns = [c.strip().lower() for c in dimp_df.columns]
+                    dimp_df.columns = [re.sub(r"[\s\-]+", "_", c.strip().lower()) for c in dimp_df.columns]
                     missing = [c for c in ("date", "challan_no", "product", "qty_dispatched", "rate")
                                if c not in dimp_df.columns]
                     if missing:

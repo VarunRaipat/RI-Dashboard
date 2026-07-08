@@ -118,7 +118,7 @@ def show(PLOT):
                 if k in st.session_state:
                     del st.session_state[k]
 
-            if role != "production":
+            if role not in ("production", "factory"):
                 st.markdown('<div class="section-header">Saved Entries — Summary</div>', unsafe_allow_html=True)
                 summary_df = pd.DataFrame(saved_rows)
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -129,7 +129,7 @@ def show(PLOT):
 
             st.rerun()
 
-    if role == "production":
+    if role in ("production", "factory"):
         return
 
     # ── Recent entries ────────────────────────────────────────────────────────

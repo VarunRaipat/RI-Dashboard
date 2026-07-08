@@ -209,6 +209,7 @@ html, body, [class*="css"], button, input, select, textarea,
 .sb-badge-production { background: rgba(39,174,96,0.14); color: #27AE60; border: 1px solid rgba(39,174,96,0.25); }
 .sb-badge-dispatch   { background: rgba(212,160,17,0.14); color: #D4A011; border: 1px solid rgba(212,160,17,0.25); }
 .sb-badge-viewer     { background: rgba(59,130,246,0.14); color: #3B82F6; border: 1px solid rgba(59,130,246,0.25); }
+.sb-badge-factory    { background: rgba(167,139,250,0.14); color: #A78BFA; border: 1px solid rgba(167,139,250,0.25); }
 
 /* ── Success / warn / info boxes ── */
 .success-box {
@@ -460,6 +461,7 @@ ROLE_BADGE = {
     "production": "sb-badge-production",
     "dispatch":   "sb-badge-dispatch",
     "viewer":     "sb-badge-viewer",
+    "factory":    "sb-badge-factory",
 }
 
 with st.sidebar:
@@ -507,17 +509,17 @@ with st.sidebar:
     pages = []
     if role in ("admin", "viewer"):
         pages.append("📊  Dashboard")
-    if role in ("admin", "production", "viewer"):
+    if role in ("admin", "production", "factory", "viewer"):
         pages.append("📋  DPR Entry")
     if role in ("admin", "headoffice", "viewer"):
         pages.append("📦  Sales Orders")
-    if role in ("admin", "dispatch", "headoffice", "viewer"):
+    if role in ("admin", "dispatch", "factory", "headoffice", "viewer"):
         pages.append("🚚  Dispatch Entry")
     if role in ("admin", "viewer"):
         pages.append("🤖  Assistant")
-    if role in ("admin", "dispatch", "viewer"):
+    if role in ("admin", "dispatch", "factory", "viewer"):
         pages.append("🏭  Inventory")
-    if role in ("admin", "dispatch", "viewer"):
+    if role in ("admin", "dispatch", "factory", "viewer"):
         pages.append("🚧  Gate Entry")
     if role == "admin":
         pages.append("⚙️  Admin")

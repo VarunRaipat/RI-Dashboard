@@ -11,8 +11,8 @@ LAKH = 100_000
 def show(PLOT):
     show_flashes()
     role = st.session_state.get("role", "dispatch")
-    can_export = role != "dispatch"
-    show_value = role != "dispatch"  # dispatch sees quantities only, no ₹ value
+    can_export = role not in ("dispatch", "factory")
+    show_value = role not in ("dispatch", "factory")  # dispatch/factory see quantities only, no ₹ value
 
     st.markdown("""
     <div class="page-title">🏭 Inventory</div>

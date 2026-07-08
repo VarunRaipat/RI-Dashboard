@@ -147,7 +147,7 @@ def show(PLOT):
         _show_headoffice()
         return
 
-    if role == "dispatch":
+    if role in ("dispatch", "factory"):
         _show_dispatch_operator()
         return
 
