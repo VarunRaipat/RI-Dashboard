@@ -6,7 +6,7 @@ import pandas as pd
 from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING,
                           PRODUCT_CONFIG, INVENTORY_MATERIAL_LABELS,
                           GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
-from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage
+from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage, get_inventory_opening
 
 _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
@@ -42,9 +42,11 @@ def finished_goods_summary():
     in INVENTORY_PRODUCTS, as of today."""
     df_prod = _since_anchor(get_production())
     df_disp = _since_anchor(get_dispatch())
+    db_opening = get_inventory_opening()
 
     rows = []
     for canonical, prod_name, disp_name, opening in INVENTORY_PRODUCTS:
+        opening = db_opening.get(canonical, {}).get("qty", opening)
         produced = float(df_prod.loc[df_prod["product"] == prod_name, "nos"].sum()) \
             if prod_name and df_prod is not None and not df_prod.empty else 0.0
         dispatched = float(df_disp.loc[_matches_product(df_disp["product"], disp_name), "qty_dispatched"].sum()) \
@@ -73,9 +75,11 @@ def rm_summary():
     df_usage = _since_anchor(get_rm_usage())
     df_gate = _since_anchor(get_gate_entries())
     rm_prices = get_rm_prices()
+    db_opening = get_inventory_opening()
 
     rows = []
     for material, opening in RM_INVENTORY_OPENING.items():
+        opening = db_opening.get(material, {}).get("qty", opening)
         if material in _PRODUCTION_CONSUME_COL:
             col = _PRODUCTION_CONSUME_COL[material]
             consumed = float(df_prod[col].sum()) if df_prod is not None and not df_prod.empty and col in df_prod.columns else 0.0
@@ -106,6 +110,7 @@ def daily_breakdown(canonical_name, start, end):
     if not match:
         return pd.DataFrame()
     _, prod_name, disp_name, opening = match
+    opening = get_inventory_opening().get(canonical_name, {}).get("qty", opening)
 
     df_prod = get_production()
     df_disp = get_dispatch()

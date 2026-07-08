@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from core.config import INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE
+from core.config import INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING, INVENTORY_MATERIAL_LABELS
 from core.inventory import finished_goods_summary, rm_summary, daily_breakdown, gate_tracked_balance
+from core.db import get_inventory_opening, save_inventory_opening
 from core.ui import interactive_table, show_flashes
 
 LAKH = 100_000
@@ -11,8 +12,10 @@ LAKH = 100_000
 def show(PLOT):
     show_flashes()
     role = st.session_state.get("role", "dispatch")
+    name = st.session_state.get("name", "")
     can_export = role not in ("dispatch", "factory")
     show_value = role not in ("dispatch", "factory")  # dispatch/factory see quantities only, no ₹ value
+    can_set_opening = role in ("admin", "factory")
 
     st.markdown("""
     <div class="page-title">🏭 Inventory</div>
@@ -20,6 +23,41 @@ def show(PLOT):
     """, unsafe_allow_html=True)
     st.caption(f"Opening stock counted on {pd.Timestamp(INVENTORY_ANCHOR_DATE).strftime('%d-%b-%Y')}. "
                f"Current stock = opening + production − dispatch since that date.")
+
+    if can_set_opening:
+        with st.expander("✏️ Set Opening Stock (one-time physical count)"):
+            st.caption(
+                "Enter the physical stock count for a product/material once — Current Stock then "
+                "rolls forward automatically from Production/Dispatch or Gate Entry. Come back here "
+                "only if you do a fresh physical recount."
+            )
+            db_opening = get_inventory_opening()
+            oc1, oc2 = st.columns(2)
+            kind = oc1.radio("Type", ["Finished Good", "Raw Material"], horizontal=True, key="inv_open_kind")
+            if kind == "Finished Good":
+                item_keys = [row[0] for row in INVENTORY_PRODUCTS]
+                labels = {k: k for k in item_keys}
+                item_type = "finished_good"
+            else:
+                item_keys = list(RM_INVENTORY_OPENING.keys())
+                labels = {k: INVENTORY_MATERIAL_LABELS.get(k, k) for k in item_keys}
+                item_type = "raw_material"
+
+            sel_item = oc2.selectbox("Item", item_keys, format_func=lambda k: labels.get(k, k), key="inv_open_item")
+            existing = db_opening.get(sel_item)
+            current_val = existing["qty"] if existing else 0.0
+            if existing:
+                st.caption(f"Currently set to **{current_val:,.2f}** — last updated by {existing['updated_by'] or 'unknown'} on {existing['updated_at']}.")
+            else:
+                st.caption("Not set yet — defaults to 0.")
+
+            new_val = st.number_input(f"Opening stock — {labels.get(sel_item, sel_item)}",
+                                       min_value=0.0, value=float(current_val), step=1.0,
+                                       key=f"inv_open_val_{sel_item}")
+            if st.button("💾 Save Opening Stock", key="inv_open_save"):
+                save_inventory_opening(sel_item, item_type, new_val, updated_by=name)
+                st.success(f"✅ Opening stock for {labels.get(sel_item, sel_item)} set to {new_val:,.2f}.")
+                st.rerun()
 
     # ── Finished Goods ─────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Finished Goods</div>', unsafe_allow_html=True)

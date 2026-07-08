@@ -299,6 +299,21 @@ ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
 -- Power_per_block columns (if they exist from an earlier version) are left
 -- in place, just unused — nothing is dropped.
 
+-- ── Migration: Inventory Opening Stock (one-time physical count) ───────────
+-- New table — lets an operator enter the opening stock for a finished-good
+-- product or raw material once (a physical count); Current Stock in
+-- Inventory then rolls forward automatically from Production/Dispatch or
+-- Gate Entry, same as it always has, just using this as the baseline
+-- instead of the hardcoded 0 in core/config.py.
+CREATE TABLE IF NOT EXISTS inventory_opening (
+    item_key    TEXT PRIMARY KEY,
+    item_type   TEXT NOT NULL,
+    opening_qty REAL DEFAULT 0,
+    updated_by  TEXT,
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE inventory_opening DISABLE ROW LEVEL SECURITY;
+
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via
 -- its own login screen (not Supabase Auth) and talks to Supabase with one

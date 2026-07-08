@@ -63,11 +63,53 @@ def _show_headoffice():
                 st.rerun()
 
 
+def _init_lines(key):
+    if key not in st.session_state:
+        st.session_state[key] = 1
+
+
+def _product_lines(prefix, n_lines):
+    """Renders `n_lines` Product/Qty Ordered/Qty Dispatched/Rate rows (plain
+    widgets, not inside a form, so Add/Remove can rerun immediately — same
+    pattern as DPR's multi-product lines). Returns nothing; read back via
+    st.session_state[f"{prefix}_prod_{i}"] etc. at submit time."""
+    header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
+    header[0].markdown("**Product**")
+    header[1].markdown("**Qty Ordered**")
+    header[2].markdown("**Qty Dispatched**")
+    header[3].markdown("**Rate (₹/nos.)**")
+
+    for i in range(n_lines):
+        cols = st.columns([3, 1.7, 1.7, 1.5, 0.5])
+        cols[0].selectbox("Product", DISPATCH_PRODUCTS, key=f"{prefix}_prod_{i}", label_visibility="collapsed")
+        cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
+        cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
+        cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
+        if n_lines > 1:
+            if cols[4].button("✕", key=f"{prefix}_rem_{i}"):
+                for j in range(i, n_lines - 1):
+                    for f in ("prod", "qo", "qd", "rate"):
+                        st.session_state[f"{prefix}_{f}_{j}"] = st.session_state.get(f"{prefix}_{f}_{j+1}")
+                st.session_state[f"{prefix}_lines"] = n_lines - 1
+                st.rerun()
+
+    if st.button("➕ Add Product", key=f"{prefix}_add_line"):
+        st.session_state[f"{prefix}_lines"] += 1
+        st.rerun()
+
+
+def _reset_lines(prefix, n_lines):
+    for i in range(n_lines):
+        for f in ("prod", "qo", "qd", "rate"):
+            st.session_state.pop(f"{prefix}_{f}_{i}", None)
+    st.session_state[f"{prefix}_lines"] = 1
+
+
 def _show_dispatch_operator():
     """Minimal view for dispatch role: challan entry form only."""
     st.markdown("""
     <div class="page-title">🚚 Dispatch Entry</div>
-    <div class="page-subtitle">Enter challan details below</div>
+    <div class="page-subtitle">Enter challan details below — add multiple products if one challan covers more than one.</div>
     """, unsafe_allow_html=True)
 
     df_known = get_dispatch()
@@ -75,66 +117,82 @@ def _show_dispatch_operator():
 
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
     next_challan = next_sequence_number(df_known, "challan_no", sale_type, date_col="date")
+    _init_lines("disp_op_lines")
 
-    with st.form("dispatch_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        entry_date = c1.date_input("Date", date.today())
-        # Keyed to the value itself so a fixed key doesn't "stick" to a
-        # stale number from an earlier Sale Type selection.
-        challan_no = c2.text_input("Challan No.", value=str(next_challan),
-                                   key=f"disp_op_challan_{next_challan}",
-                                   help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
-        di_no      = c3.text_input("DI No.")
+    c1, c2, c3 = st.columns(3)
+    entry_date = c1.date_input("Date", date.today(), key="disp_op_date")
+    # Keyed to the value itself so a fixed key doesn't "stick" to a
+    # stale number from an earlier Sale Type selection.
+    challan_no = c2.text_input("Challan No.", value=str(next_challan),
+                               key=f"disp_op_challan_{next_challan}",
+                               help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
+    di_no      = c3.text_input("DI No.", key="disp_op_di")
 
-        ca, cb, cc = st.columns(3)
-        client_name   = client_name_field(ca, known_clients, "disp_op_client")
-        product       = cb.selectbox("Product", DISPATCH_PRODUCTS)
-        delivery_addr = cc.text_input("Delivery Address")
+    ca, cb = st.columns(2)
+    client_name   = client_name_field(ca, known_clients, "disp_op_client")
+    delivery_addr = cb.text_input("Delivery Address", key="disp_op_addr")
 
-        cd, ce, cf = st.columns(3)
-        qty_ordered    = cd.number_input("Qty Ordered",              min_value=0,   step=100)
-        qty_dispatched = ce.number_input("Qty Dispatched (Challan)", min_value=0,   step=100)
-        rate           = cf.number_input("Rate (₹/nos.)",            min_value=0.0, step=0.5)
+    st.markdown("**Products in this Challan**")
+    _product_lines("disp_op", st.session_state["disp_op_lines"])
 
-        gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate")
+    gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")
 
-        cg, ch, ci, cj = st.columns(4)
-        truck_no       = cg.selectbox("Truck No.", TRUCKS)
-        driver_name    = ch.selectbox("Driver Name", DRIVERS)
-        trip_distance  = ci.number_input("Distance (km)", min_value=0.0, step=5.0)
-        remarks        = cj.text_input("Remarks")
-        form_filled_by = st.text_input("Form Filled By")
+    cg, ch, ci, cj = st.columns(4)
+    truck_no       = cg.selectbox("Truck No.", TRUCKS, key="disp_op_truck")
+    driver_name    = ch.selectbox("Driver Name", DRIVERS, key="disp_op_driver")
+    trip_distance  = ci.number_input("Distance (km)", min_value=0.0, step=5.0, key="disp_op_dist")
+    remarks        = cj.text_input("Remarks", key="disp_op_remarks")
+    form_filled_by = st.text_input("Form Filled By", key="disp_op_filled_by")
 
-        submitted = st.form_submit_button("✅ Submit Challan", type="primary", use_container_width=True)
+    if st.button("✅ Submit Challan", type="primary", use_container_width=True, key="disp_op_submit"):
+        n_lines = st.session_state["disp_op_lines"]
+        lines = [
+            (st.session_state.get(f"disp_op_prod_{i}", DISPATCH_PRODUCTS[0]),
+             st.session_state.get(f"disp_op_qo_{i}", 0) or 0,
+             st.session_state.get(f"disp_op_qd_{i}", 0) or 0,
+             st.session_state.get(f"disp_op_rate_{i}", 0.0) or 0.0)
+            for i in range(n_lines)
+        ]
+        lines = [l for l in lines if l[2] > 0]
 
-    if submitted:
         if is_duplicate(df_known, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
             st.error(f"Challan No. {challan_no} already exists. Refresh the page and try again.")
-        elif qty_dispatched <= 0:
-            st.error("Qty Dispatched must be > 0.")
-        elif rate <= 0:
-            st.error("Rate must be > 0.")
+        elif not lines:
+            st.error("Add at least one product line with Qty Dispatched > 0.")
+        elif any(rate <= 0 for _, _, _, rate in lines):
+            st.error("Rate must be > 0 for every product line.")
         else:
-            base_value = dispatch_value(qty_dispatched, rate)
-            gst_amt, d_value = gst_split(base_value, gst_applicable)
-            insert_dispatch({
-                "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
-                "bill_no": None, "sale_type": sale_type,
-                "client_name": client_name, "delivery_address": delivery_addr,
-                "product": product, "qty_ordered": qty_ordered,
-                "qty_dispatched": qty_dispatched, "rate": rate,
-                "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
-                "trip_distance": trip_distance,
-                "truck_no": truck_no, "driver_name": driver_name,
-                "remarks": remarks, "form_filled_by": form_filled_by,
-            })
+            saved = []
+            for product, qty_ordered, qty_dispatched, rate in lines:
+                base_value = dispatch_value(qty_dispatched, rate)
+                gst_amt, d_value = gst_split(base_value, gst_applicable)
+                insert_dispatch({
+                    "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
+                    "bill_no": None, "sale_type": sale_type,
+                    "client_name": client_name, "delivery_address": delivery_addr,
+                    "product": product, "qty_ordered": qty_ordered,
+                    "qty_dispatched": qty_dispatched, "rate": rate,
+                    "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                    "trip_distance": trip_distance,
+                    "truck_no": truck_no, "driver_name": driver_name,
+                    "remarks": remarks, "form_filled_by": form_filled_by,
+                })
+                saved.append((product, qty_dispatched, rate, d_value, gst_amt, qty_ordered))
+
             st.toast(f"✅ Challan {challan_no} saved!")
-            st.markdown('<div class="success-box">✅ <b>Dispatch entry saved!</b></div>', unsafe_allow_html=True)
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Qty Dispatched", f"{int(qty_dispatched):,} nos")
-            m2.metric("Rate",           f"₹{rate:.2f}/nos")
-            m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
-            m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
+            st.markdown(
+                f'<div class="success-box">✅ <b>Challan {challan_no} saved — {len(saved)} product line(s)!</b></div>',
+                unsafe_allow_html=True,
+            )
+            for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered in saved:
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric(product[:22], f"{int(qty_dispatched):,} nos")
+                m2.metric("Rate",           f"₹{rate:.2f}/nos")
+                m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
+                m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
+
+            _reset_lines("disp_op", n_lines)
+            st.rerun()
 
 
 def show(PLOT):
@@ -314,72 +372,89 @@ def show(PLOT):
     # ── New Challan Entry (dispatch + admin only) ─────────────────────────────
     if can_challan:
         st.markdown('<div class="section-header">New Challan Entry</div>', unsafe_allow_html=True)
+        st.caption("Add multiple products if one challan covers more than one.")
 
         sale_type          = st.selectbox("Sale Type", SALE_TYPES, key="disp_main_sale_type")
         next_challan_main  = next_sequence_number(df_all, "challan_no", sale_type, date_col="date")
+        _init_lines("disp_main_lines")
 
-        with st.form("dispatch_form", clear_on_submit=True):
-            c1, c2, c3, c4 = st.columns(4)
-            entry_date = c1.date_input("Date", date.today())
-            # Keyed to the value itself so a fixed key doesn't "stick" to a
-            # stale number from an earlier Sale Type selection.
-            challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
-                                       key=f"disp_main_challan_{next_challan_main}",
-                                       help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
-            di_no      = c3.text_input("DI No.")
-            bill_no    = c4.text_input("Bill No.") if can_bill else None
+        c1, c2, c3, c4 = st.columns(4)
+        entry_date = c1.date_input("Date", date.today(), key="disp_main_date")
+        # Keyed to the value itself so a fixed key doesn't "stick" to a
+        # stale number from an earlier Sale Type selection.
+        challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
+                                   key=f"disp_main_challan_{next_challan_main}",
+                                   help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
+        di_no      = c3.text_input("DI No.", key="disp_main_di")
+        bill_no    = c4.text_input("Bill No.", key="disp_main_bill") if can_bill else None
 
-            known_clients = set(df_all["client_name"].dropna().astype(str)) if not df_all.empty and "client_name" in df_all.columns else set()
-            ca, cb, cc = st.columns(3)
-            client_name   = client_name_field(ca, known_clients, "disp_main_client")
-            product       = cb.selectbox("Product", DISPATCH_PRODUCTS)
-            delivery_addr = cc.text_input("Delivery Address")
+        known_clients = set(df_all["client_name"].dropna().astype(str)) if not df_all.empty and "client_name" in df_all.columns else set()
+        ca, cb = st.columns(2)
+        client_name   = client_name_field(ca, known_clients, "disp_main_client")
+        delivery_addr = cb.text_input("Delivery Address", key="disp_main_addr")
 
-            cd, ce, cf = st.columns(3)
-            qty_ordered    = cd.number_input("Qty Ordered",              min_value=0,   step=100)
-            qty_dispatched = ce.number_input("Qty Dispatched (Challan)", min_value=0,   step=100)
-            rate           = cf.number_input("Rate (₹/nos.)",            min_value=0.0, step=0.5)
+        st.markdown("**Products in this Challan**")
+        _product_lines("disp_main", st.session_state["disp_main_lines"])
 
-            gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_main_gst")
+        gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_main_gst")
 
-            cg, ch, ci, cj = st.columns(4)
-            truck_no       = cg.selectbox("Truck No.", TRUCKS)
-            driver_name    = ch.selectbox("Driver Name", DRIVERS)
-            trip_distance  = ci.number_input("Distance (km)", min_value=0.0, step=5.0)
-            remarks        = cj.text_input("Remarks")
-            form_filled_by = st.text_input("Form Filled By")
+        cg, ch, ci, cj = st.columns(4)
+        truck_no       = cg.selectbox("Truck No.", TRUCKS, key="disp_main_truck")
+        driver_name    = ch.selectbox("Driver Name", DRIVERS, key="disp_main_driver")
+        trip_distance  = ci.number_input("Distance (km)", min_value=0.0, step=5.0, key="disp_main_dist")
+        remarks        = cj.text_input("Remarks", key="disp_main_remarks")
+        form_filled_by = st.text_input("Form Filled By", key="disp_main_filled_by")
 
-            submitted = st.form_submit_button("✅ Submit Challan", type="primary", use_container_width=True)
+        if st.button("✅ Submit Challan", type="primary", use_container_width=True, key="disp_main_submit"):
+            n_lines = st.session_state["disp_main_lines"]
+            lines = [
+                (st.session_state.get(f"disp_main_prod_{i}", DISPATCH_PRODUCTS[0]),
+                 st.session_state.get(f"disp_main_qo_{i}", 0) or 0,
+                 st.session_state.get(f"disp_main_qd_{i}", 0) or 0,
+                 st.session_state.get(f"disp_main_rate_{i}", 0.0) or 0.0)
+                for i in range(n_lines)
+            ]
+            lines = [l for l in lines if l[2] > 0]
 
-        if submitted:
             if is_duplicate(df_all, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
                 st.error(f"Challan No. {challan_no} already exists. Refresh the page and try again.")
-            elif qty_dispatched <= 0:
-                st.error("Qty Dispatched must be > 0.")
-            elif rate <= 0:
-                st.error("Rate must be > 0.")
+            elif not lines:
+                st.error("Add at least one product line with Qty Dispatched > 0.")
+            elif any(rate <= 0 for _, _, _, rate in lines):
+                st.error("Rate must be > 0 for every product line.")
             else:
-                base_value = dispatch_value(qty_dispatched, rate)
-                gst_amt, d_value = gst_split(base_value, gst_applicable)
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Qty Dispatched", f"{int(qty_dispatched):,} nos")
-                m2.metric("Rate",           f"₹{rate:.2f}/nos")
-                m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
-                m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
-                insert_dispatch({
-                    "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
-                    "bill_no": (bill_no.strip() if bill_no and bill_no.strip() else None),
-                    "sale_type": sale_type,
-                    "client_name": client_name, "delivery_address": delivery_addr,
-                    "product": product, "qty_ordered": qty_ordered,
-                    "qty_dispatched": qty_dispatched, "rate": rate,
-                    "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
-                    "trip_distance": trip_distance,
-                    "truck_no": truck_no, "driver_name": driver_name,
-                    "remarks": remarks, "form_filled_by": form_filled_by,
-                })
+                saved = []
+                for product, qty_ordered, qty_dispatched, rate in lines:
+                    base_value = dispatch_value(qty_dispatched, rate)
+                    gst_amt, d_value = gst_split(base_value, gst_applicable)
+                    insert_dispatch({
+                        "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
+                        "bill_no": (bill_no.strip() if bill_no and bill_no.strip() else None),
+                        "sale_type": sale_type,
+                        "client_name": client_name, "delivery_address": delivery_addr,
+                        "product": product, "qty_ordered": qty_ordered,
+                        "qty_dispatched": qty_dispatched, "rate": rate,
+                        "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                        "trip_distance": trip_distance,
+                        "truck_no": truck_no, "driver_name": driver_name,
+                        "remarks": remarks, "form_filled_by": form_filled_by,
+                    })
+                    saved.append((product, qty_dispatched, rate, d_value, gst_amt, qty_ordered))
+
                 st.toast(f"✅ Challan {challan_no} saved!")
-            st.markdown('<div class="success-box">✅ <b>Dispatch entry saved!</b></div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="success-box">✅ <b>Challan {challan_no} saved — {len(saved)} product line(s)!</b></div>',
+                    unsafe_allow_html=True,
+                )
+                for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered in saved:
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric(product[:22], f"{int(qty_dispatched):,} nos")
+                    m2.metric("Rate",           f"₹{rate:.2f}/nos")
+                    m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
+                    m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
+
+                _reset_lines("disp_main", n_lines)
+                st.rerun()
 
     # ── All Dispatch Entries (filtered by date range above) ───────────────────
     st.markdown("---")

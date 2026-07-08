@@ -241,6 +241,13 @@ def init_db():
         action     TEXT, module TEXT, detail TEXT,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS inventory_opening (
+        item_key   TEXT PRIMARY KEY,
+        item_type  TEXT NOT NULL,
+        opening_qty REAL DEFAULT 0,
+        updated_by TEXT,
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     """)
     # Lightweight migration for columns added after a table already existed —
     # CREATE TABLE IF NOT EXISTS above only helps fresh databases.
@@ -562,6 +569,59 @@ def save_product_config(product, data):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("update", "Admin", f"Product config updated: {product}")
+
+
+@st.cache_data(ttl=60)
+def get_inventory_opening():
+    """{item_key: {"qty": float, "updated_by": str, "updated_at": str}} for
+    every finished-good product / raw material whose opening stock has been
+    physically counted and entered — items not in here fall back to the
+    hardcoded 0 default in core/config.py."""
+    if _use_supabase():
+        r = requests.get(_sb_url("inventory_opening"), headers=_headers(), params={"select": "*", "limit": 500})
+        rows = r.json() if r.status_code == 200 else []
+    else:
+        con = _conn()
+        rows = pd.read_sql("SELECT * FROM inventory_opening", con).to_dict("records")
+        con.close()
+    return {
+        row["item_key"]: {
+            "qty": float(row.get("opening_qty") or 0),
+            "updated_by": row.get("updated_by") or "",
+            "updated_at": row.get("updated_at") or "",
+        }
+        for row in rows
+    }
+
+
+def save_inventory_opening(item_key, item_type, qty, updated_by):
+    from datetime import datetime
+    payload = {
+        "item_key": item_key, "item_type": item_type, "opening_qty": qty,
+        "updated_by": updated_by, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if _use_supabase():
+        r = requests.post(
+            _sb_url("inventory_opening"),
+            headers={**_headers(), "Prefer": "resolution=merge-duplicates"},
+            params={"on_conflict": "item_key"},
+            json=payload,
+        )
+        if r.status_code not in (200, 201):
+            raise Exception(f"Save failed: {r.text}")
+    else:
+        con = _conn()
+        cols = ", ".join(payload.keys())
+        ph   = ", ".join("?" for _ in payload)
+        con.execute(
+            f"INSERT INTO inventory_opening ({cols}) VALUES ({ph}) "
+            f"ON CONFLICT(item_key) DO UPDATE SET "
+            + ", ".join(f"{k} = excluded.{k}" for k in payload if k != "item_key"),
+            list(payload.values()),
+        )
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Inventory", f"Opening stock set for {item_key}: {qty}")
 
 
 def update_production(row_id, data):
