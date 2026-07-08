@@ -314,6 +314,25 @@ CREATE TABLE IF NOT EXISTS inventory_opening (
 );
 ALTER TABLE inventory_opening DISABLE ROW LEVEL SECURITY;
 
+-- ── Migration: Transport cost (separate from Material + GST) ───────────────
+-- Sales Orders and Dispatch both get a third cost component alongside
+-- Material (rate x qty) and GST: Transport, billed either "per_unit"
+-- (rate x qty, same shape as Material) or "flat" (one amount for the whole
+-- challan/DI — for a multi-product challan, the flat amount is stored on
+-- just the first line so summing across lines doesn't double-count).
+-- Transport GST is tracked separately since it isn't always taxed the same
+-- way Material is.
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_mode TEXT DEFAULT 'per_unit';
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_mode TEXT DEFAULT 'per_unit';
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
+
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via
 -- its own login screen (not Supabase Auth) and talks to Supabase with one

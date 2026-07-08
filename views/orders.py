@@ -4,9 +4,9 @@ import plotly.graph_objects as go
 from datetime import date
 from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
-from core.calculations import gst_split
+from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
-from core.ui import client_name_field, flash, show_flashes
+from core.ui import client_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 
 LAKH = 100_000
@@ -166,8 +166,10 @@ def show(PLOT):
     # the freshly computed number — a fixed key would "stick" to whatever
     # was in session_state from the first render and ignore later `value=`.
     di_no_input  = h1.text_input("DI No.", value=di_no_display, key=f"ord_di_no_{di_no_display}",
-                                 disabled=True,
-                                 help="Auto-generated: next number for the selected Sale Type.")
+                                 disabled=(di_mode == "Add product to existing DI" and existing_dis),
+                                 help="Pre-filled with the next number for the selected Sale Type — edit if your paper DI differs."
+                                 if not (di_mode == "Add product to existing DI" and existing_dis)
+                                 else "Adding to an existing DI — number is fixed.")
     order_date   = h2.date_input("Order Date", value=date.today(), key="ord_date")
 
     _pm_opts    = [REQUIRED_PLACEHOLDER] + PAYMENT_MODES
@@ -281,10 +283,15 @@ def show(PLOT):
         st.session_state.order_lines += 1
         st.rerun()
 
+    transport_mode, transport_rate, transport_gst_applicable = transport_fields("ord")
+    if di_mode == "Add product to existing DI" and existing_dis:
+        st.caption("Adding to an existing DI: a Flat transport amount is only charged once, on the "
+                   "DI's very first product line — new lines added here won't re-charge it.")
+
     # ── Submit ────────────────────────────────────────────────────────────────
     st.markdown("")
     if st.button("✅ Save Order", type="primary", use_container_width=True, key="ord_submit"):
-        di_no_final  = di_no_display.strip()
+        di_no_final  = di_no_input.strip()
         _payment_val = st.session_state.get("ord_payment", REQUIRED_PLACEHOLDER)
         _sale_val    = st.session_state.get("ord_sale_type", REQUIRED_PLACEHOLDER)
         _ctype_val   = client_type
@@ -326,6 +333,18 @@ def show(PLOT):
                     continue
                 prod = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
                 gst_amt, total_final = gst_split(qty_v * rate_v, gst_applicable)
+                # Per-unit transport applies to every line; a Flat amount is
+                # billed once per DI, so it only goes on the first line of a
+                # brand-new DI — adding lines to an existing DI never
+                # re-charges it (that DI's flat charge already went out with
+                # its original first line).
+                if transport_mode == "per_unit":
+                    t_rate = transport_rate
+                elif di_mode == "New DI" and saved == 0:
+                    t_rate = transport_rate
+                else:
+                    t_rate = 0
+                t_value, t_gst_amt = transport_charge(transport_mode, t_rate, qty_v, transport_gst_applicable)
                 insert_order({
                     **common_fields,
                     "di_no":            di_no_final,
@@ -335,9 +354,13 @@ def show(PLOT):
                     "rate":             rate_v,
                     "total_amount":     total_final,
                     "gst_amount":       gst_amt,
+                    "transport_mode":   transport_mode, "transport_rate": t_rate,
+                    "transport_value":  t_value, "transport_gst_applicable": transport_gst_applicable,
+                    "transport_gst_amount": t_gst_amt,
                 })
                 pdf_lines.append({"product": prod, "qty_ordered": qty_v, "rate": rate_v,
-                                   "total_amount": total_final, "gst_amount": gst_amt})
+                                   "total_amount": total_final, "gst_amount": gst_amt,
+                                   "transport_value": t_value, "transport_gst_amount": t_gst_amt})
                 saved += 1
             if saved:
                 pdf_header = dict(common_fields)
@@ -349,6 +372,8 @@ def show(PLOT):
                 for k in list(st.session_state.keys()):
                     if k.startswith(("ord_prod_","ord_qty_","ord_rate_","ord_total_")):
                         del st.session_state[k]
+                for k in ("ord_transport_mode", "ord_transport_rate", "ord_transport_gst"):
+                    st.session_state.pop(k, None)
                 st.rerun()
             else:
                 st.error("Enter qty > 0 for at least one product line.")
@@ -377,6 +402,10 @@ def show(PLOT):
     )
     if "gst_amount" in df_orders.columns:
         _agg["gst_amount"] = ("gst_amount", "sum")
+    if "transport_value" in df_orders.columns:
+        _agg["transport_value"] = ("transport_value", "sum")
+    if "transport_gst_amount" in df_orders.columns:
+        _agg["transport_gst_amount"] = ("transport_gst_amount", "sum")
     if "client_type" in df_orders.columns:
         _agg["client_type"] = ("client_type", "first")
     if "sale_type" in df_orders.columns:
@@ -409,24 +438,28 @@ def show(PLOT):
 
     from core.ui import table_by_sale_type
 
-    for col in ["total_ordered","dispatched_value","pending_value","qty_ordered","dispatched_qty","pending_qty","gst_amount"]:
+    for col in ["total_ordered","dispatched_value","pending_value","qty_ordered","dispatched_qty",
+                "pending_qty","gst_amount","transport_value","transport_gst_amount"]:
         if col in di_summary.columns:
             di_summary[col] = di_summary[col].round(0).astype(int)
 
     show_cols = ["di_no","order_date","client_name","client_type","sale_type","products","Status",
                  "qty_ordered","dispatched_qty","pending_qty",
-                 "total_ordered","gst_amount","dispatched_value","pending_value","challans"]
+                 "total_ordered","gst_amount","transport_value","transport_gst_amount",
+                 "dispatched_value","pending_value","challans"]
     show_cols = [c for c in show_cols if c in di_summary.columns]
     rename_map = {
         "di_no":"DI No.","order_date":"Date","client_name":"Client",
         "client_type":"Client Type","sale_type":"Sale Type",
         "products":"Products","qty_ordered":"Ord Qty","dispatched_qty":"Disp Qty",
-        "pending_qty":"Pending Qty","total_ordered":"Order Val (₹)","gst_amount":"GST (₹)",
+        "pending_qty":"Pending Qty","total_ordered":"Material Val (₹)","gst_amount":"Material GST (₹)",
+        "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "dispatched_value":"Disp Val (₹)","pending_value":"Pending Val (₹)",
         "challans":"Challans",
     }
     sum_cols = [c for c in ["qty_ordered","dispatched_qty","pending_qty",
-                             "total_ordered","gst_amount","dispatched_value","pending_value"]
+                             "total_ordered","gst_amount","transport_value","transport_gst_amount",
+                             "dispatched_value","pending_value"]
                 if c in di_summary.columns] if role != "headoffice" else None
     col_cfg = {"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
 
@@ -546,6 +579,18 @@ def show(PLOT):
                 e_gst_applicable = egst1.checkbox(f"Include GST (@{GST_PCT:.0f}%)", value=_e_gst_default)
                 e_gst_amount     = egst2.number_input("GST Amount (₹)", value=float(erow.get("gst_amount", 0) or 0), min_value=0.0, step=100.0)
 
+                st.markdown("**Transport**")
+                _e_tmode_default = str(erow.get("transport_mode", "per_unit") or "per_unit")
+                etm1, etm2, etm3, etm4 = st.columns(4)
+                e_tmode_label = etm1.radio("Mode", ["Per Unit (₹/nos.)", "Flat (₹ total)"],
+                                          index=1 if _e_tmode_default == "flat" else 0)
+                e_tmode = "per_unit" if e_tmode_label.startswith("Per Unit") else "flat"
+                e_trate = etm2.number_input("Transport Rate (₹)", value=float(erow.get("transport_rate", 0) or 0), min_value=0.0, step=0.5)
+                e_tvalue = etm3.number_input("Transport Value (₹)", value=float(erow.get("transport_value", 0) or 0), min_value=0.0, step=100.0)
+                _e_tgst_default = str(erow.get("transport_gst_applicable", False)).lower() in ("true", "1")
+                e_tgst_applicable = etm4.checkbox("GST on Transport", value=_e_tgst_default)
+                e_tgst_amount = st.number_input("Transport GST Amount (₹)", value=float(erow.get("transport_gst_amount", 0) or 0), min_value=0.0, step=50.0)
+
                 epay1, epay2 = st.columns(2)
                 e_pay    = epay1.selectbox("Payment Mode", PAYMENT_MODES,
                                         index=PAYMENT_MODES.index(erow["mode_of_payment"]) if erow.get("mode_of_payment") in PAYMENT_MODES else 0)
@@ -564,6 +609,9 @@ def show(PLOT):
                         "product": e_prod, "qty_ordered": e_qty, "rate": e_rate,
                         "total_amount": e_total if e_total > 0 else round(e_qty * e_rate, 2),
                         "gst_applicable": e_gst_applicable, "gst_amount": e_gst_amount,
+                        "transport_mode": e_tmode, "transport_rate": e_trate,
+                        "transport_value": e_tvalue, "transport_gst_applicable": e_tgst_applicable,
+                        "transport_gst_amount": e_tgst_amount,
                         "mode_of_payment": e_pay, "sale_type": e_stype, "remarks": e_rem,
                     })
                     flash("✅ Order line updated!")

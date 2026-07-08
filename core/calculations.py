@@ -89,3 +89,17 @@ def gst_split(base_amount: float, gst_applicable: bool) -> tuple:
     base = float(base_amount or 0)
     gst_amount = round(base * GST_PCT / 100, 2) if gst_applicable else 0.0
     return gst_amount, round(base + gst_amount, 2)
+
+
+def transport_charge(mode: str, rate: float, qty: float, gst_applicable: bool) -> tuple:
+    """Transport is billed either "per_unit" (rate x qty, same shape as
+    Material Rate) or "flat" (rate is the total amount as-is — for a flat
+    charge split across multiple product lines in one challan/DI, the
+    caller passes the full rate for exactly one line and 0 for the rest,
+    so summing across lines never double-counts). Returns
+    (transport_value, transport_gst_amount) — GST on transport is tracked
+    separately from Material GST since real invoices don't always tax both
+    the same way."""
+    value = round(float(rate or 0) * float(qty or 0), 2) if mode == "per_unit" else round(float(rate or 0), 2)
+    gst_amount = round(value * GST_PCT / 100, 2) if gst_applicable else 0.0
+    return value, gst_amount

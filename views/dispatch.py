@@ -3,9 +3,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
 from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT
-from core.calculations import dispatch_value, gst_split
+from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
-from core.ui import client_name_field, flash, show_flashes
+from core.ui import client_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 
 LAKH = 100_000
@@ -105,6 +105,19 @@ def _reset_lines(prefix, n_lines):
     st.session_state[f"{prefix}_lines"] = 1
 
 
+def _reset_challan_fields(prefix, extra_keys=()):
+    """These fields are plain widgets (not inside st.form), so unlike the
+    old form-based entry they don't auto-clear on submit — clear them
+    explicitly so the next challan starts fresh instead of silently
+    reusing the last one's client/GST/truck/etc."""
+    for key in (
+        f"{prefix}_di", f"{prefix}_client_pick", f"{prefix}_client_new", f"{prefix}_addr",
+        f"{prefix}_gst", f"{prefix}_transport_mode", f"{prefix}_transport_rate", f"{prefix}_transport_gst",
+        f"{prefix}_truck", f"{prefix}_driver", f"{prefix}_dist", f"{prefix}_remarks", f"{prefix}_filled_by",
+    ) + tuple(extra_keys):
+        st.session_state.pop(key, None)
+
+
 def _show_dispatch_operator():
     """Minimal view for dispatch role: challan entry form only."""
     st.markdown("""
@@ -136,6 +149,7 @@ def _show_dispatch_operator():
     _product_lines("disp_op", st.session_state["disp_op_lines"])
 
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")
+    transport_mode, transport_rate, transport_gst_applicable = transport_fields("disp_op")
 
     cg, ch, ci, cj = st.columns(4)
     truck_no       = cg.selectbox("Truck No.", TRUCKS, key="disp_op_truck")
@@ -163,9 +177,14 @@ def _show_dispatch_operator():
             st.error("Rate must be > 0 for every product line.")
         else:
             saved = []
-            for product, qty_ordered, qty_dispatched, rate in lines:
+            for idx, (product, qty_ordered, qty_dispatched, rate) in enumerate(lines):
                 base_value = dispatch_value(qty_dispatched, rate)
                 gst_amt, d_value = gst_split(base_value, gst_applicable)
+                # Flat transport is billed once per challan — attach the full
+                # amount to only the first line so summing across lines
+                # doesn't double-count it; per-unit transport scales per line.
+                t_rate = transport_rate if (transport_mode == "per_unit" or idx == 0) else 0
+                t_value, t_gst_amt = transport_charge(transport_mode, t_rate, qty_dispatched, transport_gst_applicable)
                 insert_dispatch({
                     "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
                     "bill_no": None, "sale_type": sale_type,
@@ -173,25 +192,32 @@ def _show_dispatch_operator():
                     "product": product, "qty_ordered": qty_ordered,
                     "qty_dispatched": qty_dispatched, "rate": rate,
                     "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                    "transport_mode": transport_mode, "transport_rate": t_rate,
+                    "transport_value": t_value, "transport_gst_applicable": transport_gst_applicable,
+                    "transport_gst_amount": t_gst_amt,
                     "trip_distance": trip_distance,
                     "truck_no": truck_no, "driver_name": driver_name,
                     "remarks": remarks, "form_filled_by": form_filled_by,
                 })
-                saved.append((product, qty_dispatched, rate, d_value, gst_amt, qty_ordered))
+                saved.append((product, qty_dispatched, rate, d_value, gst_amt, qty_ordered, t_value, t_gst_amt))
 
             st.toast(f"✅ Challan {challan_no} saved!")
             st.markdown(
                 f'<div class="success-box">✅ <b>Challan {challan_no} saved — {len(saved)} product line(s)!</b></div>',
                 unsafe_allow_html=True,
             )
-            for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered in saved:
+            for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered, t_value, t_gst_amt in saved:
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric(product[:22], f"{int(qty_dispatched):,} nos")
                 m2.metric("Rate",           f"₹{rate:.2f}/nos")
-                m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
+                m3.metric("Material Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
                 m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
+                if t_value or t_gst_amt:
+                    st.caption(f"Transport: ₹{t_value:,.0f}" + (f" + ₹{t_gst_amt:,.0f} GST" if t_gst_amt else "")
+                               + f" — **Grand Total: ₹{(d_value + t_value + t_gst_amt):,.0f}**")
 
             _reset_lines("disp_op", n_lines)
+            _reset_challan_fields("disp_op")
             st.rerun()
 
 
@@ -397,6 +423,7 @@ def show(PLOT):
         _product_lines("disp_main", st.session_state["disp_main_lines"])
 
         gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_main_gst")
+        transport_mode, transport_rate, transport_gst_applicable = transport_fields("disp_main")
 
         cg, ch, ci, cj = st.columns(4)
         truck_no       = cg.selectbox("Truck No.", TRUCKS, key="disp_main_truck")
@@ -424,9 +451,11 @@ def show(PLOT):
                 st.error("Rate must be > 0 for every product line.")
             else:
                 saved = []
-                for product, qty_ordered, qty_dispatched, rate in lines:
+                for idx, (product, qty_ordered, qty_dispatched, rate) in enumerate(lines):
                     base_value = dispatch_value(qty_dispatched, rate)
                     gst_amt, d_value = gst_split(base_value, gst_applicable)
+                    t_rate = transport_rate if (transport_mode == "per_unit" or idx == 0) else 0
+                    t_value, t_gst_amt = transport_charge(transport_mode, t_rate, qty_dispatched, transport_gst_applicable)
                     insert_dispatch({
                         "date": str(entry_date), "challan_no": challan_no, "di_no": di_no,
                         "bill_no": (bill_no.strip() if bill_no and bill_no.strip() else None),
@@ -435,25 +464,32 @@ def show(PLOT):
                         "product": product, "qty_ordered": qty_ordered,
                         "qty_dispatched": qty_dispatched, "rate": rate,
                         "dispatch_value": d_value, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                        "transport_mode": transport_mode, "transport_rate": t_rate,
+                        "transport_value": t_value, "transport_gst_applicable": transport_gst_applicable,
+                        "transport_gst_amount": t_gst_amt,
                         "trip_distance": trip_distance,
                         "truck_no": truck_no, "driver_name": driver_name,
                         "remarks": remarks, "form_filled_by": form_filled_by,
                     })
-                    saved.append((product, qty_dispatched, rate, d_value, gst_amt, qty_ordered))
+                    saved.append((product, qty_dispatched, rate, d_value, gst_amt, qty_ordered, t_value, t_gst_amt))
 
                 st.toast(f"✅ Challan {challan_no} saved!")
                 st.markdown(
                     f'<div class="success-box">✅ <b>Challan {challan_no} saved — {len(saved)} product line(s)!</b></div>',
                     unsafe_allow_html=True,
                 )
-                for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered in saved:
+                for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered, t_value, t_gst_amt in saved:
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric(product[:22], f"{int(qty_dispatched):,} nos")
                     m2.metric("Rate",           f"₹{rate:.2f}/nos")
-                    m3.metric("Dispatch Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
+                    m3.metric("Material Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
                     m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
+                    if t_value or t_gst_amt:
+                        st.caption(f"Transport: ₹{t_value:,.0f}" + (f" + ₹{t_gst_amt:,.0f} GST" if t_gst_amt else "")
+                                   + f" — **Grand Total: ₹{(d_value + t_value + t_gst_amt):,.0f}**")
 
                 _reset_lines("disp_main", n_lines)
+                _reset_challan_fields("disp_main", extra_keys=["disp_main_bill"])
                 st.rerun()
 
     # ── All Dispatch Entries (filtered by date range above) ───────────────────
@@ -473,15 +509,17 @@ def show(PLOT):
     from core.ui import table_by_sale_type
 
     show_cols = ["date","challan_no","bill_no","sale_type","client_name","product",
-                 "qty_dispatched","dispatch_value","gst_amount","truck_no","driver_name","trip_distance","remarks"]
+                 "qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount",
+                 "truck_no","driver_name","trip_distance","remarks"]
     show_cols = [c for c in show_cols if c in df.columns]
     rename_map = {
         "date":"Date","challan_no":"Challan","bill_no":"Bill No.","sale_type":"Sale Type",
         "client_name":"Client","product":"Product",
-        "qty_dispatched":"Qty","dispatch_value":"Value (₹)","gst_amount":"GST (₹)",
+        "qty_dispatched":"Qty","dispatch_value":"Material Value (₹)","gst_amount":"Material GST (₹)",
+        "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "truck_no":"Truck","driver_name":"Driver","trip_distance":"Dist km","remarks":"Remarks",
     }
-    sum_cols = [c for c in ["qty_dispatched","dispatch_value","gst_amount","trip_distance"] if c in df.columns]
+    sum_cols = [c for c in ["qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount","trip_distance"] if c in df.columns]
     col_cfg  = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
 
     pending_mask = _pending_mask(df)
@@ -537,6 +575,21 @@ def show(PLOT):
             _e_gst_default = str(erow.get("gst_applicable", False)).lower() in ("true", "1")
             e_gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", value=_e_gst_default)
 
+            st.markdown("**Transport**")
+            etm, etr, etg = st.columns(3)
+            _e_tmode_default = str(erow.get("transport_mode", "per_unit") or "per_unit")
+            _tmode_opts = ["Per Unit (₹/nos.)", "Flat (₹ total for whole challan/DI)"]
+            e_tmode_label = etm.radio("Mode", _tmode_opts,
+                                      index=1 if _e_tmode_default == "flat" else 0, key="disp_edit_tmode")
+            e_tmode = "per_unit" if e_tmode_label.startswith("Per Unit") else "flat"
+            e_trate = etr.number_input(
+                "Transport Rate (₹/nos.)" if e_tmode == "per_unit" else "Transport Amount (₹)",
+                value=float(erow.get("transport_rate", 0) or 0), min_value=0.0,
+                step=0.5 if e_tmode == "per_unit" else 100.0,
+            )
+            _e_tgst_default = str(erow.get("transport_gst_applicable", False)).lower() in ("true", "1")
+            e_tgst_applicable = etg.checkbox("Apply GST to Transport too", value=_e_tgst_default)
+
             ej, ek, el = st.columns(3)
             e_truck  = ej.text_input("Truck No.",    value=str(erow.get("truck_no","") or ""))
             e_driver = ek.text_input("Driver Name",  value=str(erow.get("driver_name","") or ""))
@@ -554,12 +607,16 @@ def show(PLOT):
             if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
                 new_base = round(float(e_qty_d) * float(e_rate), 2)
                 new_gst, new_dv = gst_split(new_base, e_gst_applicable)
+                new_t_value, new_t_gst = transport_charge(e_tmode, e_trate, e_qty_d, e_tgst_applicable)
                 payload = {
                     "date": str(e_date), "challan_no": e_challan, "di_no": e_di,
                     "client_name": e_client, "delivery_address": e_addr, "product": e_prod,
                     "sale_type": e_stype,
                     "qty_ordered": e_qty_o, "qty_dispatched": e_qty_d, "rate": e_rate,
                     "dispatch_value": new_dv, "gst_applicable": e_gst_applicable, "gst_amount": new_gst,
+                    "transport_mode": e_tmode, "transport_rate": e_trate,
+                    "transport_value": new_t_value, "transport_gst_applicable": e_tgst_applicable,
+                    "transport_gst_amount": new_t_gst,
                     "trip_distance": e_dist,
                     "truck_no": e_truck, "driver_name": e_driver, "remarks": e_rem,
                 }

@@ -144,29 +144,36 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     story.append(Spacer(1, 7 * mm))
 
     # ── Product lines table ─────────────────────────────────────────────────
-    has_pending  = dispatched is not None
-    has_gst      = any(float(line.get("gst_amount", 0) or 0) > 0 for line in lines)
+    has_pending   = dispatched is not None
+    has_gst       = any(float(line.get("gst_amount", 0) or 0) > 0 for line in lines)
+    has_transport = any(float(line.get("transport_value", 0) or 0) > 0 for line in lines)
     head = ["PRODUCT", "QTY ORDERED"]
     if has_pending:
         head += ["DISPATCHED", "PENDING"]
     head += ["RATE (RS.)"]
     if has_gst:
         head += ["GST (RS.)"]
+    if has_transport:
+        head += ["TRANSPORT (RS.)"]
     head += ["TOTAL (RS.)"]
 
     rows = [head]
-    total_amount = 0.0
-    total_gst    = 0.0
-    total_qty    = 0.0
+    total_amount    = 0.0
+    total_gst       = 0.0
+    total_qty       = 0.0
+    total_transport = 0.0
     for line in lines:
         prod   = line.get("product", "")
         qty    = float(line.get("qty_ordered", 0) or 0)
         rate   = float(line.get("rate", 0) or 0)
         amt    = float(line.get("total_amount", 0) or 0)
         gst    = float(line.get("gst_amount", 0) or 0)
-        total_amount += amt
-        total_gst    += gst
-        total_qty    += qty
+        transport = float(line.get("transport_value", 0) or 0)
+        transport_gst = float(line.get("transport_gst_amount", 0) or 0)
+        total_amount    += amt
+        total_gst       += gst
+        total_qty       += qty
+        total_transport += transport + transport_gst
         row = [prod, f"{qty:,.0f}"]
         if has_pending:
             d = (dispatched or {}).get(prod, {"qty": 0})
@@ -175,6 +182,8 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
         row += [f"{rate:,.2f}"]
         if has_gst:
             row += [f"{gst:,.2f}"]
+        if has_transport:
+            row += [f"{transport + transport_gst:,.2f}"]
         row += [f"{amt:,.2f}"]
         rows.append(row)
 
@@ -184,6 +193,8 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     total_row += [""]
     if has_gst:
         total_row += [f"{total_gst:,.2f}"]
+    if has_transport:
+        total_row += [f"{total_transport:,.2f}"]
     total_row += [f"{total_amount:,.2f}"]
     rows.append(total_row)
 
@@ -212,6 +223,12 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
         ("LINEBELOW", (0, 1), (-1, -2), 0.3, HAIRLINE),
     ]))
     story.append(prod_tbl)
+    if has_transport:
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(
+            f"GRAND TOTAL (incl. Transport): RS. {total_amount + total_transport:,.2f}",
+            ss["FooterNote"],
+        ))
     story.append(Spacer(1, 7 * mm))
 
     remarks = (header.get("remarks") or "").strip()

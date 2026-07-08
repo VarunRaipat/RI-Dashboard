@@ -133,6 +133,27 @@ def item_name_field(container, known_items, key, default=""):
     return _name_picker_field(container, "Item / Part Description", "item", known_items, key, default)
 
 
+def transport_fields(prefix):
+    """Transport Mode / Rate / GST widgets — rendered once per challan or DI
+    (not per product line). Returns (mode_code, rate, gst_applicable) where
+    mode_code is "per_unit" (rate x each line's qty) or "flat" (rate is the
+    total for the whole challan/DI, applied to just the first product line
+    so multi-line entries don't double-count it)."""
+    st.markdown("**Transport**")
+    tc1, tc2, tc3 = st.columns([1.4, 1.2, 1.4])
+    mode_label = tc1.radio("Mode", ["Per Unit (₹/nos.)", "Flat (₹ total for whole challan/DI)"],
+                          key=f"{prefix}_transport_mode")
+    mode_code = "per_unit" if mode_label.startswith("Per Unit") else "flat"
+    rate = tc2.number_input(
+        "Transport Rate (₹/nos.)" if mode_code == "per_unit" else "Transport Amount (₹)",
+        min_value=0.0, step=0.5 if mode_code == "per_unit" else 100.0, key=f"{prefix}_transport_rate",
+    )
+    gst_applicable = tc3.checkbox("Apply GST to Transport too", key=f"{prefix}_transport_gst")
+    if mode_code == "flat":
+        tc1.caption("Flat amount is attached to the first product line only.")
+    return mode_code, rate, gst_applicable
+
+
 def interactive_table(df, key, sum_cols=None, show_cols=None,
                       rename=None, col_config=None, date_col="date", show_export=True):
     """
