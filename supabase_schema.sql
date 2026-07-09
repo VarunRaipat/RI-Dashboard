@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS production (
     welding_cost    REAL DEFAULT 0,
     jalli_cost      REAL DEFAULT 0,
     emi_cost        REAL DEFAULT 0,
-    dg_cost         REAL DEFAULT 0,
+    dg_cost         REAL DEFAULT 0,  -- deprecated: DG folded into power_cost, column kept for old rows
     admin_cost      REAL DEFAULT 0,
     misc_cost       REAL DEFAULT 0,
     total_cost      REAL DEFAULT 0,
@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS rm_prices (
 -- (Prefer: resolution=merge-duplicates) works. No transport column — real
 -- transport cost is tracked in the Dispatch module instead.
 -- No power_per_block column — Power is a flat Rs.1,000/entry cost (like
--- EMI/DG/Admin), not a per-unit rate; see core/config.py's POWER_PER_ENTRY.
+-- EMI/Admin), not a per-unit rate; see core/config.py's POWER_PER_ENTRY.
+-- (Power now also covers DG — see core/config.py.)
 CREATE TABLE IF NOT EXISTS product_config (
     id                      BIGSERIAL PRIMARY KEY,
     product                 TEXT UNIQUE NOT NULL,

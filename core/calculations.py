@@ -1,6 +1,6 @@
 from core.config import (
     PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
-    EMI_PER_ENTRY, DG_PER_ENTRY, POWER_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT, GST_PCT,
+    EMI_PER_ENTRY, POWER_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT, GST_PCT,
 )
 
 
@@ -11,14 +11,19 @@ def calculate_production(
     product_config: dict = None,
     raw_materials: list = None,
     pipe_diameter_config: dict = None,
+    entry_count: int = 1,
 ) -> dict:
     """
     Nothing is entered per DPR batch — Concrete and Steel each have a fixed
     per-unit quantity set on the product (see RAW_MATERIALS's product_field),
     so usage = Nos x that figure, and cost = usage x the matching RM Prices
     rate. Jalli (cage welding), Welding, Production, and Loading/Unloading
-    are flat Rs./nos rates — not priced materials. Power, like EMI/DG/Admin,
-    is a flat Rs./entry cost, not a per-unit rate.
+    are flat Rs./nos rates — not priced materials. Power (which also covers
+    DG), like EMI/Admin, is a flat Rs./day cost — EMI_PER_ENTRY/POWER_PER_ENTRY/
+    ADMIN_PER_ENTRY are each one day's full share, so when a day has more than
+    one product line, entry_count (the number of lines saved for that day)
+    splits it evenly across them — otherwise a 5-product day would charge 5x
+    a single day's EMI/Power/Admin instead of 1x.
 
     For Hume Pipes, the per-unit flat rates come from pipe_diameter_config
     (keyed by diameter only, since they don't vary by class or Joint Type),
@@ -43,13 +48,13 @@ def calculate_production(
     loading_unloading_cost = cfg["loading_unloading_cost"] * v(nos)
     welding_cost             = cfg["welding_cost"] * v(nos)
     jalli_cost               = cfg["jalli_cost"] * v(nos)
-    emi_cost   = float(EMI_PER_ENTRY)    # fixed Rs./entry
-    dg_cost    = float(DG_PER_ENTRY)     # fixed Rs./entry
-    power_cost = float(POWER_PER_ENTRY)  # fixed Rs./entry
-    admin_cost = float(ADMIN_PER_ENTRY)  # fixed Rs./entry
+    divisor    = max(int(entry_count or 1), 1)
+    emi_cost   = float(EMI_PER_ENTRY)   / divisor  # day's EMI, split across today's lines
+    power_cost = float(POWER_PER_ENTRY) / divisor  # day's Power (incl. DG), split across today's lines
+    admin_cost = float(ADMIN_PER_ENTRY) / divisor  # day's Admin, split across today's lines
 
     sub_total  = (rm_cost + production_cost + loading_unloading_cost
-                  + welding_cost + jalli_cost + emi_cost + dg_cost + power_cost + admin_cost)
+                  + welding_cost + jalli_cost + emi_cost + power_cost + admin_cost)
     misc_cost  = sub_total * (MISC_PCT / 100)
     total_cost = sub_total + misc_cost
 
@@ -65,7 +70,6 @@ def calculate_production(
         "welding_cost":            round(welding_cost, 2),
         "jalli_cost":              round(jalli_cost, 2),
         "emi_cost":                round(emi_cost, 2),
-        "dg_cost":                 round(dg_cost, 2),
         "admin_cost":              round(admin_cost, 2),
         "misc_cost":               round(misc_cost, 2),
         "total_cost":              round(total_cost, 2),

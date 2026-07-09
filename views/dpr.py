@@ -11,7 +11,7 @@ from core.ui import flash, show_flashes
 
 _RM_COST_FIELDS = [
     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
-    "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
+    "emi_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
 ] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + [f"{m['key']}_cost" for m in RAW_MATERIALS]
 
 
@@ -76,13 +76,15 @@ def show(PLOT):
     st.markdown("")
     if st.button("✅ Submit & Calculate", type="primary", use_container_width=True, key="dpr_submit"):
         saved_rows = []
-        for i in range(st.session_state.dpr_lines):
+        valid_lines = [i for i in range(st.session_state.dpr_lines)
+                       if (st.session_state.get(f"dpr_nos_{i}", 0) or 0) > 0]
+        line_count = len(valid_lines)
+        for i in valid_lines:
             nos = st.session_state.get(f"dpr_nos_{i}", 0) or 0
-            if nos <= 0:
-                continue
             product = st.session_state.get(f"dpr_prod_{i}", PRODUCTION_PRODUCTS[0])
             pricing_key = SKU_TO_PRICING_KEY.get(product, product)
-            result = calculate_production(pricing_key, nos, rm, prod_cfg, pipe_diameter_config=pipe_dia_cfg)
+            result = calculate_production(pricing_key, nos, rm, prod_cfg,
+                                            pipe_diameter_config=pipe_dia_cfg, entry_count=line_count)
             record = {
                 "date": str(entry_date), "product": product, "nos": nos,
                 "plant": plant,
@@ -146,19 +148,19 @@ def show(PLOT):
 
         show_cols = ["date","product","nos","plant",
                      "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
-                     "emi_cost","dg_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
+                     "emi_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
                      ] + [f"{m['key']}_qty" for m in RAW_MATERIALS]
         show_cols = [c for c in show_cols if c in df.columns]
         rename = {
             "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
             "rm_cost":"RM Cost","production_cost":"Production","loading_unloading_cost":"Loading/Unloading",
             "power_cost":"Power","welding_cost":"Welding","jalli_cost":"Jalli","emi_cost":"EMI",
-            "dg_cost":"DG","admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
+            "admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
             "profit":"Profit","profit_pct":"Profit %",
             **{f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS},
         }
         sum_cols = [c for c in ["nos","revenue","rm_cost","production_cost","loading_unloading_cost",
-                                 "power_cost","welding_cost","jalli_cost","emi_cost","dg_cost","admin_cost","misc_cost",
+                                 "power_cost","welding_cost","jalli_cost","emi_cost","admin_cost","misc_cost",
                                  "total_cost","profit"] if c in df.columns]
         col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
         interactive_table(df, key="dpr_rec", sum_cols=sum_cols, show_cols=show_cols,
@@ -220,7 +222,10 @@ def show(PLOT):
 
             if save:
                 e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
-                result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg, pipe_diameter_config=pipe_dia_cfg)
+                same_day_count = int((df_edit["date"] == pd.Timestamp(e_date)).sum())
+                line_count = same_day_count if row["date"] == pd.Timestamp(e_date) else same_day_count + 1
+                result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg,
+                                                pipe_diameter_config=pipe_dia_cfg, entry_count=line_count)
                 updated = {
                     "date": str(e_date), "product": e_product, "nos": e_nos,
                     "plant": e_plant,

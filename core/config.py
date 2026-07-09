@@ -1,4 +1,5 @@
 import math
+import re
 from datetime import date
 
 # ── Users & Roles ─────────────────────────────────────────────────────────────
@@ -30,10 +31,9 @@ RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
 # Formula: Total Cost = RM (Concrete+Steel) + Production + Loading/Unloading
-#                      + Welding + Jalli (cage welding) + EMI + DG + Power + Admin, then + Misc%
-EMI_PER_ENTRY   = 20_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
-DG_PER_ENTRY    =  5_000  # Rs. fixed per DPR entry — placeholder, confirm with admin
-POWER_PER_ENTRY =  1_000  # Rs. fixed per DPR entry (daily) — confirmed
+#                      + Welding + Jalli (cage welding) + EMI + Power + Admin, then + Misc%
+EMI_PER_ENTRY   = round(283_000 / 30, 2)  # Rs. 283,000/month EMI ÷ 30 days — confirmed
+POWER_PER_ENTRY =  1_000  # Rs. 30,000/month power (incl. DG) ÷ 30 days — confirmed
 ADMIN_PER_ENTRY =  1_500  # Rs. fixed per DPR entry (daily) — confirmed
 MISC_PCT        =   20.0  # % of all costs — confirmed
 
@@ -116,7 +116,7 @@ def _joint_types_for(diameter_mm, cls):
 # concrete_volume_m3 / steel_kg_per_unit: fixed physical quantity per unit —
 # usage per DPR entry = Nos x this figure, at the matching RM Prices rate
 # (see RAW_MATERIALS above).
-# No "power_per_block" — Power is now a flat POWER_PER_ENTRY (like EMI/DG/
+# No "power_per_block" — Power is now a flat POWER_PER_ENTRY (like EMI/
 # Admin), not a per-unit rate.
 def _blank_rates():
     return {
@@ -218,6 +218,16 @@ ORDER_PRODUCTS    = _PIPE_SKUS + _NON_PIPE_PRODUCTS
 DISPATCH_PRODUCTS = _PIPE_SKUS + _NON_PIPE_PRODUCTS
 
 HUME_PIPE_PRODUCTS = list(_PIPE_SKUS)
+
+_PIPE_SKU_RE = re.compile(r"^Hume Pipe (\d+)mm (NP\d) \((.+)\)$")
+
+def parse_pipe_sku(sku: str):
+    """Split a Hume Pipe SKU ("Hume Pipe 300mm NP3 (Socket & Spigot)") into
+    (diameter_mm: int, pipe_class: str, joint_type: str) for demand/size
+    analysis. Returns None for non-pipe products (Slab/Pillar/etc.), which
+    don't have this diameter+class+joint shape."""
+    m = _PIPE_SKU_RE.match(str(sku or ""))
+    return (int(m.group(1)), m.group(2), m.group(3)) if m else None
 
 TRUCKS    = ["2821", "1669", "4879", "8391", "Other"]
 DRIVERS   = ["Peter","Ladhu","Islam","Bhadiya","Sukra","Debu","Kaila","Sahdeo","Tinku","Nimiya","Yashwant","Raghunath","Karan","Other"]

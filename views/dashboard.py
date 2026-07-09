@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, timedelta
 from core.db import get_production, get_dispatch, get_orders
-from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG
+from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG, parse_pipe_sku
 
 LAKH = 100_000
 
@@ -117,7 +117,6 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             "Welding":        ("welding_cost", "sum"),
             "Jalli":          ("jalli_cost",  "sum"),
             "EMI":            ("emi_cost",   "sum"),
-            "DG":             ("dg_cost",    "sum"),
             "Admin":          ("admin_cost", "sum"),
             "Misc":           ("misc_cost",  "sum"),
             "Total_Cost":     ("total_cost", "sum"),
@@ -130,7 +129,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
                 lambda r: (r["Profit"] / r["Revenue"] * 100) if r["Revenue"] else 0, axis=1
             )
 
-        money_cols = ["Revenue","RM_Cost","Production","Loading","Power","Welding","Jalli","EMI","DG","Admin","Misc","Total_Cost","Profit"]
+        money_cols = ["Revenue","RM_Cost","Production","Loading","Power","Welding","Jalli","EMI","Admin","Misc","Total_Cost","Profit"]
         for mc in money_cols:
             if mc in summ.columns:
                 summ[mc] = (summ[mc] / LAKH).round(3)
@@ -141,7 +140,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             "product":"Product","Days":"Days","Total_Nos":"Nos.",
             "Revenue":"Prod Value(L)","RM_Cost":"RM(L)","Production":"Production(L)",
             "Loading":"Loading/Unload(L)","Power":"Power(L)","Welding":"Welding(L)","Jalli":"Jalli(L)",
-            "EMI":"EMI(L)","DG":"DG(L)","Admin":"Admin(L)","Misc":"Misc(L)",
+            "EMI":"EMI(L)","Admin":"Admin(L)","Misc":"Misc(L)",
             "Total_Cost":"Total Cost(L)","Profit":"Profit(L)","Avg_Profit_Pct":"Profit%",
         }
         summ = summ.rename(columns={k: v for k, v in rename_map.items() if k in summ.columns})
@@ -159,7 +158,6 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             Welding    =("welding_cost","sum"),
             Jalli      =("jalli_cost",  "sum"),
             EMI        =("emi_cost",    "sum"),
-            DG         =("dg_cost",     "sum"),
             Admin      =("admin_cost",  "sum"),
             Misc       =("misc_cost",   "sum"),
             Total_Cost =("total_cost",  "sum"),
@@ -232,7 +230,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         st.markdown('<div class="section-header">Monthly Breakup — All Months</div>', unsafe_allow_html=True)
         tbl = m_all.copy()
         tbl["Month"] = tbl["month"].dt.strftime("%b %Y")
-        for mc in ["Revenue","RM","Production","Loading","Power","Welding","Jalli","EMI","DG","Admin","Misc","Total_Cost","Profit"]:
+        for mc in ["Revenue","RM","Production","Loading","Power","Welding","Jalli","EMI","Admin","Misc","Total_Cost","Profit"]:
             if mc in tbl.columns:
                 tbl[mc] = (tbl[mc] / LAKH).round(3)
         tbl["Profit_Pct"] = tbl["Profit_Pct"].round(1)
@@ -241,11 +239,11 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             "Month":"Month","Days":"Days","Nos":"Nos.",
             "Revenue":"Prod Value(L)","RM":"RM(L)","Production":"Production(L)",
             "Loading":"Loading/Unload(L)","Power":"Power(L)","Welding":"Welding(L)","Jalli":"Jalli(L)",
-            "EMI":"EMI(L)","DG":"DG(L)","Admin":"Admin(L)","Misc":"Misc(L)",
+            "EMI":"EMI(L)","Admin":"Admin(L)","Misc":"Misc(L)",
             "Total_Cost":"Total Cost(L)","Profit":"Profit(L)","Profit_Pct":"Profit%",
         })
         display_cols = ["Month","Days","Nos.","Prod Value(L)","RM(L)","Production(L)","Loading/Unload(L)",
-                        "Power(L)","Welding(L)","Jalli(L)","EMI(L)","DG(L)",
+                        "Power(L)","Welding(L)","Jalli(L)","EMI(L)",
                         "Admin(L)","Misc(L)","Total Cost(L)","Profit(L)","Profit%"]
         display_cols = [c for c in display_cols if c in tbl.columns]
         st.dataframe(tbl[display_cols], use_container_width=True, hide_index=True)
@@ -254,7 +252,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         col3, col4 = st.columns(2)
         with col3:
             st.markdown('<div class="section-header">Cost Breakdown (Period)</div>', unsafe_allow_html=True)
-            cost_labels = ["Raw Material","Production","Loading/Unload","Power","Welding","Jalli","EMI","DG","Admin","Misc"]
+            cost_labels = ["Raw Material","Production","Loading/Unload","Power","Welding","Jalli","EMI","Admin","Misc"]
             cost_vals   = [
                 df_prod["rm_cost"].sum(),
                 df_prod["production_cost"].sum() if "production_cost" in df_prod.columns else 0,
@@ -263,7 +261,6 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
                 df_prod["welding_cost"].sum() if "welding_cost" in df_prod.columns else 0,
                 df_prod["jalli_cost"].sum() if "jalli_cost" in df_prod.columns else 0,
                 df_prod["emi_cost"].sum()   if "emi_cost"   in df_prod.columns else 0,
-                df_prod["dg_cost"].sum()    if "dg_cost"    in df_prod.columns else 0,
                 df_prod["admin_cost"].sum() if "admin_cost" in df_prod.columns else 0,
                 df_prod["misc_cost"].sum()  if "misc_cost"  in df_prod.columns else 0,
             ]
@@ -317,6 +314,137 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
 
             rm_df["Dispatched"] = [round(dispatched_totals.get(c, 0), 1) for c in rm_avail]
             st.dataframe(rm_df, use_container_width=True, hide_index=True)
+
+
+def _tag_pipe_skus(df):
+    """Attach Diameter/Class/Joint columns parsed from each row's SKU (see
+    core.config.parse_pipe_sku). df is expected to already be pipe-only
+    (see HUME_PIPE_PRODUCTS filtering in show()); any row whose SKU still
+    doesn't parse is dropped rather than crashing the chart."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    parsed = df["product"].map(parse_pipe_sku)
+    out = df[parsed.notna()].copy()
+    if out.empty:
+        return out
+    out["Diameter"] = parsed[parsed.notna()].map(lambda t: t[0])
+    out["Class"]    = parsed[parsed.notna()].map(lambda t: t[1])
+    out["Joint"]    = parsed[parsed.notna()].map(lambda t: t[2])
+    return out
+
+
+def _agg_or_empty(df, group_cols, agg_map):
+    if df.empty:
+        return pd.DataFrame(columns=group_cols + list(agg_map.keys()))
+    return df.groupby(group_cols).agg(**agg_map).reset_index()
+
+
+def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
+    """m³ Produced vs Dispatched, and demand (Qty Ordered) broken down by
+    pipe Diameter/Class/Joint Type — answers "which size/class/joint is
+    selling" rather than just overall pipe revenue."""
+    st.markdown('<div class="section-header">🏗️ Pipe Size / Class / Joint Demand</div>', unsafe_allow_html=True)
+
+    prod_t = _tag_pipe_skus(df_prod_pipe)
+    disp_t = _tag_pipe_skus(df_disp_pipe)
+    ord_t  = _tag_pipe_skus(df_ord_pipe)
+
+    if prod_t.empty and disp_t.empty and ord_t.empty:
+        st.info("No pipe production, dispatch, or order data for the selected period.")
+        return
+
+    # Dispatch/Orders don't store m³ — derive it the same way the Raw
+    # Material Usage table above does: qty x that SKU's concrete_volume_m3.
+    if not disp_t.empty:
+        per_unit = disp_t["product"].map(
+            lambda p: PRODUCT_CONFIG.get(SKU_TO_PRICING_KEY.get(p, p), {}).get("concrete_volume_m3", 0)
+        )
+        disp_t["concrete_m3"] = disp_t["qty_dispatched"] * per_unit
+
+    total_produced_m3   = prod_t["concrete_qty"].sum() if "concrete_qty" in prod_t.columns else 0
+    total_dispatched_m3 = disp_t["concrete_m3"].sum()  if "concrete_m3"  in disp_t.columns else 0
+    total_ordered_nos   = ord_t["qty_ordered"].sum()   if "qty_ordered"  in ord_t.columns  else 0
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("m³ Produced",           f"{total_produced_m3:,.1f} m³")
+    k2.metric("m³ Dispatched",         f"{total_dispatched_m3:,.1f} m³")
+    k3.metric("Nos. Ordered (Demand)", f"{total_ordered_nos:,.0f}")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**m³ Produced vs Dispatched by Diameter**")
+        p_by_d = prod_t.groupby("Diameter")["concrete_qty"].sum() if "concrete_qty" in prod_t.columns else pd.Series(dtype=float)
+        d_by_d = disp_t.groupby("Diameter")["concrete_m3"].sum()  if "concrete_m3"  in disp_t.columns else pd.Series(dtype=float)
+        diam_idx = sorted(set(p_by_d.index) | set(d_by_d.index))
+        if diam_idx:
+            fig = go.Figure()
+            fig.add_trace(go.Bar(name="Produced", x=[f"{d}mm" for d in diam_idx],
+                                  y=[round(p_by_d.get(d, 0), 2) for d in diam_idx], marker_color="#8B2428"))
+            fig.add_trace(go.Bar(name="Dispatched", x=[f"{d}mm" for d in diam_idx],
+                                  y=[round(d_by_d.get(d, 0), 2) for d in diam_idx], marker_color="#27AE60"))
+            fig.update_layout(**PLOT, height=320, barmode="group", yaxis_title="m³",
+                               legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.caption("No data.")
+
+    with c2:
+        st.markdown("**Demand (Qty Ordered) by Diameter**")
+        if "qty_ordered" in ord_t.columns and not ord_t.empty:
+            dem_d = ord_t.groupby("Diameter")["qty_ordered"].sum().sort_values(ascending=False)
+            fig2 = go.Figure(go.Bar(
+                x=[f"{d}mm" for d in dem_d.index], y=dem_d.values,
+                marker_color="#D4A011", text=dem_d.values.astype(int), textposition="outside",
+            ))
+            fig2.update_layout(**PLOT, height=320, yaxis_title="Nos. Ordered")
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.caption("No sales order data for pipes in this period.")
+
+    c3, c4 = st.columns(2)
+    with c3:
+        st.markdown("**Demand by Class**")
+        if "qty_ordered" in ord_t.columns and not ord_t.empty:
+            dem_c = ord_t.groupby("Class")["qty_ordered"].sum()
+            fig3 = go.Figure(go.Pie(labels=dem_c.index, values=dem_c.values, hole=0.45,
+                                     marker_colors=["#8B2428", "#3B82F6", "#D4A011"]))
+            fig3.update_layout(**PLOT, height=280)
+            st.plotly_chart(fig3, use_container_width=True)
+        else:
+            st.caption("No sales order data for pipes in this period.")
+
+    with c4:
+        st.markdown("**Demand by Joint Type**")
+        if "qty_ordered" in ord_t.columns and not ord_t.empty:
+            dem_j = ord_t.groupby("Joint")["qty_ordered"].sum()
+            fig4 = go.Figure(go.Pie(labels=dem_j.index, values=dem_j.values, hole=0.45,
+                                     marker_colors=["#A78BFA", "#22D3EE", "#E05252"]))
+            fig4.update_layout(**PLOT, height=280)
+            st.plotly_chart(fig4, use_container_width=True)
+        else:
+            st.caption("No sales order data for pipes in this period.")
+
+    st.markdown("**Full Breakdown — Diameter x Class x Joint**")
+    group_cols = ["Diameter", "Class", "Joint"]
+    prod_g = _agg_or_empty(prod_t, group_cols, dict(Nos_Produced=("nos", "sum"), M3_Produced=("concrete_qty", "sum")))
+    disp_g = _agg_or_empty(disp_t, group_cols, dict(Nos_Dispatched=("qty_dispatched", "sum"), M3_Dispatched=("concrete_m3", "sum")))
+    ord_g  = _agg_or_empty(ord_t,  group_cols, dict(Nos_Ordered=("qty_ordered", "sum")))
+
+    breakdown = prod_g.merge(disp_g, on=group_cols, how="outer").merge(ord_g, on=group_cols, how="outer")
+    if not breakdown.empty:
+        breakdown = breakdown.fillna(0).sort_values(group_cols)
+        for c in ["Nos_Produced", "M3_Produced", "Nos_Dispatched", "M3_Dispatched", "Nos_Ordered"]:
+            if c in breakdown.columns:
+                breakdown[c] = breakdown[c].round(1)
+        breakdown["Diameter"] = breakdown["Diameter"].astype(int).astype(str) + "mm"
+        breakdown = breakdown.rename(columns={
+            "Nos_Produced": "Nos Produced", "M3_Produced": "m³ Produced",
+            "Nos_Dispatched": "Nos Dispatched", "M3_Dispatched": "m³ Dispatched",
+            "Nos_Ordered": "Nos Ordered (Demand)",
+        })
+        st.dataframe(breakdown, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No data.")
 
 
 def show(PLOT):
@@ -433,6 +561,17 @@ def show(PLOT):
     _render_production_section(df_prod_pipe, df_disp_pipe, "Pipe Products", "#8B2428", PLOT)
     st.markdown("---")
     _render_production_section(df_prod_other, df_disp_other, "Other Precast Products", "#3B82F6", PLOT)
+    st.markdown("---")
+
+    df_ord_demand = get_orders()
+    if not df_ord_demand.empty:
+        df_ord_demand["order_date"] = pd.to_datetime(df_ord_demand["order_date"], errors="coerce")
+        df_ord_demand = df_ord_demand[
+            (df_ord_demand["order_date"] >= pd.Timestamp(start)) &
+            (df_ord_demand["order_date"] <= pd.Timestamp(end)) &
+            (df_ord_demand["product"].isin(HUME_PIPE_PRODUCTS))
+        ]
+    _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_demand, PLOT)
 
 
     # ── Dispatch & Sales ──────────────────────────────────────────────────────
@@ -518,13 +657,16 @@ def show(PLOT):
             else:
                 disp_di = pd.DataFrame(columns=["di_no","dispatched_value","dispatched_qty"])
 
-            di_sum = df_ord.groupby("di_no").agg(
+            _ord_agg = dict(
                 order_date   =("order_date",   "first"),
                 client_name  =("client_name",  "first"),
                 products     =("product",       lambda x: ", ".join(x.dropna().unique())),
                 total_ordered=("total_amount", "sum"),
                 qty_ordered  =("qty_ordered",  "sum"),
-            ).reset_index()
+            )
+            if "gst_amount" in df_ord.columns:
+                _ord_agg["gst_amount"] = ("gst_amount", "sum")
+            di_sum = df_ord.groupby("di_no").agg(**_ord_agg).reset_index()
 
             di_sum = di_sum.merge(disp_di, on="di_no", how="left")
             di_sum["dispatched_value"] = di_sum["dispatched_value"].fillna(0)
@@ -538,11 +680,14 @@ def show(PLOT):
                 return "🟢 Fulfilled"
             di_sum["Status"] = di_sum.apply(_status, axis=1)
 
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("Total DIs",        f"{di_sum['di_no'].nunique()}")
-            s2.metric("Total Order Value", f"₹{di_sum['total_ordered'].sum()/LAKH:.2f}L")
-            s3.metric("Dispatched Value",  f"₹{di_sum['dispatched_value'].sum()/LAKH:.2f}L")
-            s4.metric("Pending Value",     f"₹{di_sum['pending_value'].sum()/LAKH:.2f}L")
+            has_gst = "gst_amount" in di_sum.columns
+            s_cols = st.columns(5 if has_gst else 4)
+            s_cols[0].metric("Total DIs",        f"{di_sum['di_no'].nunique()}")
+            s_cols[1].metric("Total Order Value", f"₹{di_sum['total_ordered'].sum()/LAKH:.2f}L")
+            s_cols[2].metric("Dispatched Value",  f"₹{di_sum['dispatched_value'].sum()/LAKH:.2f}L")
+            s_cols[3].metric("Pending Value",     f"₹{di_sum['pending_value'].sum()/LAKH:.2f}L")
+            if has_gst:
+                s_cols[4].metric("Total GST",     f"₹{di_sum['gst_amount'].sum()/LAKH:.2f}L")
 
             if "sale_type" in df_ord.columns:
                 a_ord = df_ord.loc[df_ord["sale_type"] == "Sale A", "total_amount"].sum()
@@ -582,15 +727,19 @@ def show(PLOT):
             st.markdown('<div class="section-header">DI Pipeline</div>', unsafe_allow_html=True)
             tbl = di_sum.sort_values("order_date", ascending=False).copy()
             tbl["order_date"] = tbl["order_date"].dt.strftime("%d-%b-%Y")
-            for mc in ["total_ordered","dispatched_value","pending_value"]:
+            money_cols = ["total_ordered","dispatched_value","pending_value"] + (["gst_amount"] if has_gst else [])
+            for mc in money_cols:
                 tbl[mc] = (tbl[mc] / LAKH).round(3)
             tbl = tbl.rename(columns={
                 "di_no":"DI No.","order_date":"Date","client_name":"Client",
                 "products":"Products","Status":"Status",
                 "total_ordered":"Order (L)","dispatched_value":"Dispatched (L)","pending_value":"Pending (L)",
+                "gst_amount":"GST (L)",
             })
+            di_pipeline_cols = ["DI No.","Date","Client","Products","Status","Order (L)"] + \
+                (["GST (L)"] if has_gst else []) + ["Dispatched (L)","Pending (L)"]
             st.dataframe(
-                tbl[["DI No.","Date","Client","Products","Status","Order (L)","Dispatched (L)","Pending (L)"]],
+                tbl[di_pipeline_cols],
                 use_container_width=True, hide_index=True,
             )
 

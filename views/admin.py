@@ -4,6 +4,7 @@ import pandas as pd
 from core.config import (
     DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT,
     PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES,
+    EMI_PER_ENTRY, POWER_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
 )
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
@@ -130,7 +131,11 @@ def show(PLOT):
                         "steel_kg_per_unit":       new_steel,
                     })
 
-                st.caption("Fixed costs (all products): EMI ₹20,000 · DG ₹5,000 · Power ₹1,000 · Admin ₹1,500 · Misc 20%")
+                st.caption(
+                    f"Fixed costs (all products): EMI ₹{EMI_PER_ENTRY:,.2f} · "
+                    f"Power (incl. DG) ₹{POWER_PER_ENTRY:,.0f} · "
+                    f"Admin ₹{ADMIN_PER_ENTRY:,.0f} · Misc {MISC_PCT:.0f}%"
+                )
 
                 if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
                     save_product_config(sel_prod, payload)
@@ -269,6 +274,8 @@ def show(PLOT):
                                 rm = get_rm_prices()
                                 prod_cfg_i = get_product_config()
                                 pipe_dia_cfg_i = get_pipe_diameter_config()
+                                valid_rows = imp_df[imp_df["nos"].astype(float) > 0]
+                                lines_per_date = valid_rows["date"].apply(lambda d: str(pd.to_datetime(d).date())).value_counts()
                                 imported = 0
                                 for _, r in imp_df.iterrows():
                                     nos = float(r["nos"])
@@ -277,9 +284,12 @@ def show(PLOT):
                                     product = str(r["product"])
                                     plant = str(r["plant"]).strip() if "plant" in imp_df.columns and pd.notna(r.get("plant")) and str(r.get("plant")).strip() else PLANTS[0]
                                     pricing_key = SKU_TO_PRICING_KEY.get(product, product)
-                                    result = calculate_production(pricing_key, nos, rm, prod_cfg_i, pipe_diameter_config=pipe_dia_cfg_i)
+                                    r_date = str(pd.to_datetime(r["date"]).date())
+                                    line_count = int(lines_per_date.get(r_date, 1))
+                                    result = calculate_production(pricing_key, nos, rm, prod_cfg_i,
+                                                                    pipe_diameter_config=pipe_dia_cfg_i, entry_count=line_count)
                                     record = {
-                                        "date": str(pd.to_datetime(r["date"]).date()),
+                                        "date": r_date,
                                         "product": product, "nos": nos, "plant": plant,
                                         **result,
                                     }
