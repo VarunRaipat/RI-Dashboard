@@ -363,12 +363,17 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
 
     total_produced_m3   = prod_t["concrete_qty"].sum() if "concrete_qty" in prod_t.columns else 0
     total_dispatched_m3 = disp_t["concrete_m3"].sum()  if "concrete_m3"  in disp_t.columns else 0
+    total_dispatched_nos = disp_t["qty_dispatched"].sum() if "qty_dispatched" in disp_t.columns else 0
     total_ordered_nos   = ord_t["qty_ordered"].sum()   if "qty_ordered"  in ord_t.columns  else 0
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("m³ Produced",           f"{total_produced_m3:,.1f} m³")
-    k2.metric("m³ Dispatched",         f"{total_dispatched_m3:,.1f} m³")
-    k3.metric("Nos. Ordered (Demand)", f"{total_ordered_nos:,.0f}")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("m³ Produced",             f"{total_produced_m3:,.1f} m³")
+    k2.metric("m³ Dispatched",           f"{total_dispatched_m3:,.1f} m³")
+    k3.metric("Nos. Dispatched (Demand)", f"{total_dispatched_nos:,.0f}")
+    k4.metric("Nos. Ordered",            f"{total_ordered_nos:,.0f}")
+    if total_ordered_nos == 0:
+        st.caption("Demand below is based on dispatched quantity — the Sales Orders module has no rows yet, "
+                   "so ordered-quantity demand will appear here automatically once orders start getting logged.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -388,41 +393,84 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
         else:
             st.caption("No data.")
 
+    # Demand runs off whichever of Orders/Dispatch actually has data for this
+    # SKU — Orders is the truer "customer wants this" signal, but the Sales
+    # Orders module isn't in regular use yet, so Dispatch (what's actually
+    # left the factory) is what's populated today.
+    demand_df, demand_col, demand_label = (
+        (ord_t, "qty_ordered", "Qty Ordered") if total_ordered_nos > 0
+        else (disp_t, "qty_dispatched", "Qty Dispatched")
+    )
+
     with c2:
-        st.markdown("**Demand (Qty Ordered) by Diameter**")
-        if "qty_ordered" in ord_t.columns and not ord_t.empty:
-            dem_d = ord_t.groupby("Diameter")["qty_ordered"].sum().sort_values(ascending=False)
+        st.markdown(f"**Demand ({demand_label}) by Diameter**")
+        if demand_col in demand_df.columns and not demand_df.empty:
+            dem_d = demand_df.groupby("Diameter")[demand_col].sum().sort_values(ascending=False)
             fig2 = go.Figure(go.Bar(
                 x=[f"{d}mm" for d in dem_d.index], y=dem_d.values,
                 marker_color="#D4A011", text=dem_d.values.astype(int), textposition="outside",
             ))
-            fig2.update_layout(**PLOT, height=320, yaxis_title="Nos. Ordered")
+            fig2.update_layout(**PLOT, height=320, yaxis_title=demand_label)
             st.plotly_chart(fig2, use_container_width=True)
         else:
-            st.caption("No sales order data for pipes in this period.")
+            st.caption("No dispatch or order data for pipes in this period.")
 
     c3, c4 = st.columns(2)
     with c3:
         st.markdown("**Demand by Class**")
-        if "qty_ordered" in ord_t.columns and not ord_t.empty:
-            dem_c = ord_t.groupby("Class")["qty_ordered"].sum()
+        if demand_col in demand_df.columns and not demand_df.empty:
+            dem_c = demand_df.groupby("Class")[demand_col].sum()
             fig3 = go.Figure(go.Pie(labels=dem_c.index, values=dem_c.values, hole=0.45,
                                      marker_colors=["#8B2428", "#3B82F6", "#D4A011"]))
             fig3.update_layout(**PLOT, height=280)
             st.plotly_chart(fig3, use_container_width=True)
         else:
-            st.caption("No sales order data for pipes in this period.")
+            st.caption("No dispatch or order data for pipes in this period.")
 
     with c4:
         st.markdown("**Demand by Joint Type**")
-        if "qty_ordered" in ord_t.columns and not ord_t.empty:
-            dem_j = ord_t.groupby("Joint")["qty_ordered"].sum()
+        if demand_col in demand_df.columns and not demand_df.empty:
+            dem_j = demand_df.groupby("Joint")[demand_col].sum()
             fig4 = go.Figure(go.Pie(labels=dem_j.index, values=dem_j.values, hole=0.45,
                                      marker_colors=["#A78BFA", "#22D3EE", "#E05252"]))
             fig4.update_layout(**PLOT, height=280)
             st.plotly_chart(fig4, use_container_width=True)
         else:
-            st.caption("No sales order data for pipes in this period.")
+            st.caption("No dispatch or order data for pipes in this period.")
+
+    st.markdown("**Monthly Trend — m³ Produced vs Dispatched**")
+    prod_m, disp_m = pd.Series(dtype=float), pd.Series(dtype=float)
+    prod_month, disp_month = None, None
+    if not prod_t.empty:
+        prod_month = pd.to_datetime(prod_t["date"]).dt.to_period("M").dt.to_timestamp()
+        if "concrete_qty" in prod_t.columns:
+            prod_m = prod_t.groupby(prod_month)["concrete_qty"].sum()
+    if not disp_t.empty:
+        disp_month = pd.to_datetime(disp_t["date"]).dt.to_period("M").dt.to_timestamp()
+        if "concrete_m3" in disp_t.columns:
+            disp_m = disp_t.groupby(disp_month)["concrete_m3"].sum()
+    months = sorted(set(prod_m.index) | set(disp_m.index))
+    if months:
+        month_labels = [m.strftime("%b %Y") for m in months]
+        fig_m = go.Figure()
+        fig_m.add_trace(go.Bar(name="Produced", x=month_labels,
+                                y=[round(prod_m.get(m, 0), 2) for m in months], marker_color="#8B2428"))
+        fig_m.add_trace(go.Bar(name="Dispatched", x=month_labels,
+                                y=[round(disp_m.get(m, 0), 2) for m in months], marker_color="#27AE60"))
+        fig_m.update_layout(**PLOT, height=320, barmode="group", yaxis_title="m³",
+                             legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_m, use_container_width=True)
+
+        month_tbl = pd.DataFrame({"Month": month_labels}, index=months)
+        month_tbl["m³ Produced"]   = [round(prod_m.get(m, 0), 1) for m in months]
+        month_tbl["m³ Dispatched"] = [round(disp_m.get(m, 0), 1) for m in months]
+        if "nos" in prod_t.columns and not prod_t.empty:
+            month_tbl["Nos Produced"] = [int(prod_t.groupby(prod_month)["nos"].sum().get(m, 0)) for m in months]
+        if "qty_dispatched" in disp_t.columns and not disp_t.empty:
+            month_tbl["Nos Dispatched"] = [int(disp_t.groupby(disp_month)["qty_dispatched"].sum().get(m, 0)) for m in months]
+        st.dataframe(month_tbl.reset_index(drop=True), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No data.")
 
     st.markdown("**Full Breakdown — Diameter x Class x Joint**")
     group_cols = ["Diameter", "Class", "Joint"]
