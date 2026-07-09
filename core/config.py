@@ -30,12 +30,17 @@ DEFAULT_RM_PRICES["concrete"] = 2500.0  # confirmed rate: Concrete Cost = Volume
 RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
-# Formula: Total Cost = RM (Concrete+Steel) + Production + Loading/Unloading
-#                      + Welding + Jalli (cage welding) + EMI + Power + Admin, then + Misc%
-EMI_PER_ENTRY   = round(283_000 / 30, 2)  # Rs. 283,000/month EMI ÷ 30 days — confirmed
-POWER_PER_ENTRY =  1_000  # Rs. 30,000/month power (incl. DG) ÷ 30 days — confirmed
-ADMIN_PER_ENTRY =  1_500  # Rs. fixed per DPR entry (daily) — confirmed
-MISC_PCT        =   20.0  # % of all costs — confirmed
+# Formula: Product (variable) Cost = RM (Concrete+Steel) + Production +
+#          Loading/Unloading + Welding + Jalli (cage welding), then + Misc%.
+# EMI/Power/Admin are whole-factory overheads that run regardless of which
+# products (or how many) were made on a given day, so they are charged once
+# per calendar day that has production — never split across product lines —
+# and only ever appear in day/period-level totals (see
+# core.calculations.daily_fixed_costs), not on individual DPR entries.
+EMI_PER_DAY   = round(283_000 / 30, 2)  # Rs. 283,000/month EMI ÷ 30 days — confirmed
+POWER_PER_DAY =  1_000  # Rs. 30,000/month power (incl. DG) ÷ 30 days — confirmed
+ADMIN_PER_DAY =  1_500  # Rs. fixed per production day — confirmed
+MISC_PCT      =   20.0  # % of variable product costs — confirmed
 
 # GST on Selling Price — 18%. How this factors into profit_pct is being
 # confirmed with the client before wiring into calculate_production().
@@ -116,8 +121,8 @@ def _joint_types_for(diameter_mm, cls):
 # concrete_volume_m3 / steel_kg_per_unit: fixed physical quantity per unit —
 # usage per DPR entry = Nos x this figure, at the matching RM Prices rate
 # (see RAW_MATERIALS above).
-# No "power_per_block" — Power is now a flat POWER_PER_ENTRY (like EMI/
-# Admin), not a per-unit rate.
+# No "power_per_block" — Power is a factory-wide flat POWER_PER_DAY (like
+# EMI/Admin), not a per-unit or per-product rate.
 def _blank_rates():
     return {
         "selling_price":          0.0,

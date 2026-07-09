@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import date, timedelta
 from core.db import get_production, get_dispatch, get_orders
 from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG, parse_pipe_sku
+from core.calculations import daily_fixed_costs
 
 LAKH = 100_000
 
@@ -595,6 +596,39 @@ def show(PLOT):
     if df_prod.empty and df_disp.empty:
         st.warning("No data for selected period. Enter some DPR or Dispatch records first.")
         return
+
+    # ── Factory-Wide Financial Summary ────────────────────────────────────────
+    # EMI/Power/Admin are whole-factory overheads, not attributable to any one
+    # product or DPR line, so they're charged exactly once per calendar day
+    # that had production in this period — computed here, at the combined
+    # (Pipe + Other) level, so they're never double-counted across the two
+    # category sections rendered below.
+    production_days = int(df_prod["date"].nunique()) if not df_prod.empty else 0
+    fixed = daily_fixed_costs(production_days)
+    gross_revenue = df_prod["revenue"].sum() if not df_prod.empty else 0
+    gross_variable_cost = df_prod["total_cost"].sum() if not df_prod.empty else 0
+    gross_margin = gross_revenue - gross_variable_cost
+    net_profit = gross_margin - fixed["total"]
+    net_profit_pct = (net_profit / gross_revenue * 100) if gross_revenue else 0
+
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,rgba(39,174,96,0.12),rgba(39,174,96,0.04));
+         border:1px solid rgba(39,174,96,0.20); border-left:4px solid #27AE60;
+         border-radius:10px; padding:10px 18px; margin-bottom:16px;">
+        <span style="font-size:0.68rem;font-weight:700;letter-spacing:0.14em;
+              text-transform:uppercase;color:#5FCB8C;">
+            🏭 Factory-Wide Financial Summary — Production Value − Variable Cost − EMI − Power − Admin
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Production Value", f"₹{gross_revenue/LAKH:.2f}L")
+    n2.metric("Gross Margin", f"₹{gross_margin/LAKH:.2f}L",
+              help="Production Value minus variable per-product costs (RM, Production, Loading/Unloading, Welding, Jalli, Misc)")
+    n3.metric(f"Fixed Costs ({production_days}d × EMI+Power+Admin)", f"₹{fixed['total']/LAKH:.2f}L",
+              help=f"EMI ₹{fixed['emi_cost']/LAKH:.2f}L · Power ₹{fixed['power_cost']/LAKH:.2f}L · Admin ₹{fixed['admin_cost']/LAKH:.2f}L — charged once per production day, not per product")
+    n4.metric("Net Profit", f"₹{net_profit/LAKH:.2f}L", delta=f"{net_profit_pct:.1f}%")
+    st.markdown("---")
 
     # -- Production financials, split by category so Pipe economics never
     # blend with Slab/Pillar/Fencing Pillar/PSC Pole economics --------------

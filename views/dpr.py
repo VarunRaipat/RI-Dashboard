@@ -40,9 +40,11 @@ def show(PLOT):
     plant      = c2.radio("Plant", PLANTS, horizontal=True, key="dpr_plant")
 
     st.markdown('<div class="section-header">Products Made Today</div>', unsafe_allow_html=True)
-    st.caption("Add one line per pipe/product made today. Concrete, Steel, Jalli, Welding, "
-               "Production, and Power costs are computed automatically from each product's fixed "
-               "per-unit figures (Admin > Product Cost Configuration / Pipe Diameter Rates).")
+    st.caption("Add one line per pipe/product made today. Concrete, Steel, Jalli, Welding, and "
+               "Production costs are computed automatically from each product's fixed per-unit "
+               "figures (Admin > Product Cost Configuration / Pipe Diameter Rates). EMI/Power/Admin "
+               "are whole-factory overheads charged once per production day, not per line — see "
+               "the Dashboard for Net Profit including those.")
 
     n_lines = st.session_state.dpr_lines
     header_cols = st.columns([3, 2, 1])
@@ -78,13 +80,12 @@ def show(PLOT):
         saved_rows = []
         valid_lines = [i for i in range(st.session_state.dpr_lines)
                        if (st.session_state.get(f"dpr_nos_{i}", 0) or 0) > 0]
-        line_count = len(valid_lines)
         for i in valid_lines:
             nos = st.session_state.get(f"dpr_nos_{i}", 0) or 0
             product = st.session_state.get(f"dpr_prod_{i}", PRODUCTION_PRODUCTS[0])
             pricing_key = SKU_TO_PRICING_KEY.get(product, product)
             result = calculate_production(pricing_key, nos, rm, prod_cfg,
-                                            pipe_diameter_config=pipe_dia_cfg, entry_count=line_count)
+                                            pipe_diameter_config=pipe_dia_cfg)
             record = {
                 "date": str(entry_date), "product": product, "nos": nos,
                 "plant": plant,
@@ -127,7 +128,7 @@ def show(PLOT):
                 s1, s2, s3 = st.columns(3)
                 s1.metric("Total Nos.", f"{summary_df['Nos.'].sum():,.0f}")
                 s2.metric("Total Revenue", f"₹{summary_df['Revenue'].sum():,.0f}")
-                s3.metric("Total Profit", f"₹{summary_df['Profit'].sum():,.0f}")
+                s3.metric("Total Profit (before EMI/Power/Admin)", f"₹{summary_df['Profit'].sum():,.0f}")
 
             st.rerun()
 
@@ -222,10 +223,8 @@ def show(PLOT):
 
             if save:
                 e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
-                same_day_count = int((df_edit["date"] == pd.Timestamp(e_date)).sum())
-                line_count = same_day_count if row["date"] == pd.Timestamp(e_date) else same_day_count + 1
                 result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg,
-                                                pipe_diameter_config=pipe_dia_cfg, entry_count=line_count)
+                                                pipe_diameter_config=pipe_dia_cfg)
                 updated = {
                     "date": str(e_date), "product": e_product, "nos": e_nos,
                     "plant": e_plant,

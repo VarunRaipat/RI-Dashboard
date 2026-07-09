@@ -4,7 +4,7 @@ import pandas as pd
 from core.config import (
     DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT,
     PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES,
-    EMI_PER_ENTRY, POWER_PER_ENTRY, ADMIN_PER_ENTRY, MISC_PCT,
+    EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT,
 )
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
@@ -132,9 +132,9 @@ def show(PLOT):
                     })
 
                 st.caption(
-                    f"Fixed costs (all products): EMI ₹{EMI_PER_ENTRY:,.2f} · "
-                    f"Power (incl. DG) ₹{POWER_PER_ENTRY:,.0f} · "
-                    f"Admin ₹{ADMIN_PER_ENTRY:,.0f} · Misc {MISC_PCT:.0f}%"
+                    f"Factory-wide fixed costs, charged once per production day (not per product): "
+                    f"EMI ₹{EMI_PER_DAY:,.2f} · Power (incl. DG) ₹{POWER_PER_DAY:,.0f} · "
+                    f"Admin ₹{ADMIN_PER_DAY:,.0f} · Misc {MISC_PCT:.0f}% (on this product's variable costs)"
                 )
 
                 if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
@@ -164,8 +164,8 @@ def show(PLOT):
 
         with cfg_sub2:
             st.caption("These 5 rates apply to every class (NP2/NP3/NP4) and Joint Type at the "
-                       "selected diameter — set once per diameter, not per SKU. Power is a fixed "
-                       "₹1,000/entry cost applied to every DPR entry, not set here.")
+                       "selected diameter — set once per diameter, not per SKU. Power is a factory-wide "
+                       "fixed cost charged once per production day (Dashboard), not set here.")
 
             dia_cfg_all = get_pipe_diameter_config()
             sel_dia = st.selectbox("Select Diameter (mm)", HUME_PIPE_DIAMETERS_MM, key="dia_cfg_sel")
@@ -274,8 +274,6 @@ def show(PLOT):
                                 rm = get_rm_prices()
                                 prod_cfg_i = get_product_config()
                                 pipe_dia_cfg_i = get_pipe_diameter_config()
-                                valid_rows = imp_df[imp_df["nos"].astype(float) > 0]
-                                lines_per_date = valid_rows["date"].apply(lambda d: str(pd.to_datetime(d).date())).value_counts()
                                 imported = 0
                                 for _, r in imp_df.iterrows():
                                     nos = float(r["nos"])
@@ -285,9 +283,8 @@ def show(PLOT):
                                     plant = str(r["plant"]).strip() if "plant" in imp_df.columns and pd.notna(r.get("plant")) and str(r.get("plant")).strip() else PLANTS[0]
                                     pricing_key = SKU_TO_PRICING_KEY.get(product, product)
                                     r_date = str(pd.to_datetime(r["date"]).date())
-                                    line_count = int(lines_per_date.get(r_date, 1))
                                     result = calculate_production(pricing_key, nos, rm, prod_cfg_i,
-                                                                    pipe_diameter_config=pipe_dia_cfg_i, entry_count=line_count)
+                                                                    pipe_diameter_config=pipe_dia_cfg_i)
                                     record = {
                                         "date": r_date,
                                         "product": product, "nos": nos, "plant": plant,

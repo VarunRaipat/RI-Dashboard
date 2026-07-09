@@ -95,9 +95,10 @@ CREATE TABLE IF NOT EXISTS rm_prices (
 -- "product" must be unique so the app's upsert
 -- (Prefer: resolution=merge-duplicates) works. No transport column — real
 -- transport cost is tracked in the Dispatch module instead.
--- No power_per_block column — Power is a flat Rs.1,000/entry cost (like
--- EMI/Admin), not a per-unit rate; see core/config.py's POWER_PER_ENTRY.
--- (Power now also covers DG — see core/config.py.)
+-- No power_per_block column — Power is a factory-wide flat Rs.1,000/day cost
+-- (like EMI/Admin), not a per-unit or per-entry rate; charged once per
+-- production day, not per DPR line — see core/config.py's POWER_PER_DAY and
+-- core/calculations.py's daily_fixed_costs(). (Power also covers DG.)
 CREATE TABLE IF NOT EXISTS product_config (
     id                      BIGSERIAL PRIMARY KEY,
     product                 TEXT UNIQUE NOT NULL,
