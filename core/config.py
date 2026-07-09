@@ -39,7 +39,7 @@ RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 # core.calculations.daily_fixed_costs), not on individual DPR entries.
 EMI_PER_DAY   = round(283_000 / 30, 2)  # Rs. 283,000/month EMI ÷ 30 days — confirmed
 POWER_PER_DAY =  1_000  # Rs. 30,000/month power (incl. DG) ÷ 30 days — confirmed
-ADMIN_PER_DAY =  1_500  # Rs. fixed per production day — confirmed
+ADMIN_PER_DAY =  15_000  # Rs. fixed per production day — confirmed
 MISC_PCT      =   20.0  # % of variable product costs — confirmed
 
 # GST on Selling Price — 18%. How this factors into profit_pct is being
