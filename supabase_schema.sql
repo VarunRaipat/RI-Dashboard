@@ -180,6 +180,11 @@ CREATE TABLE IF NOT EXISTS quotations (
     amount          REAL DEFAULT 0,
     gst_applicable  BOOLEAN DEFAULT false,
     gst_amount      REAL DEFAULT 0,
+    transport_mode  TEXT DEFAULT 'per_unit',
+    transport_rate  REAL DEFAULT 0,
+    transport_value REAL DEFAULT 0,
+    transport_gst_applicable BOOLEAN DEFAULT false,
+    transport_gst_amount     REAL DEFAULT 0,
     sales_person    TEXT,
     status          TEXT DEFAULT 'Sent',
     discount_pct    REAL DEFAULT 0,
@@ -188,6 +193,12 @@ CREATE TABLE IF NOT EXISTS quotations (
     remarks         TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+-- If you already ran the CREATE TABLE above without transport columns:
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_mode TEXT DEFAULT 'per_unit';
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS vendor_transactions (
     id              BIGSERIAL PRIMARY KEY,

@@ -321,15 +321,19 @@ def generate_quotation(quote_no, header, lines):
     story.append(_detail_grid(ss, client_pairs, [43 * mm, 43 * mm, 43 * mm, 45 * mm]))
     story.append(Spacer(1, 7 * mm))
 
-    has_gst = any(float(line.get("gst_amount", 0) or 0) > 0 for line in lines)
+    has_gst       = any(float(line.get("gst_amount", 0) or 0) > 0 for line in lines)
+    has_transport = any(float(line.get("transport_value", 0) or 0) > 0 for line in lines)
     head = ["PRODUCT", "QTY", "UNIT", "RATE (RS.)"]
     if has_gst:
         head += ["GST (RS.)"]
+    if has_transport:
+        head += ["TRANSPORT (RS.)"]
     head += ["AMOUNT (RS.)"]
 
     rows = [head]
     subtotal = 0.0
     total_gst = 0.0
+    total_transport = 0.0
     for line in lines:
         prod = line.get("product", "")
         qty  = float(line.get("qty", 0) or 0)
@@ -337,21 +341,28 @@ def generate_quotation(quote_no, header, lines):
         rate = float(line.get("rate", 0) or 0)
         amt  = float(line.get("amount", 0) or 0)
         gst  = float(line.get("gst_amount", 0) or 0)
-        subtotal  += amt
-        total_gst += gst
+        transport = float(line.get("transport_value", 0) or 0)
+        transport_gst = float(line.get("transport_gst_amount", 0) or 0)
+        subtotal        += amt
+        total_gst        += gst
+        total_transport  += transport + transport_gst
         row = [prod, f"{qty:,.0f}", unit, f"{rate:,.2f}"]
         if has_gst:
             row += [f"{gst:,.2f}"]
+        if has_transport:
+            row += [f"{transport + transport_gst:,.2f}"]
         row += [f"{amt + gst:,.2f}"]
         rows.append(row)
 
     discount_pct = float(header.get("discount_pct", 0) or 0)
     discount_amt = round((subtotal + total_gst) * discount_pct / 100, 2)
-    grand_total  = subtotal + total_gst - discount_amt
+    grand_total  = subtotal + total_gst - discount_amt + total_transport
 
     total_row = ["", "", "", ""]
     if has_gst:
         total_row += [f"{total_gst:,.2f}"]
+    if has_transport:
+        total_row += [f"{total_transport:,.2f}"]
     total_row += [f"{subtotal:,.2f}"]
     rows.append(["SUBTOTAL"] + total_row[1:])
 

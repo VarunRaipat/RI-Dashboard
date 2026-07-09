@@ -5,9 +5,9 @@ from core.config import (ORDER_PRODUCTS, CLIENT_TYPES, QUOTATION_UNITS, QUOTATIO
                          QUOTATION_VALIDITY_DAYS, PAYMENT_MODES, SALE_TYPES, GST_PCT)
 from core.db import (insert_quotation, get_quotations, update_quotation, delete_quotation,
                      get_orders, insert_order)
-from core.calculations import gst_split
+from core.calculations import gst_split, transport_charge
 from core.pdf import generate_quotation, generate_dispatch_instruction
-from core.ui import client_name_field, flash, show_flashes, interactive_table, date_range_filter
+from core.ui import client_name_field, flash, show_flashes, interactive_table, date_range_filter, transport_fields
 from core.sequencing import fy_start, next_sequence_number
 
 LAKH = 100_000
@@ -207,6 +207,7 @@ def show(PLOT):
     header_cols[4].markdown("**Amount (₹)**")
 
     quote_total = 0.0
+    total_qty = 0.0
     for n, lid in enumerate(line_ids):
         cols = st.columns([3, 1.5, 1.5, 2, 2, 1])
         cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"quo_prod_{lid}", label_visibility="collapsed")
@@ -218,6 +219,7 @@ def show(PLOT):
         line_base = float(qty_v) * float(rate_v)
         line_gst, line_amt = gst_split(line_base, gst_applicable)
         quote_total += line_amt
+        total_qty += float(qty_v)
         cols[4].markdown(
             f"<div style='padding:9px 0;font-weight:600;'>₹{line_amt:,.2f}</div>",
             unsafe_allow_html=True,
@@ -232,11 +234,17 @@ def show(PLOT):
         st.session_state.quote_next_line_id += 1
         st.rerun()
 
+    transport_mode, transport_rate, transport_gst_applicable = transport_fields("quo")
+    _preview_t_value, _preview_t_gst = transport_charge(transport_mode, transport_rate, total_qty, transport_gst_applicable)
+    _transport_total = _preview_t_value + _preview_t_gst
+
     _discount_amt  = quote_total * discount_pct / 100
-    _net_total     = quote_total - _discount_amt
+    _net_total     = quote_total - _discount_amt + _transport_total
     _total_lines = [f"Subtotal (incl. GST): ₹{quote_total:,.2f}"]
     if discount_pct:
         _total_lines.append(f"Discount ({discount_pct:g}%): -₹{_discount_amt:,.2f}")
+    if _transport_total:
+        _total_lines.append(f"Transport (incl. GST): ₹{_transport_total:,.2f}")
     _total_lines.append(f"Grand Total: ₹{_net_total:,.2f}")
     st.markdown(
         "<div style='text-align:right;margin-top:6px'>"
@@ -283,13 +291,22 @@ def show(PLOT):
                 unit = st.session_state.get(f"quo_unit_{lid}", QUOTATION_UNITS[0])
                 base = round(qty_v * rate_v, 2)
                 gst_amt, _ = gst_split(base, gst_applicable)
+                # Per-unit transport applies to every line; a Flat amount is
+                # billed once per quotation, so it only goes on the first
+                # saved line (same convention as Dispatch Entry).
+                t_rate = transport_rate if (transport_mode == "per_unit" or saved == 0) else 0
+                t_value, t_gst_amt = transport_charge(transport_mode, t_rate, qty_v, transport_gst_applicable)
                 insert_quotation({
                     **common_fields,
                     "product": prod, "qty": qty_v, "unit": unit, "rate": rate_v,
                     "amount": base, "gst_applicable": gst_applicable, "gst_amount": gst_amt,
+                    "transport_mode": transport_mode, "transport_rate": t_rate,
+                    "transport_value": t_value, "transport_gst_applicable": transport_gst_applicable,
+                    "transport_gst_amount": t_gst_amt,
                 })
                 pdf_lines.append({"product": prod, "qty": qty_v, "unit": unit, "rate": rate_v,
-                                   "amount": base, "gst_amount": gst_amt})
+                                   "amount": base, "gst_amount": gst_amt,
+                                   "transport_value": t_value, "transport_gst_amount": t_gst_amt})
                 saved += 1
 
             if saved:
@@ -360,7 +377,9 @@ def show(PLOT):
             "sale_type":      qhdr.get("sale_type", "Sale A"),
             "remarks":        qhdr.get("remarks", ""),
         }
-        redl_lines = q_rows[["product", "qty", "unit", "rate", "amount", "gst_amount"]].to_dict("records")
+        redl_cols = ["product", "qty", "unit", "rate", "amount", "gst_amount", "transport_value", "transport_gst_amount"]
+        redl_cols = [c for c in redl_cols if c in q_rows.columns]
+        redl_lines = q_rows[redl_cols].to_dict("records")
         redl_pdf = generate_quotation(sel_qno, redl_header, redl_lines)
         st.download_button(
             "🖨️ Download Quotation PDF", data=redl_pdf,
@@ -420,15 +439,23 @@ def show(PLOT):
                     pdf_lines_cv = []
                     for _, r in q_rows.iterrows():
                         gst_amt = float(r.get("gst_amount", 0) or 0)
+                        t_value = float(r.get("transport_value", 0) or 0)
+                        t_gst_amt = float(r.get("transport_gst_amount", 0) or 0)
                         insert_order({
                             **common_ord, "di_no": new_di,
                             "product": r["product"], "qty_ordered": r["qty"],
                             "rate": r["rate"], "total_amount": r["amount"],
                             "gst_applicable": gst_amt > 0, "gst_amount": gst_amt,
+                            "transport_mode": r.get("transport_mode", "per_unit"),
+                            "transport_rate": r.get("transport_rate", 0),
+                            "transport_value": t_value,
+                            "transport_gst_applicable": bool(r.get("transport_gst_applicable", False)),
+                            "transport_gst_amount": t_gst_amt,
                         })
                         pdf_lines_cv.append({
                             "product": r["product"], "qty_ordered": r["qty"],
                             "rate": r["rate"], "total_amount": r["amount"], "gst_amount": gst_amt,
+                            "transport_value": t_value, "transport_gst_amount": t_gst_amt,
                         })
                     for _, r in q_rows.iterrows():
                         update_quotation(int(r["id"]), {"status": "Converted", "converted_di_no": new_di})

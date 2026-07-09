@@ -1158,15 +1158,19 @@ def show(PLOT):
         with oc1:
             st.markdown('<div class="section-header">🔵 Pipe Products</div>', unsafe_allow_html=True)
             if not df_prod_pipe.empty:
-                st.metric("Production Value", f"₹{df_prod_pipe['revenue'].sum()/LAKH:.2f}L")
-                st.metric("Profit", f"₹{df_prod_pipe['profit'].sum()/LAKH:.2f}L")
+                pm1, pm2, pm3 = st.columns(3)
+                pm1.metric("Production Value", f"₹{df_prod_pipe['revenue'].sum()/LAKH:.2f}L")
+                pm2.metric("Profit", f"₹{df_prod_pipe['profit'].sum()/LAKH:.2f}L")
+                pm3.metric("Dispatch Value", f"₹{(df_disp_pipe['dispatch_value'].sum() if not df_disp_pipe.empty else 0)/LAKH:.2f}L")
             else:
                 st.caption("No pipe production this period.")
         with oc2:
             st.markdown('<div class="section-header">⚙️ Other Precast Products</div>', unsafe_allow_html=True)
             if not df_prod_other.empty:
-                st.metric("Production Value", f"₹{df_prod_other['revenue'].sum()/LAKH:.2f}L")
-                st.metric("Profit", f"₹{df_prod_other['profit'].sum()/LAKH:.2f}L")
+                om1, om2, om3 = st.columns(3)
+                om1.metric("Production Value", f"₹{df_prod_other['revenue'].sum()/LAKH:.2f}L")
+                om2.metric("Profit", f"₹{df_prod_other['profit'].sum()/LAKH:.2f}L")
+                om3.metric("Dispatch Value", f"₹{(df_disp_other['dispatch_value'].sum() if not df_disp_other.empty else 0)/LAKH:.2f}L")
             else:
                 st.caption("No other-product production this period.")
 
