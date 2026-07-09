@@ -512,6 +512,8 @@ with st.sidebar:
     if role in ("admin", "production", "factory", "viewer"):
         pages.append("📋  DPR Entry")
     if role in ("admin", "headoffice", "viewer"):
+        pages.append("🧾  Quotation")
+    if role in ("admin", "headoffice", "viewer"):
         pages.append("📦  Sales Orders")
     if role in ("admin", "dispatch", "factory", "headoffice", "viewer"):
         pages.append("🚚  Dispatch Entry")
@@ -547,6 +549,8 @@ if st.session_state.get("_logged_page") != page:
 # ── Route ─────────────────────────────────────────────────────────────────────
 if page == "📋  DPR Entry":
     from views.dpr import show; show(PLOT)
+elif page == "🧾  Quotation":
+    from views.quotation import show; show(PLOT)
 elif page == "📦  Sales Orders":
     from views.orders import show; show(PLOT)
 elif page == "🚚  Dispatch Entry":

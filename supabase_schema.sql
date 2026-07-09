@@ -156,6 +156,39 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Quotations: pre-order client quotes, auto-numbered "QTN/25-26/0001"-style
+-- (resets each financial year — see core.sequencing.fy_start), one row per
+-- product line. amount/gst_amount follow the same split as orders/dispatch
+-- (gst_applicable + gst_amount, not GST-inclusive rate) for consistency with
+-- the rest of the app. converted_di_no is set when a quotation is turned
+-- into a Sales Order via the Quotation page.
+CREATE TABLE IF NOT EXISTS quotations (
+    id              BIGSERIAL PRIMARY KEY,
+    quote_no        TEXT    NOT NULL,
+    quote_date      TEXT    NOT NULL,
+    valid_until     TEXT,
+    client_name     TEXT,
+    contact_person  TEXT,
+    phone           TEXT,
+    office          TEXT,
+    gstin           TEXT,
+    client_type     TEXT,
+    product         TEXT    NOT NULL,
+    qty             REAL DEFAULT 0,
+    unit            TEXT,
+    rate            REAL DEFAULT 0,
+    amount          REAL DEFAULT 0,
+    gst_applicable  BOOLEAN DEFAULT false,
+    gst_amount      REAL DEFAULT 0,
+    sales_person    TEXT,
+    status          TEXT DEFAULT 'Sent',
+    discount_pct    REAL DEFAULT 0,
+    converted_di_no TEXT,
+    sale_type       TEXT DEFAULT 'Sale A',
+    remarks         TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS vendor_transactions (
     id              BIGSERIAL PRIMARY KEY,
     date            TEXT    NOT NULL,

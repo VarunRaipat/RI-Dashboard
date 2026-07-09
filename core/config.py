@@ -247,6 +247,10 @@ CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer"]
 
 FACTORIES = ["Rameshwaram Industries"]
 
+QUOTATION_UNITS         = ["Nos", "Rft", "Cft", "Sqft"]
+QUOTATION_STATUS        = ["Draft", "Sent", "Accepted", "Rejected", "Expired", "Converted"]
+QUOTATION_VALIDITY_DAYS = 30
+
 # TODO: replace with real plant/unit names if production runs across more than one.
 PLANTS = ["Main Plant"]
 

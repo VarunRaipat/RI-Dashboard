@@ -769,6 +769,54 @@ def delete_order(row_id):
     log_activity("delete", "Sales Orders", f"ID {row_id}")
 
 
+def insert_quotation(data):
+    if _use_supabase(): _sb_insert("quotations", data)
+    else: _sqlite_insert("quotations", data)
+    _invalidate_cache()
+    log_activity("create", "Quotation", f"{data.get('quote_no','')} · {data.get('client_name','')} · {data.get('product','')}")
+
+
+@st.cache_data(ttl=30)
+def get_quotations():
+    if _use_supabase():
+        r = requests.get(_sb_url("quotations"), headers=_headers(),
+                         params={"select": "*", "order": "quote_date.desc,id.desc", "limit": 5000})
+        if r.status_code != 200:
+            return pd.DataFrame()  # table likely not created yet
+        data = r.json()
+        return pd.DataFrame(data) if data else pd.DataFrame()
+    else:
+        try:
+            con = _conn()
+            df = pd.read_sql("SELECT * FROM quotations ORDER BY quote_date DESC, id DESC", con)
+            con.close()
+            return df
+        except Exception:
+            return pd.DataFrame()
+
+
+def update_quotation(row_id, data):
+    if _use_supabase():
+        _sb_update("quotations", row_id, data)
+    else:
+        con = _conn()
+        sets = ", ".join(f"{k} = ?" for k in data)
+        con.execute(f"UPDATE quotations SET {sets} WHERE id = ?", list(data.values()) + [row_id])
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Quotation", f"ID {row_id}")
+
+
+def delete_quotation(row_id):
+    if _use_supabase(): _sb_delete("quotations", row_id)
+    else:
+        con = _conn()
+        con.execute("DELETE FROM quotations WHERE id = ?", (row_id,))
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("delete", "Quotation", f"ID {row_id}")
+
+
 def delete_dispatch_ids(ids):
     """Delete a list of dispatch IDs in a single API call."""
     if not ids:
