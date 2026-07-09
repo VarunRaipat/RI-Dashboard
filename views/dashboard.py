@@ -124,31 +124,6 @@ def _render_production_section(df_prod, df_disp, label, accent, PLOT):
             if len(df_prod["product"].unique()) > 8:
                 st.caption(f"Top 8 of {df_prod['product'].unique().size} products shown — rest grouped as \"Other\".")
 
-        st.markdown('<div class="section-header">Daily Profit % Trend</div>', unsafe_allow_html=True)
-        top_products = _top_n_others(df_prod, "product", "revenue", n=8)
-        top_names = [p for p in top_products["product"] if p != "Other"]
-        daily = (df_prod[df_prod["product"].isin(top_names)]
-                 .groupby(["date", "product"])
-                 .agg(revenue=("revenue", "sum"), profit=("profit", "sum"))
-                 .reset_index())
-        daily["profit_pct"] = daily.apply(
-            lambda r: (r["profit"] / r["revenue"] * 100) if r["revenue"] else 0, axis=1
-        )
-        fig2 = go.Figure()
-        for i, prod in enumerate(sorted(daily["product"].unique())):
-            sub = daily[daily["product"] == prod].sort_values("date")
-            fig2.add_trace(go.Scatter(
-                x=sub["date"], y=sub["profit_pct"],
-                mode="lines+markers", name=prod,
-                line=dict(color=QUAL_COLORS[i % len(QUAL_COLORS)]),
-            ))
-        fig2.add_hline(y=0, line_dash="dash", line_color=BAD, opacity=0.5)
-        fig2.update_layout(**PLOT, height=300, yaxis_title="Profit %",
-                            legend=dict(orientation="h", y=-0.25, font=dict(size=10)))
-        st.plotly_chart(fig2, use_container_width=True)
-        if len(df_prod["product"].unique()) > 8:
-            st.caption("Showing top 8 products by revenue — see the table below for every product.")
-
         st.markdown('<div class="section-header">Product-wise P&L Summary</div>', unsafe_allow_html=True)
         agg_dict = {
             "Days":           ("date",       "nunique"),
@@ -1042,39 +1017,86 @@ def show(PLOT):
     ])
 
     with tabs[0]:
-        st.markdown('<div class="section-header">📅 Monthly Volumes</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">📅 Monthly Volumes (m³)</div>', unsafe_allow_html=True)
         mv1, mv2 = st.columns(2)
         with mv1:
-            st.markdown("**Monthly Production Volume (Nos.)**")
-            if not df_prod.empty:
+            st.markdown("**Monthly Production Volume (m³)**")
+            if not df_prod.empty and "concrete_qty" in df_prod.columns:
                 dp = df_prod.copy()
                 dp["date"] = pd.to_datetime(dp["date"])
-                mp = dp.groupby(dp["date"].dt.to_period("M").dt.to_timestamp())["nos"].sum().reset_index()
-                mp.columns = ["month", "nos"]
+                mp = dp.groupby(dp["date"].dt.to_period("M").dt.to_timestamp())["concrete_qty"].sum().reset_index()
+                mp.columns = ["month", "m3"]
                 fig_mp = go.Figure(go.Bar(
-                    x=mp["month"].dt.strftime("%b %Y"), y=mp["nos"],
-                    marker_color=ACCENT, text=mp["nos"].astype(int), textposition="outside",
+                    x=mp["month"].dt.strftime("%b %Y"), y=mp["m3"].round(2),
+                    marker_color=ACCENT, text=mp["m3"].round(2), textposition="outside",
                 ))
-                fig_mp.update_layout(**PLOT, height=300, yaxis_title="Nos. Produced")
-                st.plotly_chart(fig_mp, use_container_width=True)
+                fig_mp.update_layout(**PLOT, height=300, yaxis_title="m³ Produced")
+                st.plotly_chart(fig_mp, use_container_width=True, key="ov_monthly_prod_m3")
             else:
                 st.caption("No production data for selected period.")
 
         with mv2:
-            st.markdown("**Monthly Dispatch Volume (Nos.)**")
+            st.markdown("**Monthly Dispatch Volume (m³)**")
             if not df_disp.empty:
                 dd = df_disp.copy()
                 dd["date"] = pd.to_datetime(dd["date"])
-                md = dd.groupby(dd["date"].dt.to_period("M").dt.to_timestamp())["qty_dispatched"].sum().reset_index()
-                md.columns = ["month", "qty"]
+                per_unit = dd["product"].map(
+                    lambda p: PRODUCT_CONFIG.get(SKU_TO_PRICING_KEY.get(p, p), {}).get("concrete_volume_m3", 0)
+                )
+                dd["concrete_m3"] = dd["qty_dispatched"] * per_unit
+                md = dd.groupby(dd["date"].dt.to_period("M").dt.to_timestamp())["concrete_m3"].sum().reset_index()
+                md.columns = ["month", "m3"]
                 fig_md = go.Figure(go.Bar(
-                    x=md["month"].dt.strftime("%b %Y"), y=md["qty"],
-                    marker_color=GOOD, text=md["qty"].astype(int), textposition="outside",
+                    x=md["month"].dt.strftime("%b %Y"), y=md["m3"].round(2),
+                    marker_color=GOOD, text=md["m3"].round(2), textposition="outside",
                 ))
-                fig_md.update_layout(**PLOT, height=300, yaxis_title="Nos. Dispatched")
-                st.plotly_chart(fig_md, use_container_width=True)
+                fig_md.update_layout(**PLOT, height=300, yaxis_title="m³ Dispatched")
+                st.plotly_chart(fig_md, use_container_width=True, key="ov_monthly_disp_m3")
             else:
                 st.caption("No dispatch data for selected period.")
+
+        st.markdown("---")
+        st.markdown('<div class="section-header">💰 Production Mix by Value</div>', unsafe_allow_html=True)
+        if not df_prod.empty:
+            mix_all = _top_n_others(df_prod, "product", "revenue", n=8)
+            colors_all = (QUAL_COLORS + [OTHER_COLOR])[:len(mix_all)]
+            fig_mix = go.Figure(go.Pie(
+                labels=mix_all["product"], values=mix_all["revenue"], hole=0.42,
+                textinfo="percent", marker_colors=colors_all,
+            ))
+            fig_mix.update_layout(
+                **PLOT, height=340, showlegend=True,
+                legend=dict(orientation="v", x=1.0, y=0.5, font=dict(size=10)),
+            )
+            st.plotly_chart(fig_mix, use_container_width=True, key="ov_production_mix_value")
+            if df_prod["product"].unique().size > 8:
+                st.caption(f"Top 8 of {df_prod['product'].unique().size} products shown — rest grouped as \"Other\".")
+        else:
+            st.caption("No production data for selected period.")
+
+        st.markdown("---")
+        st.markdown('<div class="section-header">🏗️ m³ Produced vs Dispatched — Diameter-wise</div>', unsafe_allow_html=True)
+        prod_pipe_dia = _tag_pipe_skus(df_prod_pipe)
+        disp_pipe_dia = _tag_pipe_skus(df_disp_pipe)
+        if not disp_pipe_dia.empty:
+            per_unit_d = disp_pipe_dia["product"].map(
+                lambda p: PRODUCT_CONFIG.get(SKU_TO_PRICING_KEY.get(p, p), {}).get("concrete_volume_m3", 0)
+            )
+            disp_pipe_dia["concrete_m3"] = disp_pipe_dia["qty_dispatched"] * per_unit_d
+        p_by_d = prod_pipe_dia.groupby("Diameter")["concrete_qty"].sum() if "concrete_qty" in prod_pipe_dia.columns else pd.Series(dtype=float)
+        d_by_d = disp_pipe_dia.groupby("Diameter")["concrete_m3"].sum() if "concrete_m3" in disp_pipe_dia.columns else pd.Series(dtype=float)
+        diam_idx = sorted(set(p_by_d.index) | set(d_by_d.index))
+        if diam_idx:
+            fig_pd = go.Figure()
+            fig_pd.add_trace(go.Bar(name="Produced", x=[f"{d}mm" for d in diam_idx],
+                                     y=[round(p_by_d.get(d, 0), 2) for d in diam_idx], marker_color=ACCENT))
+            fig_pd.add_trace(go.Bar(name="Dispatched", x=[f"{d}mm" for d in diam_idx],
+                                     y=[round(d_by_d.get(d, 0), 2) for d in diam_idx], marker_color=GOOD))
+            fig_pd.update_layout(**PLOT, height=320, barmode="group", yaxis_title="m³",
+                                  legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_pd, use_container_width=True, key="ov_m3_produced_vs_dispatched_dia")
+        else:
+            st.caption("No pipe production or dispatch data for selected period.")
 
         st.markdown("---")
         # Demand signal falls back Orders -> Dispatch -> Production, in that
@@ -1109,7 +1131,7 @@ def show(PLOT):
                     marker_color=ACCENT, text=by_dia.values.astype(int), textposition="outside",
                 ))
                 fig_d.update_layout(**PLOT, height=300, yaxis_title=f"Nos. {cmp_label}")
-                st.plotly_chart(fig_d, use_container_width=True)
+                st.plotly_chart(fig_d, use_container_width=True, key="ov_cmp_diameter")
 
             with dc2:
                 st.markdown("**By Class**")
@@ -1119,7 +1141,7 @@ def show(PLOT):
                     textinfo="label+percent", marker_colors=QUAL_COLORS,
                 ))
                 fig_c.update_layout(**PLOT, height=300, showlegend=False)
-                st.plotly_chart(fig_c, use_container_width=True)
+                st.plotly_chart(fig_c, use_container_width=True, key="ov_cmp_class")
 
             with dc3:
                 st.markdown("**By Joint Type**")
@@ -1129,7 +1151,7 @@ def show(PLOT):
                     textinfo="label+percent", marker_colors=QUAL_COLORS[2:],
                 ))
                 fig_j.update_layout(**PLOT, height=300, showlegend=False)
-                st.plotly_chart(fig_j, use_container_width=True)
+                st.plotly_chart(fig_j, use_container_width=True, key="ov_cmp_joint")
 
         st.markdown("---")
         oc1, oc2 = st.columns(2)
