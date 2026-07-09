@@ -9,24 +9,55 @@ from core.calculations import daily_fixed_costs
 
 LAKH = 100_000
 
+# ── Shared chart palette ────────────────────────────────────────────────────
+# One consistent set of meanings used across every chart on this page, so
+# color always means the same thing: blue = neutral value/volume, green =
+# healthy profit, gold = thin margin, red = loss/danger. QUAL_COLORS is for
+# genuinely-categorical breakdowns (clients, payment modes, ...) capped at
+# 8 distinct hues + OTHER_COLOR for the "everything else" bucket.
+ACCENT       = "#246A8B"   # brand blue — neutral value/volume
+ACCENT_OTHER = "#14B8A6"   # teal — "Other Precast Products" category accent
+GOOD         = "#27AE60"
+WARN         = "#D4A011"
+BAD          = "#E05252"
+QUAL_COLORS  = ["#246A8B", "#27AE60", "#D4A011", "#A78BFA", "#22D3EE", "#E879F9", "#F97316", "#14B8A6"]
+OTHER_COLOR  = "#64748B"
 
-def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
+
+def _top_n_others(df, group_col, value_col, n=8, other_label="Other"):
+    """Collapse a long-tail categorical breakdown to the top n rows by
+    value_col plus one 'Other' row summing the rest. Hume Pipes alone have
+    30+ diameter/class/joint SKUs — grouping a pie or legend by raw SKU
+    turns unreadable past ~8 slices, so every chart that breaks down by
+    product/client/etc. should go through this first."""
+    if df.empty:
+        return pd.DataFrame(columns=[group_col, value_col])
+    s = df.groupby(group_col)[value_col].sum().sort_values(ascending=False)
+    if len(s) <= n:
+        return s.reset_index()
+    top = s.head(n)
+    other_sum = s.iloc[n:].sum()
+    out = top.reset_index()
+    if other_sum > 0:
+        out = pd.concat(
+            [out, pd.DataFrame({group_col: [other_label], value_col: [other_sum]})],
+            ignore_index=True,
+        )
+    return out
+
+
+def _profit_tier_color(pct):
+    return GOOD if pct >= 25 else WARN if pct >= 10 else BAD
+
+
+def _render_production_section(df_prod, df_disp, label, accent, PLOT):
     """Renders the Production & Financial Summary KPIs, Production Overview,
     Monthly Trends, and Cost Analysis for a given (already product-filtered)
     slice of production/dispatch data. Called once per product category
     (Pipes vs. everything else) so their profit/cost numbers are never
-    blended together."""
-    st.markdown(f"""
-    <div style="background:linear-gradient(135deg,{banner_color}1F,{banner_color}0A);
-         border:1px solid {banner_color}33; border-left:4px solid {banner_color};
-         border-radius:10px; padding:10px 18px; margin-bottom:16px;">
-        <span style="font-size:0.68rem;font-weight:700;letter-spacing:0.14em;
-              text-transform:uppercase;color:{banner_color};">
-            {label} — Production &amp; Financial Summary
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
+    blended together. Meant to be called inside its own tab — the caller's
+    tab label already identifies the category, so this only renders a plain
+    subheader, not a repeated colored banner."""
     if df_prod.empty:
         st.info(f"No {label} production data for the selected period.")
         return
@@ -38,17 +69,6 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
     avg_profit_pct = (total_profit / total_revenue * 100) if total_revenue else 0
     total_dispatch = df_disp["dispatch_value"].sum() if not df_disp.empty else 0
 
-    # Per-product nos breakdown
-    prod_nos = (df_prod.groupby("product")["nos"].sum()
-                .reset_index().sort_values("nos", ascending=False))
-    n = len(prod_nos)
-    p_cols = st.columns(min(n, 4))
-    for i, (_, prow) in enumerate(prod_nos.iterrows()):
-        p_cols[i % len(p_cols)].metric(prow["product"], f"{int(prow['nos']):,} nos")
-    if n > 1:
-        st.caption(f"Total production: **{total_nos:,.0f} nos** across {n} products")
-
-    # Financial KPIs
     f1, f2, f3, f4, f5 = st.columns(5)
     f1.metric("Production Value", f"₹{total_revenue/LAKH:.2f}L")
     f2.metric("Total Cost",       f"₹{total_cost/LAKH:.2f}L")
@@ -56,55 +76,78 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
     f4.metric("Avg Profit %",     f"{avg_profit_pct:.1f}%")
     f5.metric("Dispatch Value",   f"₹{total_dispatch/LAKH:.2f}L")
 
+    prod_nos = (df_prod.groupby("product")["nos"].sum()
+                .reset_index().sort_values("nos", ascending=False))
+    st.caption(f"**{total_nos:,.0f} nos** across {len(prod_nos)} product(s) — "
+               + ", ".join(f"{r['product']}: {int(r['nos']):,}" for _, r in prod_nos.head(6).iterrows())
+               + (" …" if len(prod_nos) > 6 else ""))
+
     st.markdown("---")
 
     df_prod = df_prod.copy()
     df_prod["date"] = pd.to_datetime(df_prod["date"])
 
-    with st.expander(f"📈 {label} — Production Overview", expanded=True):
+    with st.expander("📈 Production Overview", expanded=True):
         col1, col2 = st.columns(2)
 
         with col1:
             st.markdown('<div class="section-header">Daily Production</div>', unsafe_allow_html=True)
+            daily_tot = df_prod.groupby("date").agg(
+                nos=("nos", "sum"), revenue=("revenue", "sum"), profit=("profit", "sum"),
+            ).reset_index()
+            daily_tot["profit_pct"] = daily_tot.apply(
+                lambda r: (r["profit"] / r["revenue"] * 100) if r["revenue"] else 0, axis=1
+            )
             fig = go.Figure(go.Bar(
-                x=df_prod["date"], y=df_prod["nos"],
-                marker_color=[
-                    "#8B2428" if p >= 0 else "#5A3A3A"
-                    for p in df_prod["profit_pct"].fillna(0)
-                ],
-                text=df_prod["product"].apply(lambda x: x[:8]),
-                textposition="inside",
+                x=daily_tot["date"], y=daily_tot["nos"],
+                marker_color=[_profit_tier_color(p) for p in daily_tot["profit_pct"]],
+                customdata=daily_tot["profit_pct"].round(1),
+                hovertemplate="%{x|%d %b %Y}<br>%{y:,.0f} nos · %{customdata}% profit<extra></extra>",
             ))
             fig.update_layout(**PLOT, height=320, yaxis_title="Nos.")
             st.plotly_chart(fig, use_container_width=True)
+            st.caption("Bar color = that day's profit %: 🟢 ≥25% · 🟡 ≥10% · 🔴 below 10%")
 
         with col2:
             st.markdown('<div class="section-header">Production Mix by Value</div>', unsafe_allow_html=True)
-            mix = df_prod.groupby("product")["revenue"].sum().reset_index()
-            fig = px.pie(mix, values="revenue", names="product",
-                         hole=0.42,
-                         color_discrete_sequence=px.colors.qualitative.Bold)
-            fig.update_traces(texttemplate="%{label}<br>₹%{value:,.0f}<br>%{percent}")
-            fig.update_layout(**PLOT, height=320, showlegend=True)
+            mix = _top_n_others(df_prod, "product", "revenue", n=8)
+            colors = (QUAL_COLORS + [OTHER_COLOR])[:len(mix)]
+            fig = go.Figure(go.Pie(
+                labels=mix["product"], values=mix["revenue"], hole=0.42,
+                textinfo="percent", marker_colors=colors,
+            ))
+            fig.update_layout(
+                **PLOT, height=320, showlegend=True,
+                legend=dict(orientation="v", x=1.0, y=0.5, font=dict(size=10)),
+            )
             st.plotly_chart(fig, use_container_width=True)
+            if len(df_prod["product"].unique()) > 8:
+                st.caption(f"Top 8 of {df_prod['product'].unique().size} products shown — rest grouped as \"Other\".")
 
         st.markdown('<div class="section-header">Daily Profit % Trend</div>', unsafe_allow_html=True)
-        daily = (df_prod.groupby(["date", "product"])
+        top_products = _top_n_others(df_prod, "product", "revenue", n=8)
+        top_names = [p for p in top_products["product"] if p != "Other"]
+        daily = (df_prod[df_prod["product"].isin(top_names)]
+                 .groupby(["date", "product"])
                  .agg(revenue=("revenue", "sum"), profit=("profit", "sum"))
                  .reset_index())
         daily["profit_pct"] = daily.apply(
             lambda r: (r["profit"] / r["revenue"] * 100) if r["revenue"] else 0, axis=1
         )
         fig2 = go.Figure()
-        for prod in daily["product"].unique():
+        for i, prod in enumerate(sorted(daily["product"].unique())):
             sub = daily[daily["product"] == prod].sort_values("date")
             fig2.add_trace(go.Scatter(
                 x=sub["date"], y=sub["profit_pct"],
                 mode="lines+markers", name=prod,
+                line=dict(color=QUAL_COLORS[i % len(QUAL_COLORS)]),
             ))
-        fig2.add_hline(y=0, line_dash="dash", line_color="#FB7185", opacity=0.5)
-        fig2.update_layout(**PLOT, height=300, yaxis_title="Profit %")
+        fig2.add_hline(y=0, line_dash="dash", line_color=BAD, opacity=0.5)
+        fig2.update_layout(**PLOT, height=300, yaxis_title="Profit %",
+                            legend=dict(orientation="h", y=-0.25, font=dict(size=10)))
         st.plotly_chart(fig2, use_container_width=True)
+        if len(df_prod["product"].unique()) > 8:
+            st.caption("Showing top 8 products by revenue — see the table below for every product.")
 
         st.markdown('<div class="section-header">Product-wise P&L Summary</div>', unsafe_allow_html=True)
         agg_dict = {
@@ -129,6 +172,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             summ["Avg_Profit_Pct"] = summ.apply(
                 lambda r: (r["Profit"] / r["Revenue"] * 100) if r["Revenue"] else 0, axis=1
             )
+            summ = summ.sort_values("Revenue", ascending=False)
 
         money_cols = ["Revenue","RM_Cost","Production","Loading","Power","Welding","Jalli","EMI","Admin","Misc","Total_Cost","Profit"]
         for mc in money_cols:
@@ -147,7 +191,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         summ = summ.rename(columns={k: v for k, v in rename_map.items() if k in summ.columns})
         st.dataframe(summ, use_container_width=True, hide_index=True)
 
-    with st.expander(f"📅 {label} — Monthly Trends", expanded=False):
+    with st.expander("📅 Monthly Trends", expanded=False):
         df_all = df_prod
         m_all = df_all.groupby(df_all["date"].dt.to_period("M").dt.to_timestamp()).agg(
             Nos        =("nos",         "sum"),
@@ -169,12 +213,12 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             lambda r: (r["Profit"] / r["Revenue"] * 100) if r["Revenue"] else 0, axis=1
         )
 
-        st.markdown('<div class="section-header">Monthly Revenue vs Profit</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Monthly Production Value vs Profit</div>', unsafe_allow_html=True)
         fig_mrev = go.Figure()
         fig_mrev.add_trace(go.Bar(
             x=m_all["month"].dt.strftime("%b %Y"),
             y=(m_all["Revenue"] / LAKH).round(2),
-            marker_color=["#8B2428" if p >= 0 else "#4A2020" for p in m_all["Profit"]],
+            marker_color=accent,
             text=(m_all["Revenue"] / LAKH).round(2).astype(str) + "L",
             textposition="outside",
             name="Production Value",
@@ -184,7 +228,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             y=(m_all["Profit"] / LAKH).round(2),
             mode="lines+markers+text",
             name="Profit",
-            line=dict(color="#D4A011", width=2),
+            line=dict(color=WARN, width=2),
             marker=dict(size=7),
             text=(m_all["Profit"] / LAKH).round(2).astype(str) + "L",
             textposition="top center",
@@ -192,8 +236,8 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         ))
         fig_mrev.update_layout(
             **PLOT, height=360,
-            yaxis=dict(title=dict(text="Prod Value (L)", font=dict(color="#00C49A"))),
-            yaxis2=dict(title=dict(text="Profit (L)", font=dict(color="#FDBA44")),
+            yaxis=dict(title=dict(text="Prod Value (L)", font=dict(color=accent))),
+            yaxis2=dict(title=dict(text="Profit (L)", font=dict(color=WARN)),
                         overlaying="y", side="right"),
             legend=dict(orientation="h", y=1.08),
             barmode="group",
@@ -201,14 +245,17 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         st.plotly_chart(fig_mrev, use_container_width=True)
 
         st.markdown('<div class="section-header">Monthly Profit by Product (L)</div>', unsafe_allow_html=True)
-        m_prod = df_all.groupby([df_all["date"].dt.to_period("M").dt.to_timestamp(), "product"])["profit"].sum().reset_index()
-        m_prod = m_prod.rename(columns={"date": "month"})
+        top_by_profit = _top_n_others(df_all, "product", "profit", n=7)
+        keep_products = [p for p in top_by_profit["product"] if p != "Other"]
+        m_prod = df_all.copy()
+        m_prod["product_grp"] = m_prod["product"].where(m_prod["product"].isin(keep_products), "Other")
+        m_prod = m_prod.groupby([m_prod["date"].dt.to_period("M").dt.to_timestamp(), "product_grp"])["profit"].sum().reset_index()
+        m_prod = m_prod.rename(columns={"date": "month", "product_grp": "product"})
         m_prod["month_str"] = m_prod["month"].dt.strftime("%b %Y")
         m_prod["profit_L"]  = (m_prod["profit"] / LAKH).round(3)
         months_ordered = sorted(m_prod["month"].unique())
         month_labels   = [pd.Timestamp(m).strftime("%b %Y") for m in months_ordered]
-        products       = sorted(m_prod["product"].unique())
-        PROD_COLORS    = ["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE","#E05252","#E879F9"]
+        products       = keep_products + (["Other"] if "Other" in m_prod["product"].values else [])
         fig_mprod = go.Figure()
         for i, prod in enumerate(products):
             sub = m_prod[m_prod["product"] == prod][["month_str","profit_L"]]
@@ -217,16 +264,18 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
                 x=sub["month_str"],
                 y=sub["profit_L"],
                 name=prod,
-                marker_color=PROD_COLORS[i % len(PROD_COLORS)],
+                marker_color=OTHER_COLOR if prod == "Other" else QUAL_COLORS[i % len(QUAL_COLORS)],
                 text=sub["profit_L"].apply(lambda v: f"{v:.2f}L" if v != 0 else ""),
                 textposition="inside",
             ))
         fig_mprod.update_layout(
             **PLOT, height=380, barmode="stack",
             yaxis_title="Profit (L)",
-            legend=dict(orientation="h", y=1.08),
+            legend=dict(orientation="h", y=1.08, font=dict(size=10)),
         )
         st.plotly_chart(fig_mprod, use_container_width=True)
+        if len(df_all["product"].unique()) > 7:
+            st.caption(f"Top 7 of {df_all['product'].unique().size} products by profit shown — rest grouped as \"Other\".")
 
         st.markdown('<div class="section-header">Monthly Breakup — All Months</div>', unsafe_allow_html=True)
         tbl = m_all.copy()
@@ -249,7 +298,7 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
         display_cols = [c for c in display_cols if c in tbl.columns]
         st.dataframe(tbl[display_cols], use_container_width=True, hide_index=True)
 
-    with st.expander(f"💰 {label} — Cost Analysis", expanded=False):
+    with st.expander("💰 Cost Analysis", expanded=False):
         col3, col4 = st.columns(2)
         with col3:
             st.markdown('<div class="section-header">Cost Breakdown (Period)</div>', unsafe_allow_html=True)
@@ -268,29 +317,28 @@ def _render_production_section(df_prod, df_disp, label, banner_color, PLOT):
             fig3 = go.Figure(go.Pie(
                 labels=cost_labels, values=cost_vals, hole=0.42,
                 textinfo="label+percent",
-                marker_colors=["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE","#E05252","#E879F9","#F97316","#14B8A6"],
+                marker_colors=QUAL_COLORS + [OTHER_COLOR],
             ))
             fig3.update_layout(**PLOT, height=300, showlegend=False)
             st.plotly_chart(fig3, use_container_width=True)
 
         with col4:
             st.markdown('<div class="section-header">Avg Profit % by Product</div>', unsafe_allow_html=True)
-            pp = df_prod.groupby("product").agg(revenue=("revenue","sum"), profit=("profit","sum")).reset_index()
-            pp["profit_pct"] = pp.apply(
+            pp_all = df_prod.groupby("product").agg(revenue=("revenue","sum"), profit=("profit","sum")).reset_index()
+            pp_all["profit_pct"] = pp_all.apply(
                 lambda r: (r["profit"] / r["revenue"] * 100) if r["revenue"] else 0, axis=1
             )
-            pp = pp.sort_values("profit_pct").reset_index(drop=True)
+            pp = pp_all.sort_values("revenue", ascending=False).head(15).sort_values("profit_pct").reset_index(drop=True)
             fig4 = go.Figure(go.Bar(
                 x=pp["profit_pct"], y=pp["product"], orientation="h",
-                marker_color=[
-                    "#27AE60" if v >= 25 else "#D4A011" if v >= 10 else "#8B2428"
-                    for v in pp["profit_pct"]
-                ],
+                marker_color=[_profit_tier_color(v) for v in pp["profit_pct"]],
                 text=[f"{v:.1f}%" for v in pp["profit_pct"]],
                 textposition="outside",
             ))
-            fig4.update_layout(**PLOT, height=300, xaxis_title="%")
+            fig4.update_layout(**PLOT, height=max(300, 26 * len(pp)), xaxis_title="%")
             st.plotly_chart(fig4, use_container_width=True)
+            if len(pp_all) > 15:
+                st.caption(f"Top 15 of {len(pp_all)} products by revenue shown.")
 
         st.markdown('<div class="section-header">Raw Material Usage — Produced vs Dispatched</div>', unsafe_allow_html=True)
         rm_cols  = [f"{m['key']}_qty" for m in RAW_MATERIALS]
@@ -343,9 +391,9 @@ def _agg_or_empty(df, group_cols, agg_map):
 def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
     """m³ Produced vs Dispatched, and demand (Qty Ordered) broken down by
     pipe Diameter/Class/Joint Type — answers "which size/class/joint is
-    selling" rather than just overall pipe revenue."""
-    st.markdown('<div class="section-header">🏗️ Pipe Size / Class / Joint Demand</div>', unsafe_allow_html=True)
-
+    selling" rather than just overall pipe revenue. Diameter/Class/Joint are
+    all inherently small, fixed vocabularies (10/2-3/3 values), so none of
+    these charts need top-N collapsing."""
     prod_t = _tag_pipe_skus(df_prod_pipe)
     disp_t = _tag_pipe_skus(df_disp_pipe)
     ord_t  = _tag_pipe_skus(df_ord_pipe)
@@ -385,9 +433,9 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
         if diam_idx:
             fig = go.Figure()
             fig.add_trace(go.Bar(name="Produced", x=[f"{d}mm" for d in diam_idx],
-                                  y=[round(p_by_d.get(d, 0), 2) for d in diam_idx], marker_color="#8B2428"))
+                                  y=[round(p_by_d.get(d, 0), 2) for d in diam_idx], marker_color=ACCENT))
             fig.add_trace(go.Bar(name="Dispatched", x=[f"{d}mm" for d in diam_idx],
-                                  y=[round(d_by_d.get(d, 0), 2) for d in diam_idx], marker_color="#27AE60"))
+                                  y=[round(d_by_d.get(d, 0), 2) for d in diam_idx], marker_color=GOOD))
             fig.update_layout(**PLOT, height=320, barmode="group", yaxis_title="m³",
                                legend=dict(orientation="h", y=1.1))
             st.plotly_chart(fig, use_container_width=True)
@@ -409,7 +457,7 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
             dem_d = demand_df.groupby("Diameter")[demand_col].sum().sort_values(ascending=False)
             fig2 = go.Figure(go.Bar(
                 x=[f"{d}mm" for d in dem_d.index], y=dem_d.values,
-                marker_color="#D4A011", text=dem_d.values.astype(int), textposition="outside",
+                marker_color=WARN, text=dem_d.values.astype(int), textposition="outside",
             ))
             fig2.update_layout(**PLOT, height=320, yaxis_title=demand_label)
             st.plotly_chart(fig2, use_container_width=True)
@@ -422,7 +470,7 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
         if demand_col in demand_df.columns and not demand_df.empty:
             dem_c = demand_df.groupby("Class")[demand_col].sum()
             fig3 = go.Figure(go.Pie(labels=dem_c.index, values=dem_c.values, hole=0.45,
-                                     marker_colors=["#8B2428", "#3B82F6", "#D4A011"]))
+                                     marker_colors=QUAL_COLORS))
             fig3.update_layout(**PLOT, height=280)
             st.plotly_chart(fig3, use_container_width=True)
         else:
@@ -433,7 +481,7 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
         if demand_col in demand_df.columns and not demand_df.empty:
             dem_j = demand_df.groupby("Joint")[demand_col].sum()
             fig4 = go.Figure(go.Pie(labels=dem_j.index, values=dem_j.values, hole=0.45,
-                                     marker_colors=["#A78BFA", "#22D3EE", "#E05252"]))
+                                     marker_colors=QUAL_COLORS[2:]))
             fig4.update_layout(**PLOT, height=280)
             st.plotly_chart(fig4, use_container_width=True)
         else:
@@ -455,9 +503,9 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
         month_labels = [m.strftime("%b %Y") for m in months]
         fig_m = go.Figure()
         fig_m.add_trace(go.Bar(name="Produced", x=month_labels,
-                                y=[round(prod_m.get(m, 0), 2) for m in months], marker_color="#8B2428"))
+                                y=[round(prod_m.get(m, 0), 2) for m in months], marker_color=ACCENT))
         fig_m.add_trace(go.Bar(name="Dispatched", x=month_labels,
-                                y=[round(disp_m.get(m, 0), 2) for m in months], marker_color="#27AE60"))
+                                y=[round(disp_m.get(m, 0), 2) for m in months], marker_color=GOOD))
         fig_m.update_layout(**PLOT, height=320, barmode="group", yaxis_title="m³",
                              legend=dict(orientation="h", y=1.1))
         st.plotly_chart(fig_m, use_container_width=True)
@@ -473,27 +521,407 @@ def _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_pipe, PLOT):
     else:
         st.caption("No data.")
 
-    st.markdown("**Full Breakdown — Diameter x Class x Joint**")
-    group_cols = ["Diameter", "Class", "Joint"]
-    prod_g = _agg_or_empty(prod_t, group_cols, dict(Nos_Produced=("nos", "sum"), M3_Produced=("concrete_qty", "sum")))
-    disp_g = _agg_or_empty(disp_t, group_cols, dict(Nos_Dispatched=("qty_dispatched", "sum"), M3_Dispatched=("concrete_m3", "sum")))
-    ord_g  = _agg_or_empty(ord_t,  group_cols, dict(Nos_Ordered=("qty_ordered", "sum")))
+    with st.expander("Full Breakdown — Diameter x Class x Joint", expanded=False):
+        group_cols = ["Diameter", "Class", "Joint"]
+        prod_g = _agg_or_empty(prod_t, group_cols, dict(Nos_Produced=("nos", "sum"), M3_Produced=("concrete_qty", "sum")))
+        disp_g = _agg_or_empty(disp_t, group_cols, dict(Nos_Dispatched=("qty_dispatched", "sum"), M3_Dispatched=("concrete_m3", "sum")))
+        ord_g  = _agg_or_empty(ord_t,  group_cols, dict(Nos_Ordered=("qty_ordered", "sum")))
 
-    breakdown = prod_g.merge(disp_g, on=group_cols, how="outer").merge(ord_g, on=group_cols, how="outer")
-    if not breakdown.empty:
-        breakdown = breakdown.fillna(0).sort_values(group_cols)
-        for c in ["Nos_Produced", "M3_Produced", "Nos_Dispatched", "M3_Dispatched", "Nos_Ordered"]:
-            if c in breakdown.columns:
-                breakdown[c] = breakdown[c].round(1)
-        breakdown["Diameter"] = breakdown["Diameter"].astype(int).astype(str) + "mm"
-        breakdown = breakdown.rename(columns={
-            "Nos_Produced": "Nos Produced", "M3_Produced": "m³ Produced",
-            "Nos_Dispatched": "Nos Dispatched", "M3_Dispatched": "m³ Dispatched",
-            "Nos_Ordered": "Nos Ordered (Demand)",
-        })
-        st.dataframe(breakdown, use_container_width=True, hide_index=True)
+        breakdown = prod_g.merge(disp_g, on=group_cols, how="outer").merge(ord_g, on=group_cols, how="outer")
+        if not breakdown.empty:
+            breakdown = breakdown.fillna(0).sort_values(group_cols)
+            for c in ["Nos_Produced", "M3_Produced", "Nos_Dispatched", "M3_Dispatched", "Nos_Ordered"]:
+                if c in breakdown.columns:
+                    breakdown[c] = breakdown[c].round(1)
+            breakdown["Diameter"] = breakdown["Diameter"].astype(int).astype(str) + "mm"
+            breakdown = breakdown.rename(columns={
+                "Nos_Produced": "Nos Produced", "M3_Produced": "m³ Produced",
+                "Nos_Dispatched": "Nos Dispatched", "M3_Dispatched": "m³ Dispatched",
+                "Nos_Ordered": "Nos Ordered (Demand)",
+            })
+            st.dataframe(breakdown, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No data.")
+
+
+def _render_dispatch_sales_tab(df_disp, PLOT):
+    if df_disp.empty:
+        st.info("No dispatch data for selected period.")
+        return
+
+    df_disp = df_disp.copy()
+    df_disp["date"] = pd.to_datetime(df_disp["date"])
+
+    if "sale_type" in df_disp.columns:
+        a_disp = df_disp.loc[df_disp["sale_type"] == "Sale A", "dispatch_value"].sum()
+        b_disp = df_disp.loc[df_disp["sale_type"] == "Sale B", "dispatch_value"].sum()
+        dsp1, dsp2 = st.columns(2)
+        dsp1.metric("Sale A Dispatch Value", f"₹{a_disp/LAKH:.2f}L")
+        dsp2.metric("Sale B Dispatch Value", f"₹{b_disp/LAKH:.2f}L")
+        st.markdown("---")
+
+    col5, col6 = st.columns(2)
+    with col5:
+        top10_cl = _top_n_others(df_disp, "client_name", "dispatch_value", n=10)
+        if "Other" in top10_cl["client_name"].values:
+            colors = (QUAL_COLORS * 2)[:len(top10_cl) - 1] + [OTHER_COLOR]
+        else:
+            colors = (QUAL_COLORS * 2)[:len(top10_cl)]
+        fig5 = go.Figure(go.Pie(
+            labels=top10_cl["client_name"], values=top10_cl["dispatch_value"],
+            hole=0.4, textinfo="percent",
+            hovertemplate="%{label}<br>₹%{value:,.0f}<br>%{percent}<extra></extra>",
+            marker_colors=colors,
+        ))
+        fig5.update_layout(**PLOT, height=340, title="Top 10 Clients — Dispatch Value",
+                           showlegend=True, legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=10)))
+        st.plotly_chart(fig5, use_container_width=True)
+
+    with col6:
+        prod_disp = _top_n_others(df_disp, "product", "dispatch_value", n=10)
+        prod_disp["Value (L)"] = (prod_disp["dispatch_value"] / LAKH).round(2)
+        colors = [OTHER_COLOR if p == "Other" else QUAL_COLORS[i % len(QUAL_COLORS)] for i, p in enumerate(prod_disp["product"])]
+        fig6 = go.Figure(go.Bar(
+            x=prod_disp["product"], y=prod_disp["Value (L)"],
+            marker_color=colors,
+            text=prod_disp["Value (L)"].astype(str) + "L", textposition="outside",
+        ))
+        fig6.update_layout(**PLOT, height=340, title="Billed Value by Product (L)",
+                           showlegend=False, yaxis_title="Value (L)")
+        st.plotly_chart(fig6, use_container_width=True)
+        if len(df_disp["product"].unique()) > 10:
+            st.caption(f"Top 10 of {df_disp['product'].unique().size} products by value shown.")
+
+    dr1, dr2 = st.columns(2)
+    with dr1:
+        st.markdown("**Driver-wise Trips & Value**")
+        drv = df_disp.groupby("driver_name").agg(
+            Trips=("id","count"),
+            Value=("dispatch_value","sum"),
+        ).reset_index().rename(columns={"driver_name":"Driver"})
+        drv["Value (L)"] = (drv["Value"] / LAKH).round(2)
+        st.dataframe(drv[["Driver","Trips","Value (L)"]].sort_values("Value (L)", ascending=False),
+                     use_container_width=True, hide_index=True)
+
+    with dr2:
+        st.markdown("**Truck-wise Trips & Value**")
+        trk = df_disp.groupby("truck_no").agg(
+            Trips   =("id",            "count"),
+            Total_km=("trip_distance",  "sum"),
+            Value   =("dispatch_value", "sum"),
+        ).reset_index().rename(columns={"truck_no":"Truck"})
+        trk["Value (L)"] = (trk["Value"] / LAKH).round(2)
+        st.dataframe(trk[["Truck","Trips","Total_km","Value (L)"]].sort_values("Value (L)", ascending=False),
+                     use_container_width=True, hide_index=True)
+
+
+def _render_sales_orders_tab(df_disp, start, end, PLOT):
+    df_ord = get_orders()
+    if df_ord.empty:
+        st.info("No sales orders yet.")
+        return
+
+    df_ord["order_date"] = pd.to_datetime(df_ord["order_date"], errors="coerce")
+
+    if not df_disp.empty and "di_no" in df_disp.columns:
+        disp_di = df_disp.groupby("di_no").agg(
+            dispatched_value=("dispatch_value","sum"),
+            dispatched_qty  =("qty_dispatched","sum"),
+        ).reset_index()
     else:
-        st.caption("No data.")
+        disp_di = pd.DataFrame(columns=["di_no","dispatched_value","dispatched_qty"])
+
+    _ord_agg = dict(
+        order_date   =("order_date",   "first"),
+        client_name  =("client_name",  "first"),
+        products     =("product",       lambda x: ", ".join(x.dropna().unique())),
+        total_ordered=("total_amount", "sum"),
+        qty_ordered  =("qty_ordered",  "sum"),
+    )
+    if "gst_amount" in df_ord.columns:
+        _ord_agg["gst_amount"] = ("gst_amount", "sum")
+    di_sum = df_ord.groupby("di_no").agg(**_ord_agg).reset_index()
+
+    di_sum = di_sum.merge(disp_di, on="di_no", how="left")
+    di_sum["dispatched_value"] = di_sum["dispatched_value"].fillna(0)
+    di_sum["dispatched_qty"]   = di_sum["dispatched_qty"].fillna(0)
+    di_sum["pending_value"]    = di_sum["total_ordered"] - di_sum["dispatched_value"]
+    di_sum["pending_qty"]      = di_sum["qty_ordered"]   - di_sum["dispatched_qty"]
+
+    def _status(row):
+        if row["dispatched_qty"] <= 0: return "🔴 Pending"
+        if row["pending_qty"] > 1:     return "🟡 Partial"
+        return "🟢 Fulfilled"
+    di_sum["Status"] = di_sum.apply(_status, axis=1)
+
+    has_gst = "gst_amount" in di_sum.columns
+    s_cols = st.columns(5 if has_gst else 4)
+    s_cols[0].metric("Total DIs",        f"{di_sum['di_no'].nunique()}")
+    s_cols[1].metric("Total Order Value", f"₹{di_sum['total_ordered'].sum()/LAKH:.2f}L")
+    s_cols[2].metric("Dispatched Value",  f"₹{di_sum['dispatched_value'].sum()/LAKH:.2f}L")
+    s_cols[3].metric("Pending Value",     f"₹{di_sum['pending_value'].sum()/LAKH:.2f}L")
+    if has_gst:
+        s_cols[4].metric("Total GST",     f"₹{di_sum['gst_amount'].sum()/LAKH:.2f}L")
+
+    if "sale_type" in df_ord.columns:
+        a_ord = df_ord.loc[df_ord["sale_type"] == "Sale A", "total_amount"].sum()
+        b_ord = df_ord.loc[df_ord["sale_type"] == "Sale B", "total_amount"].sum()
+        so1, so2 = st.columns(2)
+        so1.metric("Sale A Order Value", f"₹{a_ord/LAKH:.2f}L")
+        so2.metric("Sale B Order Value", f"₹{b_ord/LAKH:.2f}L")
+
+    st.markdown("---")
+
+    status_counts = di_sum["Status"].value_counts().reset_index()
+    status_counts.columns = ["Status","Count"]
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown('<div class="section-header">Orders by Status</div>', unsafe_allow_html=True)
+        status_color = {"🔴 Pending": BAD, "🟡 Partial": WARN, "🟢 Fulfilled": GOOD}
+        fig_s = go.Figure(go.Bar(
+            x=status_counts["Status"], y=status_counts["Count"],
+            marker_color=[status_color.get(s, OTHER_COLOR) for s in status_counts["Status"]],
+            text=status_counts["Count"], textposition="outside",
+        ))
+        fig_s.update_layout(**PLOT, height=260, showlegend=False)
+        st.plotly_chart(fig_s, use_container_width=True)
+
+    with col_b:
+        st.markdown('<div class="section-header">Ordered vs Dispatched (L)</div>', unsafe_allow_html=True)
+        top_clients = di_sum.groupby("client_name").agg(
+            Ordered   =("total_ordered",    "sum"),
+            Dispatched=("dispatched_value", "sum"),
+        ).reset_index().sort_values("Ordered", ascending=False).head(8)
+        fig_c = go.Figure()
+        fig_c.add_trace(go.Bar(name="Ordered",    x=top_clients["client_name"], y=(top_clients["Ordered"]/LAKH).round(2),    marker_color="#A78BFA"))
+        fig_c.add_trace(go.Bar(name="Dispatched", x=top_clients["client_name"], y=(top_clients["Dispatched"]/LAKH).round(2), marker_color=GOOD))
+        fig_c.update_layout(**PLOT, height=260, barmode="group", yaxis_title="Value (L)", legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_c, use_container_width=True)
+
+    with st.expander("📋 DI Pipeline (full table)", expanded=False):
+        tbl = di_sum.sort_values("order_date", ascending=False).copy()
+        tbl["order_date"] = tbl["order_date"].dt.strftime("%d-%b-%Y")
+        money_cols = ["total_ordered","dispatched_value","pending_value"] + (["gst_amount"] if has_gst else [])
+        for mc in money_cols:
+            tbl[mc] = (tbl[mc] / LAKH).round(3)
+        tbl = tbl.rename(columns={
+            "di_no":"DI No.","order_date":"Date","client_name":"Client",
+            "products":"Products","Status":"Status",
+            "total_ordered":"Order (L)","dispatched_value":"Dispatched (L)","pending_value":"Pending (L)",
+            "gst_amount":"GST (L)",
+        })
+        di_pipeline_cols = ["DI No.","Date","Client","Products","Status","Order (L)"] + \
+            (["GST (L)"] if has_gst else []) + ["Dispatched (L)","Pending (L)"]
+        st.dataframe(
+            tbl[di_pipeline_cols],
+            use_container_width=True, hide_index=True,
+        )
+
+    if "client_type" in df_ord.columns:
+        st.markdown("---")
+        st.markdown('<div class="section-header">Client Type Mix</div>', unsafe_allow_html=True)
+        type_mix = df_ord.groupby("client_type")["total_amount"].sum().reset_index()
+        type_mix = type_mix[type_mix["total_amount"] > 0]
+        type_mix["Value (L)"] = (type_mix["total_amount"] / LAKH).round(2)
+        ct1, ct2 = st.columns(2)
+        with ct1:
+            fig_ctype = go.Figure(go.Pie(
+                labels=type_mix["client_type"],
+                values=type_mix["total_amount"],
+                hole=0.45, textinfo="label+percent",
+                marker_colors=QUAL_COLORS,
+            ))
+            fig_ctype.update_layout(**PLOT, height=280, showlegend=False)
+            st.plotly_chart(fig_ctype, use_container_width=True)
+        with ct2:
+            st.dataframe(
+                type_mix[["client_type","Value (L)"]].rename(columns={"client_type":"Client Type"})
+                .sort_values("Value (L)", ascending=False),
+                use_container_width=True, hide_index=True,
+            )
+
+    if "mode_of_payment" in df_ord.columns:
+        st.markdown("---")
+        st.markdown('<div class="section-header">Payment Mode Mix</div>', unsafe_allow_html=True)
+        pay_mix = df_ord.groupby("mode_of_payment")["total_amount"].sum().reset_index()
+        pay_mix = pay_mix[pay_mix["total_amount"] > 0]
+        pay_mix["Value (L)"] = (pay_mix["total_amount"] / LAKH).round(2)
+        pm1, pm2 = st.columns(2)
+        with pm1:
+            fig_pay = go.Figure(go.Pie(
+                labels=pay_mix["mode_of_payment"],
+                values=pay_mix["total_amount"],
+                hole=0.45, textinfo="label+percent",
+                marker_colors=QUAL_COLORS,
+            ))
+            fig_pay.update_layout(**PLOT, height=280, showlegend=False)
+            st.plotly_chart(fig_pay, use_container_width=True)
+        with pm2:
+            st.dataframe(
+                pay_mix[["mode_of_payment","Value (L)"]].rename(columns={"mode_of_payment":"Payment Mode"})
+                .sort_values("Value (L)", ascending=False),
+                use_container_width=True, hide_index=True,
+            )
+
+    with st.expander("🔁 Repeat Clients & Avg Order Size", expanded=False):
+        client_stats = df_ord.groupby("client_name").agg(
+            Orders     =("di_no",       "nunique"),
+            Total_Value=("total_amount","sum"),
+            Avg_Order  =("total_amount","mean"),
+        ).reset_index().sort_values("Total_Value", ascending=False)
+        client_stats["Total (L)"]     = (client_stats["Total_Value"] / LAKH).round(2)
+        client_stats["Avg Order (₹)"] = client_stats["Avg_Order"].round(0).astype(int)
+        client_stats["Type"]          = client_stats["Orders"].apply(lambda x: "🔄 Repeat" if x > 1 else "1️⃣ One-time")
+        st.dataframe(
+            client_stats[["client_name","Orders","Type","Total (L)","Avg Order (₹)"]]
+            .rename(columns={"client_name":"Client"}),
+            use_container_width=True, hide_index=True,
+        )
+
+
+def _render_advanced_analytics_tab(df_prod, df_disp, start, end, PLOT):
+    """Uses the same date-filtered df_prod/df_disp as the rest of the
+    dashboard (previously this pulled fresh all-time data via get_production()
+    with no args, so this tab silently ignored the date filter everyone else
+    respects — showing different totals here than everywhere else)."""
+    df_prod = df_prod.copy()
+    df_disp = df_disp.copy() if not df_disp.empty else df_disp
+    if not df_prod.empty:
+        df_prod["date"] = pd.to_datetime(df_prod["date"], errors="coerce")
+    if not df_disp.empty:
+        df_disp["date"] = pd.to_datetime(df_disp["date"], errors="coerce")
+
+    if not df_prod.empty and "profit_pct" in df_prod.columns:
+        st.markdown('<div class="section-header">Profit % Trend by Product (Monthly)</div>', unsafe_allow_html=True)
+        df_prod["month"] = df_prod["date"].dt.to_period("M").dt.to_timestamp()
+        top_by_rev = _top_n_others(df_prod, "product", "revenue", n=8)
+        keep = [p for p in top_by_rev["product"] if p != "Other"]
+        trend = df_prod[df_prod["product"].isin(keep)].groupby(["month","product"]).agg(
+            revenue=("revenue", "sum"), profit=("profit", "sum")
+        ).reset_index()
+        trend["profit_pct"] = trend.apply(
+            lambda r: (r["profit"] / r["revenue"] * 100) if r["revenue"] else 0, axis=1
+        )
+        trend["month_str"] = trend["month"].dt.strftime("%b %Y")
+        fig_trend = go.Figure()
+        for i, prod in enumerate(sorted(trend["product"].unique())):
+            sub = trend[trend["product"] == prod].sort_values("month")
+            fig_trend.add_trace(go.Scatter(
+                x=sub["month_str"], y=sub["profit_pct"].round(1),
+                mode="lines+markers",
+                name=prod,
+                line=dict(color=QUAL_COLORS[i % len(QUAL_COLORS)], width=2),
+                marker=dict(size=7),
+            ))
+        fig_trend.add_hline(y=10, line_dash="dash", line_color=BAD,
+                            annotation_text="10% threshold", annotation_position="bottom right")
+        fig_trend.update_layout(**PLOT, height=340, yaxis_title="Profit %",
+                                legend=dict(orientation="h", y=-0.3, font=dict(size=10)))
+        st.plotly_chart(fig_trend, use_container_width=True)
+        if df_prod["product"].unique().size > 8:
+            st.caption(f"Top 8 of {df_prod['product'].unique().size} products by revenue shown.")
+
+    if not df_prod.empty and "profit_pct" in df_prod.columns:
+        low = df_prod[df_prod["profit_pct"] < 10].copy()
+        if not low.empty:
+            low_sorted = low.sort_values("profit_pct").head(20)
+            low_sorted["Date"]     = low_sorted["date"].dt.strftime("%d-%b-%Y")
+            low_sorted["Profit %"] = low_sorted["profit_pct"].round(1)
+            low_sorted["Profit ₹"] = low_sorted["profit"].round(0).astype(int)
+            st.markdown(
+                f'<div class="warn-box">⚠️ <b>{len(low)} entries</b> with Profit % below 10%</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                low_sorted[["Date","product","nos","Profit %","Profit ₹"]]
+                .rename(columns={"product":"Product","nos":"Nos."}),
+                use_container_width=True, hide_index=True,
+            )
+
+    if not df_prod.empty and "plant" in df_prod.columns:
+        st.markdown("---")
+        st.markdown('<div class="section-header">Plant Performance</div>', unsafe_allow_html=True)
+        plant = df_prod.groupby("plant").agg(
+            Entries =("id",         "count"),
+            Nos     =("nos",        "sum"),
+            Revenue =("revenue",    "sum"),
+            Cost    =("total_cost", "sum"),
+            Profit  =("profit",     "sum"),
+        ).reset_index()
+        plant["Revenue (L)"]  = (plant["Revenue"] / LAKH).round(2)
+        plant["Cost (L)"]     = (plant["Cost"]    / LAKH).round(2)
+        plant["Profit (L)"]   = (plant["Profit"]  / LAKH).round(2)
+        plant["Avg Profit %"] = plant.apply(
+            lambda r: round(r["Profit"] / r["Revenue"] * 100, 1) if r["Revenue"] else 0, axis=1
+        )
+        pv1, pv2 = st.columns(2)
+        with pv1:
+            st.dataframe(
+                plant[["plant","Entries","Nos","Revenue (L)","Cost (L)","Profit (L)","Avg Profit %"]]
+                .rename(columns={"plant":"Plant"}),
+                use_container_width=True, hide_index=True,
+            )
+        with pv2:
+            fig_plant = go.Figure()
+            fig_plant.add_trace(go.Bar(name="Revenue (L)", x=plant["plant"], y=plant["Revenue (L)"], marker_color=ACCENT))
+            fig_plant.add_trace(go.Bar(name="Profit (L)",  x=plant["plant"], y=plant["Profit (L)"],  marker_color=GOOD))
+            fig_plant.update_layout(**PLOT, height=260, barmode="group",
+                                    legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_plant, use_container_width=True)
+
+    if not df_prod.empty:
+        st.markdown("---")
+        st.markdown('<div class="section-header">Idle Days (No Production)</div>', unsafe_allow_html=True)
+        prod_dates = set(df_prod["date"].dt.date)
+        all_days   = pd.date_range(start=start, end=end, freq="D")
+        idle       = [d.date() for d in all_days if d.date() not in prod_dates]
+        if idle:
+            st.markdown(
+                f'<div class="warn-box">🏭 <b>{len(idle)} idle day(s)</b> in selected period — no production recorded</div>',
+                unsafe_allow_html=True,
+            )
+            idle_df = pd.DataFrame({
+                "Date": [d.strftime("%d-%b-%Y") for d in idle],
+                "Day":  [d.strftime("%A")       for d in idle],
+            })
+            st.dataframe(idle_df, use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ No idle days in selected period — production recorded every day.")
+
+    if not df_disp.empty and "trip_distance" in df_disp.columns:
+        st.markdown("---")
+        st.markdown('<div class="section-header">Truck Diesel Cost (4 km/L · ₹100/L)</div>', unsafe_allow_html=True)
+        COST_PER_KM = 100 / 4  # ₹25/km
+
+        trk_cost = df_disp.groupby("truck_no").agg(
+            Trips     =("id",            "count"),
+            Total_km  =("trip_distance", "sum"),
+            Disp_Value=("dispatch_value","sum"),
+        ).reset_index()
+        trk_cost["Diesel Cost (₹)"] = (trk_cost["Total_km"] * COST_PER_KM).round(0).astype(int)
+        trk_cost["Cost/Trip (₹)"]   = (trk_cost["Diesel Cost (₹)"] / trk_cost["Trips"]).round(0).astype(int)
+        trk_cost["Disp Value (L)"]  = (trk_cost["Disp_Value"] / LAKH).round(2)
+        trk_cost["Diesel % of Rev"] = ((trk_cost["Diesel Cost (₹)"] / trk_cost["Disp_Value"]) * 100).round(1)
+
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            st.dataframe(
+                trk_cost[["truck_no","Trips","Total_km","Diesel Cost (₹)","Cost/Trip (₹)","Disp Value (L)","Diesel % of Rev"]]
+                .rename(columns={"truck_no":"Truck","Total_km":"Total KM"})
+                .sort_values("Diesel Cost (₹)", ascending=False),
+                use_container_width=True, hide_index=True,
+            )
+        with tc2:
+            srt = trk_cost.sort_values("Diesel Cost (₹)", ascending=False)
+            fig_trk = go.Figure(go.Bar(
+                x=srt["truck_no"],
+                y=srt["Diesel Cost (₹)"],
+                marker_color=WARN,
+                text=srt["Diesel Cost (₹)"].apply(lambda v: f"₹{v:,.0f}"),
+                textposition="outside",
+            ))
+            fig_trk.update_layout(**PLOT, height=300, yaxis_title="₹", showlegend=False)
+            st.plotly_chart(fig_trk, use_container_width=True)
 
 
 def show(PLOT):
@@ -544,17 +972,6 @@ def show(PLOT):
     rm_value = rm_inv["Value (₹)"].sum() if not rm_inv.empty else 0
     low_stock_ct = int((fg_inv["Current Stock"] < 0).sum()) if not fg_inv.empty else 0
 
-    st.markdown("""
-    <div style="background:linear-gradient(135deg,rgba(59,130,246,0.12),rgba(59,130,246,0.04));
-         border:1px solid rgba(59,130,246,0.20); border-left:4px solid #3B82F6;
-         border-radius:10px; padding:10px 18px; margin-bottom:16px;">
-        <span style="font-size:0.68rem;font-weight:700;letter-spacing:0.14em;
-              text-transform:uppercase;color:#7AA7E8;">
-            📦 Inventory Snapshot
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
     i1, i2, i3, i4 = st.columns(4)
     i1.metric("Finished Goods Value",  f"₹{fg_value/LAKH:.2f}L")
     i2.metric("Cement + GGBS Value",   f"₹{rm_value/LAKH:.2f}L")
@@ -563,35 +980,12 @@ def show(PLOT):
              delta=("check stock" if low_stock_ct else "all ok"),
              delta_color=("inverse" if low_stock_ct else "off"))
 
-    if not fg_inv.empty and low_stock_ct:
-        low_df = fg_inv[fg_inv["Current Stock"] < 0].sort_values("Current Stock").copy()
-        low_df["Current Stock"] = low_df["Current Stock"].round(0).astype(int)
+    if low_stock_ct:
         st.markdown(
             f'<div class="warn-box">⚠️ <b>{low_stock_ct} product(s)</b> with negative stock — '
-            f'production hasn\'t caught up with what\'s been dispatched</div>',
+            f'see the Overview tab below for details</div>',
             unsafe_allow_html=True,
         )
-        st.dataframe(
-            low_df[["Product", "Opening", "Produced", "Dispatched", "Current Stock"]],
-            use_container_width=True, hide_index=True,
-        )
-
-    if not fg_inv.empty:
-        top_stock = fg_inv[fg_inv["Current Stock"] > 0].sort_values("Value (₹)", ascending=False).head(8)
-        if not top_stock.empty:
-            fig_inv = go.Figure(go.Bar(
-                x=(top_stock["Value (₹)"] / LAKH).round(2),
-                y=top_stock["Product"],
-                orientation="h",
-                marker_color="#3B82F6",
-                text=(top_stock["Value (₹)"] / LAKH).round(2).astype(str) + "L",
-                textposition="outside",
-            ))
-            fig_inv.update_layout(**PLOT, height=280, xaxis_title="Value (L)",
-                                  yaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_inv, use_container_width=True)
-
-    st.markdown("---")
 
     if df_prod.empty and df_disp.empty:
         st.warning("No data for selected period. Enter some DPR or Dispatch records first.")
@@ -602,7 +996,7 @@ def show(PLOT):
     # product or DPR line, so they're charged exactly once per calendar day
     # that had production in this period — computed here, at the combined
     # (Pipe + Other) level, so they're never double-counted across the two
-    # category sections rendered below.
+    # category tabs.
     production_days = int(df_prod["date"].nunique()) if not df_prod.empty else 0
     fixed = daily_fixed_costs(production_days)
     gross_revenue = df_prod["revenue"].sum() if not df_prod.empty else 0
@@ -611,16 +1005,8 @@ def show(PLOT):
     net_profit = gross_margin - fixed["total"]
     net_profit_pct = (net_profit / gross_revenue * 100) if gross_revenue else 0
 
-    st.markdown("""
-    <div style="background:linear-gradient(135deg,rgba(39,174,96,0.12),rgba(39,174,96,0.04));
-         border:1px solid rgba(39,174,96,0.20); border-left:4px solid #27AE60;
-         border-radius:10px; padding:10px 18px; margin-bottom:16px;">
-        <span style="font-size:0.68rem;font-weight:700;letter-spacing:0.14em;
-              text-transform:uppercase;color:#5FCB8C;">
-            🏭 Factory-Wide Financial Summary — Production Value − Variable Cost − EMI − Power − Admin
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown('<div class="section-header">🏭 Factory-Wide Financial Summary</div>', unsafe_allow_html=True)
     n1, n2, n3, n4 = st.columns(4)
     n1.metric("Production Value", f"₹{gross_revenue/LAKH:.2f}L")
     n2.metric("Gross Margin", f"₹{gross_margin/LAKH:.2f}L",
@@ -628,7 +1014,6 @@ def show(PLOT):
     n3.metric(f"Fixed Costs ({production_days}d × EMI+Power+Admin)", f"₹{fixed['total']/LAKH:.2f}L",
               help=f"EMI ₹{fixed['emi_cost']/LAKH:.2f}L · Power ₹{fixed['power_cost']/LAKH:.2f}L · Admin ₹{fixed['admin_cost']/LAKH:.2f}L — charged once per production day, not per product")
     n4.metric("Net Profit", f"₹{net_profit/LAKH:.2f}L", delta=f"{net_profit_pct:.1f}%")
-    st.markdown("---")
 
     # -- Production financials, split by category so Pipe economics never
     # blend with Slab/Pillar/Fencing Pillar/PSC Pole economics --------------
@@ -640,11 +1025,6 @@ def show(PLOT):
     df_disp_pipe  = df_disp[is_disp_pipe]  if not df_disp.empty else df_disp
     df_disp_other = df_disp[~is_disp_pipe] if not df_disp.empty else df_disp
 
-    _render_production_section(df_prod_pipe, df_disp_pipe, "Pipe Products", "#8B2428", PLOT)
-    st.markdown("---")
-    _render_production_section(df_prod_other, df_disp_other, "Other Precast Products", "#3B82F6", PLOT)
-    st.markdown("---")
-
     df_ord_demand = get_orders()
     if not df_ord_demand.empty:
         df_ord_demand["order_date"] = pd.to_datetime(df_ord_demand["order_date"], errors="coerce")
@@ -653,379 +1033,75 @@ def show(PLOT):
             (df_ord_demand["order_date"] <= pd.Timestamp(end)) &
             (df_ord_demand["product"].isin(HUME_PIPE_PRODUCTS))
         ]
-    _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_demand, PLOT)
 
+    st.markdown("---")
 
-    # ── Dispatch & Sales ──────────────────────────────────────────────────────
-    with st.expander("🚚 Dispatch & Sales", expanded=True):
-        if df_disp.empty:
-            st.info("No dispatch data for selected period.")
-        else:
-            df_disp["date"] = pd.to_datetime(df_disp["date"])
+    tabs = st.tabs([
+        "🏠 Overview", "🔵 Pipe Products", "📐 Pipe Demand", "⚙️ Other Products",
+        "🚚 Dispatch & Sales", "📦 Sales Orders", "🔍 Advanced Analytics",
+    ])
 
-            if "sale_type" in df_disp.columns:
-                a_disp = df_disp.loc[df_disp["sale_type"] == "Sale A", "dispatch_value"].sum()
-                b_disp = df_disp.loc[df_disp["sale_type"] == "Sale B", "dispatch_value"].sum()
-                dsp1, dsp2 = st.columns(2)
-                dsp1.metric("Sale A Dispatch Value", f"₹{a_disp/LAKH:.2f}L")
-                dsp2.metric("Sale B Dispatch Value", f"₹{b_disp/LAKH:.2f}L")
-                st.markdown("---")
-
-            col5, col6 = st.columns(2)
-            with col5:
-                cl_all   = df_disp.groupby("client_name")["dispatch_value"].sum().reset_index().sort_values("dispatch_value", ascending=False)
-                top10_cl = cl_all.head(10)
-                others_v = cl_all.iloc[10:]["dispatch_value"].sum()
-                if others_v > 0:
-                    top10_cl = pd.concat([top10_cl, pd.DataFrame([{"client_name":"Others","dispatch_value":others_v}])], ignore_index=True)
-                DCOLORS = ["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE","#E05252","#E879F9","#F97316","#14B8A6","#888888"]
-                fig5 = go.Figure(go.Pie(
-                    labels=top10_cl["client_name"], values=top10_cl["dispatch_value"],
-                    hole=0.4, textinfo="percent",
-                    hovertemplate="%{label}<br>₹%{value:,.0f}<br>%{percent}<extra></extra>",
-                    marker_colors=DCOLORS,
-                ))
-                fig5.update_layout(**PLOT, height=320, title="Top 10 Clients — Dispatch Value",
-                                   showlegend=True, legend=dict(orientation="v", x=1.02, y=0.5, font=dict(size=10)))
-                st.plotly_chart(fig5, use_container_width=True)
-
-            with col6:
-                prod_disp = df_disp.groupby("product")["dispatch_value"].sum().reset_index()
-                prod_disp["Value (L)"] = (prod_disp["dispatch_value"] / LAKH).round(2)
-                fig6 = px.bar(prod_disp, x="product", y="Value (L)",
-                              title="Billed Value by Product (L)",
-                              color="product",
-                              color_discrete_sequence=px.colors.qualitative.Bold,
-                              text="Value (L)")
-                fig6.update_traces(texttemplate="%{text}L", textposition="outside")
-                fig6.update_layout(**PLOT, height=300, showlegend=False, yaxis_title="Value (L)")
-                st.plotly_chart(fig6, use_container_width=True)
-
-            dr1, dr2 = st.columns(2)
-            with dr1:
-                st.markdown("**Driver-wise Trips & Value**")
-                drv = df_disp.groupby("driver_name").agg(
-                    Trips=("id","count"),
-                    Value=("dispatch_value","sum"),
-                ).reset_index().rename(columns={"driver_name":"Driver"})
-                drv["Value (L)"] = (drv["Value"] / LAKH).round(2)
-                st.dataframe(drv[["Driver","Trips","Value (L)"]].sort_values("Value (L)", ascending=False),
-                             use_container_width=True, hide_index=True)
-
-            with dr2:
-                st.markdown("**Truck-wise Trips & Value**")
-                trk = df_disp.groupby("truck_no").agg(
-                    Trips   =("id",            "count"),
-                    Total_km=("trip_distance",  "sum"),
-                    Value   =("dispatch_value", "sum"),
-                ).reset_index().rename(columns={"truck_no":"Truck"})
-                trk["Value (L)"] = (trk["Value"] / LAKH).round(2)
-                st.dataframe(trk[["Truck","Trips","Total_km","Value (L)"]].sort_values("Value (L)", ascending=False),
-                             use_container_width=True, hide_index=True)
-
-    # ── Sales Orders Pipeline ─────────────────────────────────────────────────
-    with st.expander("📦 Sales Orders Pipeline", expanded=True):
-        df_ord = get_orders()
-        if df_ord.empty:
-            st.info("No sales orders yet.")
-        else:
-            df_ord["order_date"] = pd.to_datetime(df_ord["order_date"], errors="coerce")
-
-            if not df_disp.empty and "di_no" in df_disp.columns:
-                disp_di = df_disp.groupby("di_no").agg(
-                    dispatched_value=("dispatch_value","sum"),
-                    dispatched_qty  =("qty_dispatched","sum"),
-                ).reset_index()
+    with tabs[0]:
+        oc1, oc2 = st.columns(2)
+        with oc1:
+            st.markdown('<div class="section-header">🔵 Pipe Products</div>', unsafe_allow_html=True)
+            if not df_prod_pipe.empty:
+                st.metric("Production Value", f"₹{df_prod_pipe['revenue'].sum()/LAKH:.2f}L")
+                st.metric("Profit", f"₹{df_prod_pipe['profit'].sum()/LAKH:.2f}L")
             else:
-                disp_di = pd.DataFrame(columns=["di_no","dispatched_value","dispatched_qty"])
+                st.caption("No pipe production this period.")
+        with oc2:
+            st.markdown('<div class="section-header">⚙️ Other Precast Products</div>', unsafe_allow_html=True)
+            if not df_prod_other.empty:
+                st.metric("Production Value", f"₹{df_prod_other['revenue'].sum()/LAKH:.2f}L")
+                st.metric("Profit", f"₹{df_prod_other['profit'].sum()/LAKH:.2f}L")
+            else:
+                st.caption("No other-product production this period.")
 
-            _ord_agg = dict(
-                order_date   =("order_date",   "first"),
-                client_name  =("client_name",  "first"),
-                products     =("product",       lambda x: ", ".join(x.dropna().unique())),
-                total_ordered=("total_amount", "sum"),
-                qty_ordered  =("qty_ordered",  "sum"),
+        st.markdown("---")
+        st.markdown('<div class="section-header">📦 Inventory</div>', unsafe_allow_html=True)
+        if not fg_inv.empty and low_stock_ct:
+            low_df = fg_inv[fg_inv["Current Stock"] < 0].sort_values("Current Stock").copy()
+            low_df["Current Stock"] = low_df["Current Stock"].round(0).astype(int)
+            st.markdown(
+                f'<div class="warn-box">⚠️ <b>{low_stock_ct} product(s)</b> with negative stock — '
+                f'production hasn\'t caught up with what\'s been dispatched</div>',
+                unsafe_allow_html=True,
             )
-            if "gst_amount" in df_ord.columns:
-                _ord_agg["gst_amount"] = ("gst_amount", "sum")
-            di_sum = df_ord.groupby("di_no").agg(**_ord_agg).reset_index()
-
-            di_sum = di_sum.merge(disp_di, on="di_no", how="left")
-            di_sum["dispatched_value"] = di_sum["dispatched_value"].fillna(0)
-            di_sum["dispatched_qty"]   = di_sum["dispatched_qty"].fillna(0)
-            di_sum["pending_value"]    = di_sum["total_ordered"] - di_sum["dispatched_value"]
-            di_sum["pending_qty"]      = di_sum["qty_ordered"]   - di_sum["dispatched_qty"]
-
-            def _status(row):
-                if row["dispatched_qty"] <= 0: return "🔴 Pending"
-                if row["pending_qty"] > 1:     return "🟡 Partial"
-                return "🟢 Fulfilled"
-            di_sum["Status"] = di_sum.apply(_status, axis=1)
-
-            has_gst = "gst_amount" in di_sum.columns
-            s_cols = st.columns(5 if has_gst else 4)
-            s_cols[0].metric("Total DIs",        f"{di_sum['di_no'].nunique()}")
-            s_cols[1].metric("Total Order Value", f"₹{di_sum['total_ordered'].sum()/LAKH:.2f}L")
-            s_cols[2].metric("Dispatched Value",  f"₹{di_sum['dispatched_value'].sum()/LAKH:.2f}L")
-            s_cols[3].metric("Pending Value",     f"₹{di_sum['pending_value'].sum()/LAKH:.2f}L")
-            if has_gst:
-                s_cols[4].metric("Total GST",     f"₹{di_sum['gst_amount'].sum()/LAKH:.2f}L")
-
-            if "sale_type" in df_ord.columns:
-                a_ord = df_ord.loc[df_ord["sale_type"] == "Sale A", "total_amount"].sum()
-                b_ord = df_ord.loc[df_ord["sale_type"] == "Sale B", "total_amount"].sum()
-                so1, so2 = st.columns(2)
-                so1.metric("Sale A Order Value", f"₹{a_ord/LAKH:.2f}L")
-                so2.metric("Sale B Order Value", f"₹{b_ord/LAKH:.2f}L")
-
-            st.markdown("---")
-
-            status_counts = di_sum["Status"].value_counts().reset_index()
-            status_counts.columns = ["Status","Count"]
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.markdown('<div class="section-header">Orders by Status</div>', unsafe_allow_html=True)
-                status_color = {"🔴 Pending":"#8B2428","🟡 Partial":"#D4A011","🟢 Fulfilled":"#27AE60"}
-                fig_s = go.Figure(go.Bar(
-                    x=status_counts["Status"], y=status_counts["Count"],
-                    marker_color=[status_color.get(s,"#888") for s in status_counts["Status"]],
-                    text=status_counts["Count"], textposition="outside",
-                ))
-                fig_s.update_layout(**PLOT, height=260, showlegend=False)
-                st.plotly_chart(fig_s, use_container_width=True)
-
-            with col_b:
-                st.markdown('<div class="section-header">Ordered vs Dispatched (L)</div>', unsafe_allow_html=True)
-                top_clients = di_sum.groupby("client_name").agg(
-                    Ordered   =("total_ordered",    "sum"),
-                    Dispatched=("dispatched_value", "sum"),
-                ).reset_index().sort_values("Ordered", ascending=False).head(8)
-                fig_c = go.Figure()
-                fig_c.add_trace(go.Bar(name="Ordered",    x=top_clients["client_name"], y=(top_clients["Ordered"]/LAKH).round(2),    marker_color="#A78BFA"))
-                fig_c.add_trace(go.Bar(name="Dispatched", x=top_clients["client_name"], y=(top_clients["Dispatched"]/LAKH).round(2), marker_color="#27AE60"))
-                fig_c.update_layout(**PLOT, height=260, barmode="group", yaxis_title="Value (L)", legend=dict(orientation="h", y=1.1))
-                st.plotly_chart(fig_c, use_container_width=True)
-
-            st.markdown('<div class="section-header">DI Pipeline</div>', unsafe_allow_html=True)
-            tbl = di_sum.sort_values("order_date", ascending=False).copy()
-            tbl["order_date"] = tbl["order_date"].dt.strftime("%d-%b-%Y")
-            money_cols = ["total_ordered","dispatched_value","pending_value"] + (["gst_amount"] if has_gst else [])
-            for mc in money_cols:
-                tbl[mc] = (tbl[mc] / LAKH).round(3)
-            tbl = tbl.rename(columns={
-                "di_no":"DI No.","order_date":"Date","client_name":"Client",
-                "products":"Products","Status":"Status",
-                "total_ordered":"Order (L)","dispatched_value":"Dispatched (L)","pending_value":"Pending (L)",
-                "gst_amount":"GST (L)",
-            })
-            di_pipeline_cols = ["DI No.","Date","Client","Products","Status","Order (L)"] + \
-                (["GST (L)"] if has_gst else []) + ["Dispatched (L)","Pending (L)"]
             st.dataframe(
-                tbl[di_pipeline_cols],
+                low_df[["Product", "Opening", "Produced", "Dispatched", "Current Stock"]],
                 use_container_width=True, hide_index=True,
             )
 
-            if "mode_of_payment" in df_ord.columns or "client_type" in df_ord.columns:
-                st.markdown("---")
-
-            if "client_type" in df_ord.columns:
-                st.markdown('<div class="section-header">Client Type Mix</div>', unsafe_allow_html=True)
-                type_mix = df_ord.groupby("client_type")["total_amount"].sum().reset_index()
-                type_mix = type_mix[type_mix["total_amount"] > 0]
-                type_mix["Value (L)"] = (type_mix["total_amount"] / LAKH).round(2)
-                ct1, ct2 = st.columns(2)
-                with ct1:
-                    fig_ctype = go.Figure(go.Pie(
-                        labels=type_mix["client_type"],
-                        values=type_mix["total_amount"],
-                        hole=0.45, textinfo="label+percent",
-                        marker_colors=["#D4A011","#3B82F6","#8B2428","#27AE60","#A78BFA"],
-                    ))
-                    fig_ctype.update_layout(**PLOT, height=280, showlegend=False)
-                    st.plotly_chart(fig_ctype, use_container_width=True)
-                with ct2:
-                    st.dataframe(
-                        type_mix[["client_type","Value (L)"]].rename(columns={"client_type":"Client Type"})
-                        .sort_values("Value (L)", ascending=False),
-                        use_container_width=True, hide_index=True,
-                    )
-                st.markdown("---")
-
-            if "mode_of_payment" in df_ord.columns:
-                st.markdown('<div class="section-header">Payment Mode Mix</div>', unsafe_allow_html=True)
-                pay_mix = df_ord.groupby("mode_of_payment")["total_amount"].sum().reset_index()
-                pay_mix = pay_mix[pay_mix["total_amount"] > 0]
-                pay_mix["Value (L)"] = (pay_mix["total_amount"] / LAKH).round(2)
-                pm1, pm2 = st.columns(2)
-                with pm1:
-                    fig_pay = go.Figure(go.Pie(
-                        labels=pay_mix["mode_of_payment"],
-                        values=pay_mix["total_amount"],
-                        hole=0.45, textinfo="label+percent",
-                        marker_colors=["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE"],
-                    ))
-                    fig_pay.update_layout(**PLOT, height=280, showlegend=False)
-                    st.plotly_chart(fig_pay, use_container_width=True)
-                with pm2:
-                    st.dataframe(
-                        pay_mix[["mode_of_payment","Value (L)"]].rename(columns={"mode_of_payment":"Payment Mode"})
-                        .sort_values("Value (L)", ascending=False),
-                        use_container_width=True, hide_index=True,
-                    )
-
-            st.markdown("---")
-            st.markdown('<div class="section-header">Repeat Clients & Avg Order Size</div>', unsafe_allow_html=True)
-            client_stats = df_ord.groupby("client_name").agg(
-                Orders     =("di_no",       "nunique"),
-                Total_Value=("total_amount","sum"),
-                Avg_Order  =("total_amount","mean"),
-            ).reset_index().sort_values("Total_Value", ascending=False)
-            client_stats["Total (L)"]     = (client_stats["Total_Value"] / LAKH).round(2)
-            client_stats["Avg Order (₹)"] = client_stats["Avg_Order"].round(0).astype(int)
-            client_stats["Type"]          = client_stats["Orders"].apply(lambda x: "🔄 Repeat" if x > 1 else "1️⃣ One-time")
-            st.dataframe(
-                client_stats[["client_name","Orders","Type","Total (L)","Avg Order (₹)"]]
-                .rename(columns={"client_name":"Client"}),
-                use_container_width=True, hide_index=True,
-            )
-
-    # ── Advanced Analytics ────────────────────────────────────────────────────
-    with st.expander("🔍 Advanced Analytics", expanded=False):
-        df_prod_all = get_production()
-        df_disp_all = get_dispatch()
-
-        if not df_prod_all.empty:
-            df_prod_all["date"] = pd.to_datetime(df_prod_all["date"], errors="coerce")
-        if not df_disp_all.empty:
-            df_disp_all["date"] = pd.to_datetime(df_disp_all["date"], errors="coerce")
-
-        if not df_prod_all.empty and "profit_pct" in df_prod_all.columns:
-            st.markdown('<div class="section-header">Profit % Trend by Product (Monthly)</div>', unsafe_allow_html=True)
-            df_prod_all["month"] = df_prod_all["date"].dt.to_period("M").dt.to_timestamp()
-            trend = df_prod_all.groupby(["month","product"]).agg(
-                revenue=("revenue", "sum"), profit=("profit", "sum")
-            ).reset_index()
-            trend["profit_pct"] = trend.apply(
-                lambda r: (r["profit"] / r["revenue"] * 100) if r["revenue"] else 0, axis=1
-            )
-            trend["month_str"] = trend["month"].dt.strftime("%b %Y")
-            fig_trend = go.Figure()
-            TCOLORS = ["#8B2428","#3B82F6","#D4A011","#A78BFA","#27AE60","#22D3EE","#E05252","#E879F9"]
-            for i, prod in enumerate(sorted(trend["product"].unique())):
-                sub = trend[trend["product"] == prod].sort_values("month")
-                fig_trend.add_trace(go.Scatter(
-                    x=sub["month_str"], y=sub["profit_pct"].round(1),
-                    mode="lines+markers+text",
-                    name=prod,
-                    line=dict(color=TCOLORS[i % len(TCOLORS)], width=2),
-                    marker=dict(size=7),
-                    text=sub["profit_pct"].round(1).astype(str) + "%",
-                    textposition="top center",
-                ))
-            fig_trend.add_hline(y=10, line_dash="dash", line_color="#FB7185",
-                                annotation_text="10% threshold", annotation_position="bottom right")
-            fig_trend.update_layout(**PLOT, height=340, yaxis_title="Profit %",
-                                    legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig_trend, use_container_width=True)
-
-        if not df_prod_all.empty and "profit_pct" in df_prod_all.columns:
-            low = df_prod_all[df_prod_all["profit_pct"] < 10].copy()
-            if not low.empty:
-                low_sorted = low.sort_values("profit_pct").head(20)
-                low_sorted["Date"]     = low_sorted["date"].dt.strftime("%d-%b-%Y")
-                low_sorted["Profit %"] = low_sorted["profit_pct"].round(1)
-                low_sorted["Profit ₹"] = low_sorted["profit"].round(0).astype(int)
-                st.markdown(
-                    f'<div class="warn-box">⚠️ <b>{len(low)} entries</b> with Profit % below 10%</div>',
-                    unsafe_allow_html=True,
-                )
-                st.dataframe(
-                    low_sorted[["Date","product","nos","Profit %","Profit ₹"]]
-                    .rename(columns={"product":"Product","nos":"Nos."}),
-                    use_container_width=True, hide_index=True,
-                )
-
-        if not df_prod_all.empty and "plant" in df_prod_all.columns:
-            st.markdown("---")
-            st.markdown('<div class="section-header">Plant Performance</div>', unsafe_allow_html=True)
-            plant = df_prod_all.groupby("plant").agg(
-                Entries =("id",         "count"),
-                Nos     =("nos",        "sum"),
-                Revenue =("revenue",    "sum"),
-                Cost    =("total_cost", "sum"),
-                Profit  =("profit",     "sum"),
-            ).reset_index()
-            plant["Revenue (L)"]  = (plant["Revenue"] / LAKH).round(2)
-            plant["Cost (L)"]     = (plant["Cost"]    / LAKH).round(2)
-            plant["Profit (L)"]   = (plant["Profit"]  / LAKH).round(2)
-            plant["Avg Profit %"] = plant.apply(
-                lambda r: round(r["Profit"] / r["Revenue"] * 100, 1) if r["Revenue"] else 0, axis=1
-            )
-            pv1, pv2 = st.columns(2)
-            with pv1:
-                st.dataframe(
-                    plant[["plant","Entries","Nos","Revenue (L)","Cost (L)","Profit (L)","Avg Profit %"]]
-                    .rename(columns={"plant":"Plant"}),
-                    use_container_width=True, hide_index=True,
-                )
-            with pv2:
-                fig_plant = go.Figure()
-                fig_plant.add_trace(go.Bar(name="Revenue (L)", x=plant["plant"], y=plant["Revenue (L)"], marker_color="#3B82F6"))
-                fig_plant.add_trace(go.Bar(name="Profit (L)",  x=plant["plant"], y=plant["Profit (L)"],  marker_color="#27AE60"))
-                fig_plant.update_layout(**PLOT, height=260, barmode="group",
-                                        legend=dict(orientation="h", y=1.1))
-                st.plotly_chart(fig_plant, use_container_width=True)
-
-        if not df_prod_all.empty:
-            st.markdown("---")
-            st.markdown('<div class="section-header">Idle Days (No Production)</div>', unsafe_allow_html=True)
-            prod_dates = set(df_prod_all["date"].dt.date)
-            all_days   = pd.date_range(start=start, end=end, freq="D")
-            idle       = [d.date() for d in all_days if d.date() not in prod_dates]
-            if idle:
-                st.markdown(
-                    f'<div class="warn-box">🏭 <b>{len(idle)} idle day(s)</b> in selected period — no production recorded</div>',
-                    unsafe_allow_html=True,
-                )
-                idle_df = pd.DataFrame({
-                    "Date": [d.strftime("%d-%b-%Y") for d in idle],
-                    "Day":  [d.strftime("%A")       for d in idle],
-                })
-                st.dataframe(idle_df, use_container_width=True, hide_index=True)
-            else:
-                st.success("✅ No idle days in selected period — production recorded every day.")
-
-        if not df_disp_all.empty and "trip_distance" in df_disp_all.columns:
-            st.markdown("---")
-            st.markdown('<div class="section-header">Truck Diesel Cost (4 km/L · ₹100/L)</div>', unsafe_allow_html=True)
-            COST_PER_KM = 100 / 4  # ₹25/km
-
-            trk_cost = df_disp_all.groupby("truck_no").agg(
-                Trips     =("id",            "count"),
-                Total_km  =("trip_distance", "sum"),
-                Disp_Value=("dispatch_value","sum"),
-            ).reset_index()
-            trk_cost["Diesel Cost (₹)"] = (trk_cost["Total_km"] * COST_PER_KM).round(0).astype(int)
-            trk_cost["Cost/Trip (₹)"]   = (trk_cost["Diesel Cost (₹)"] / trk_cost["Trips"]).round(0).astype(int)
-            trk_cost["Disp Value (L)"]  = (trk_cost["Disp_Value"] / LAKH).round(2)
-            trk_cost["Diesel % of Rev"] = ((trk_cost["Diesel Cost (₹)"] / trk_cost["Disp_Value"]) * 100).round(1)
-
-            tc1, tc2 = st.columns(2)
-            with tc1:
-                st.dataframe(
-                    trk_cost[["truck_no","Trips","Total_km","Diesel Cost (₹)","Cost/Trip (₹)","Disp Value (L)","Diesel % of Rev"]]
-                    .rename(columns={"truck_no":"Truck","Total_km":"Total KM"})
-                    .sort_values("Diesel Cost (₹)", ascending=False),
-                    use_container_width=True, hide_index=True,
-                )
-            with tc2:
-                srt = trk_cost.sort_values("Diesel Cost (₹)", ascending=False)
-                fig_trk = go.Figure(go.Bar(
-                    x=srt["truck_no"],
-                    y=srt["Diesel Cost (₹)"],
-                    marker_color="#D4A011",
-                    text=srt["Diesel Cost (₹)"].apply(lambda v: f"₹{v:,.0f}"),
+        if not fg_inv.empty:
+            top_stock = fg_inv[fg_inv["Current Stock"] > 0].sort_values("Value (₹)", ascending=False).head(8)
+            if not top_stock.empty:
+                fig_inv = go.Figure(go.Bar(
+                    x=(top_stock["Value (₹)"] / LAKH).round(2),
+                    y=top_stock["Product"],
+                    orientation="h",
+                    marker_color=ACCENT,
+                    text=(top_stock["Value (₹)"] / LAKH).round(2).astype(str) + "L",
                     textposition="outside",
                 ))
-                fig_trk.update_layout(**PLOT, height=300, yaxis_title="₹", showlegend=False)
-                st.plotly_chart(fig_trk, use_container_width=True)
+                fig_inv.update_layout(**PLOT, height=280, xaxis_title="Value (L)",
+                                      yaxis=dict(autorange="reversed"))
+                st.plotly_chart(fig_inv, use_container_width=True)
+
+    with tabs[1]:
+        _render_production_section(df_prod_pipe, df_disp_pipe, "Pipe Products", ACCENT, PLOT)
+
+    with tabs[2]:
+        _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_demand, PLOT)
+
+    with tabs[3]:
+        _render_production_section(df_prod_other, df_disp_other, "Other Precast Products", ACCENT_OTHER, PLOT)
+
+    with tabs[4]:
+        _render_dispatch_sales_tab(df_disp, PLOT)
+
+    with tabs[5]:
+        _render_sales_orders_tab(df_disp, start, end, PLOT)
+
+    with tabs[6]:
+        _render_advanced_analytics_tab(df_prod, df_disp, start, end, PLOT)
