@@ -51,7 +51,7 @@ def calculate_production(
     jalli_cost               = cfg["jalli_cost"] * v(nos)
 
     sub_total  = rm_cost + production_cost + loading_unloading_cost + welding_cost + jalli_cost
-    misc_cost  = sub_total * (MISC_PCT / 100)
+    misc_cost  = rm_cost * (MISC_PCT / 100)
     total_cost = sub_total + misc_cost
 
     revenue    = cfg["selling_price"] * v(nos)

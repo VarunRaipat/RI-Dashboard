@@ -31,7 +31,8 @@ RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────
 # Formula: Product (variable) Cost = RM (Concrete+Steel) + Production +
-#          Loading/Unloading + Welding + Jalli (cage welding), then + Misc%.
+#          Loading/Unloading + Welding + Jalli (cage welding) + Misc%
+#          (Misc is a % of RM cost only, not the whole variable cost).
 # EMI/Power/Admin are whole-factory overheads that run regardless of which
 # products (or how many) were made on a given day, so they are charged once
 # per calendar day that has production — never split across product lines —
@@ -40,7 +41,7 @@ RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 EMI_PER_DAY   = round(283_000 / 30, 2)  # Rs. 283,000/month EMI ÷ 30 days — confirmed
 POWER_PER_DAY =  1_000  # Rs. 30,000/month power (incl. DG) ÷ 30 days — confirmed
 ADMIN_PER_DAY =  15_000  # Rs. fixed per production day — confirmed
-MISC_PCT      =   20.0  # % of variable product costs — confirmed
+MISC_PCT      =   10.0  # % of raw material (Concrete+Steel) cost only — confirmed
 
 # GST on Selling Price — 18%. How this factors into profit_pct is being
 # confirmed with the client before wiring into calculate_production().

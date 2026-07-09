@@ -51,28 +51,6 @@ def show(PLOT):
                 st.success("✅ RM prices updated! New DPR entries will use these prices.")
                 st.rerun()
 
-        # Show price history
-        from core.db import _use_supabase, _sb_url, _headers, _conn
-        import requests as _req
-        _hist_cols = ["effective_date"] + [m["key"] for m in RAW_MATERIALS]
-        try:
-            if _use_supabase():
-                r = _req.get(_sb_url("rm_prices"), headers=_headers(), params={
-                    "select": ",".join(_hist_cols),
-                    "order": "created_at.desc", "limit": 10,
-                })
-                hist = pd.DataFrame(r.json()) if r.status_code == 200 and r.json() else pd.DataFrame()
-            else:
-                con = _conn()
-                hist = pd.read_sql(
-                    f"SELECT {', '.join(_hist_cols)} FROM rm_prices ORDER BY created_at DESC LIMIT 10", con)
-                con.close()
-            if not hist.empty:
-                st.markdown("#### Price History (last 10)")
-                st.dataframe(hist, use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.caption(f"Price history unavailable: {e}")
-
     # ── Tab 2: Product Config ─────────────────────────────────────────────────
     with tab2:
         st.markdown("### Product Cost Configuration")
@@ -134,7 +112,7 @@ def show(PLOT):
                 st.caption(
                     f"Factory-wide fixed costs, charged once per production day (not per product): "
                     f"EMI ₹{EMI_PER_DAY:,.2f} · Power (incl. DG) ₹{POWER_PER_DAY:,.0f} · "
-                    f"Admin ₹{ADMIN_PER_DAY:,.0f} · Misc {MISC_PCT:.0f}% (on this product's variable costs)"
+                    f"Admin ₹{ADMIN_PER_DAY:,.0f} · Misc {MISC_PCT:.0f}% (on this product's raw material cost)"
                 )
 
                 if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
