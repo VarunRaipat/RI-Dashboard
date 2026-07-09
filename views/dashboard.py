@@ -1042,6 +1042,96 @@ def show(PLOT):
     ])
 
     with tabs[0]:
+        st.markdown('<div class="section-header">📅 Monthly Volumes</div>', unsafe_allow_html=True)
+        mv1, mv2 = st.columns(2)
+        with mv1:
+            st.markdown("**Monthly Production Volume (Nos.)**")
+            if not df_prod.empty:
+                dp = df_prod.copy()
+                dp["date"] = pd.to_datetime(dp["date"])
+                mp = dp.groupby(dp["date"].dt.to_period("M").dt.to_timestamp())["nos"].sum().reset_index()
+                mp.columns = ["month", "nos"]
+                fig_mp = go.Figure(go.Bar(
+                    x=mp["month"].dt.strftime("%b %Y"), y=mp["nos"],
+                    marker_color=ACCENT, text=mp["nos"].astype(int), textposition="outside",
+                ))
+                fig_mp.update_layout(**PLOT, height=300, yaxis_title="Nos. Produced")
+                st.plotly_chart(fig_mp, use_container_width=True)
+            else:
+                st.caption("No production data for selected period.")
+
+        with mv2:
+            st.markdown("**Monthly Dispatch Volume (Nos.)**")
+            if not df_disp.empty:
+                dd = df_disp.copy()
+                dd["date"] = pd.to_datetime(dd["date"])
+                md = dd.groupby(dd["date"].dt.to_period("M").dt.to_timestamp())["qty_dispatched"].sum().reset_index()
+                md.columns = ["month", "qty"]
+                fig_md = go.Figure(go.Bar(
+                    x=md["month"].dt.strftime("%b %Y"), y=md["qty"],
+                    marker_color=GOOD, text=md["qty"].astype(int), textposition="outside",
+                ))
+                fig_md.update_layout(**PLOT, height=300, yaxis_title="Nos. Dispatched")
+                st.plotly_chart(fig_md, use_container_width=True)
+            else:
+                st.caption("No dispatch data for selected period.")
+
+        st.markdown("---")
+        # Demand signal falls back Orders -> Dispatch -> Production, in that
+        # order of "truest customer intent" — same precedent as
+        # _render_pipe_demand_section. Dispatch/Orders are legitimately empty
+        # until those modules are used, so without this fallback these three
+        # charts would just be blank forever even though production data
+        # (which does exist) already answers "which size/class/joint are we
+        # actually making".
+        ord_pipe_t = _tag_pipe_skus(df_ord_demand) if df_ord_demand is not None else pd.DataFrame()
+        disp_pipe_t = _tag_pipe_skus(df_disp_pipe)
+        prod_pipe_t = _tag_pipe_skus(df_prod_pipe)
+        if not ord_pipe_t.empty:
+            cmp_df, cmp_col, cmp_label = ord_pipe_t, "qty_ordered", "Ordered"
+        elif not disp_pipe_t.empty:
+            cmp_df, cmp_col, cmp_label = disp_pipe_t, "qty_dispatched", "Dispatched"
+        else:
+            cmp_df, cmp_col, cmp_label = prod_pipe_t, "nos", "Produced"
+
+        st.markdown(f'<div class="section-header">🏗️ Pipe {cmp_label} Comparison — Diameter / Class / Joint</div>', unsafe_allow_html=True)
+        if cmp_df.empty:
+            st.caption("No pipe production, dispatch, or order data for selected period.")
+        else:
+            if cmp_label == "Produced":
+                st.caption("No dispatch or order data logged yet — showing production instead.")
+            dc1, dc2, dc3 = st.columns(3)
+            with dc1:
+                st.markdown("**By Diameter**")
+                by_dia = cmp_df.groupby("Diameter")[cmp_col].sum().sort_index()
+                fig_d = go.Figure(go.Bar(
+                    x=[f"{d}mm" for d in by_dia.index], y=by_dia.values,
+                    marker_color=ACCENT, text=by_dia.values.astype(int), textposition="outside",
+                ))
+                fig_d.update_layout(**PLOT, height=300, yaxis_title=f"Nos. {cmp_label}")
+                st.plotly_chart(fig_d, use_container_width=True)
+
+            with dc2:
+                st.markdown("**By Class**")
+                by_cls = cmp_df.groupby("Class")[cmp_col].sum()
+                fig_c = go.Figure(go.Pie(
+                    labels=by_cls.index, values=by_cls.values, hole=0.45,
+                    textinfo="label+percent", marker_colors=QUAL_COLORS,
+                ))
+                fig_c.update_layout(**PLOT, height=300, showlegend=False)
+                st.plotly_chart(fig_c, use_container_width=True)
+
+            with dc3:
+                st.markdown("**By Joint Type**")
+                by_joint = cmp_df.groupby("Joint")[cmp_col].sum()
+                fig_j = go.Figure(go.Pie(
+                    labels=by_joint.index, values=by_joint.values, hole=0.45,
+                    textinfo="label+percent", marker_colors=QUAL_COLORS[2:],
+                ))
+                fig_j.update_layout(**PLOT, height=300, showlegend=False)
+                st.plotly_chart(fig_j, use_container_width=True)
+
+        st.markdown("---")
         oc1, oc2 = st.columns(2)
         with oc1:
             st.markdown('<div class="section-header">🔵 Pipe Products</div>', unsafe_allow_html=True)
