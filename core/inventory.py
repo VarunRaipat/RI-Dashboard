@@ -4,9 +4,10 @@ Current stock = opening + in - out since that date.
 """
 import pandas as pd
 from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING,
-                          PRODUCT_CONFIG, INVENTORY_MATERIAL_LABELS, SKU_TO_PRICING_KEY,
+                          INVENTORY_MATERIAL_LABELS, SKU_TO_PRICING_KEY,
                           GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
-from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage, get_inventory_opening
+from core.db import (get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage,
+                      get_inventory_opening, get_product_config)
 
 _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
@@ -44,6 +45,7 @@ def finished_goods_summary():
     df_prod = _since_anchor(get_production())
     df_disp = _since_anchor(get_dispatch())
     db_opening = get_inventory_opening()
+    product_config = get_product_config()
 
     rows = []
     for canonical, prod_name, disp_name, opening in INVENTORY_PRODUCTS:
@@ -55,9 +57,9 @@ def finished_goods_summary():
         current_stock = opening + produced - dispatched
         # canonical is always a single SKU (e.g. "Hume Pipe 300mm NP2 (M/F)"),
         # unlike prod_name/disp_name which can be tuples — SKU_TO_PRICING_KEY
-        # strips the joint suffix to match PRODUCT_CONFIG's pricing keys.
+        # strips the joint suffix to match product_config's diameter+class keys.
         pricing_key = SKU_TO_PRICING_KEY.get(canonical, canonical)
-        selling_price = PRODUCT_CONFIG.get(pricing_key, {}).get("selling_price", 0)
+        selling_price = product_config.get(pricing_key, {}).get("selling_price", 0)
         rows.append({
             "Product": canonical,
             "Opening": opening,
