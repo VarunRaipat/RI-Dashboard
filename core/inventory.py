@@ -4,7 +4,7 @@ Current stock = opening + in - out since that date.
 """
 import pandas as pd
 from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING,
-                          PRODUCT_CONFIG, INVENTORY_MATERIAL_LABELS,
+                          PRODUCT_CONFIG, INVENTORY_MATERIAL_LABELS, SKU_TO_PRICING_KEY,
                           GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS)
 from core.db import get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage, get_inventory_opening
 
@@ -53,7 +53,11 @@ def finished_goods_summary():
         dispatched = float(df_disp.loc[_matches_product(df_disp["product"], disp_name), "qty_dispatched"].sum()) \
             if df_disp is not None and not df_disp.empty else 0.0
         current_stock = opening + produced - dispatched
-        selling_price = PRODUCT_CONFIG.get(prod_name, {}).get("selling_price", 0) if prod_name else 0
+        # canonical is always a single SKU (e.g. "Hume Pipe 300mm NP2 (M/F)"),
+        # unlike prod_name/disp_name which can be tuples — SKU_TO_PRICING_KEY
+        # strips the joint suffix to match PRODUCT_CONFIG's pricing keys.
+        pricing_key = SKU_TO_PRICING_KEY.get(canonical, canonical)
+        selling_price = PRODUCT_CONFIG.get(pricing_key, {}).get("selling_price", 0)
         rows.append({
             "Product": canonical,
             "Opening": opening,
