@@ -523,7 +523,7 @@ with st.sidebar:
         pages.append("🏭  Inventory")
     if role in ("admin", "dispatch", "factory", "viewer"):
         pages.append("🚧  Gate Entry")
-    if role == "admin":
+    if role in ("admin", "viewer"):
         pages.append("⚙️  Admin")
 
     page = st.radio("Navigate", pages, label_visibility="collapsed")
