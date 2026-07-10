@@ -32,32 +32,55 @@ def show(PLOT):
                 "only if you do a fresh physical recount."
             )
             db_opening = get_inventory_opening()
-            oc1, oc2 = st.columns(2)
-            kind = oc1.radio("Type", ["Finished Good", "Raw Material"], horizontal=True, key="inv_open_kind")
+            kind = st.radio("Type", ["Finished Good", "Raw Material"], horizontal=True, key="inv_open_kind")
+
             if kind == "Finished Good":
                 item_keys = [row[0] for row in INVENTORY_PRODUCTS]
-                labels = {k: k for k in item_keys}
-                item_type = "finished_good"
+                st.caption("Enter the physical count for each pipe/product, then Save All. Rows left unchanged are skipped.")
+                bulk_df = pd.DataFrame({
+                    "Product": item_keys,
+                    "Opening Stock": [db_opening.get(k, {}).get("qty", 0.0) for k in item_keys],
+                })
+                edited = st.data_editor(
+                    bulk_df, hide_index=True, use_container_width=True,
+                    column_config={
+                        "Product": st.column_config.TextColumn(disabled=True),
+                        "Opening Stock": st.column_config.NumberColumn(min_value=0.0, step=1.0),
+                    },
+                    key="inv_open_bulk_editor",
+                )
+                if st.button("💾 Save All Opening Stock", key="inv_open_bulk_save"):
+                    changed = 0
+                    for _, row in edited.iterrows():
+                        item_key = row["Product"]
+                        new_qty = float(row["Opening Stock"])
+                        existing_qty = db_opening.get(item_key, {}).get("qty", 0.0)
+                        if new_qty != existing_qty:
+                            save_inventory_opening(item_key, "finished_good", new_qty, updated_by=name)
+                            changed += 1
+                    if changed:
+                        st.success(f"✅ Saved opening stock for {changed} product(s).")
+                        st.rerun()
+                    else:
+                        st.info("No changes to save.")
             else:
                 item_keys = list(RM_INVENTORY_OPENING.keys())
                 labels = {k: INVENTORY_MATERIAL_LABELS.get(k, k) for k in item_keys}
-                item_type = "raw_material"
+                sel_item = st.selectbox("Item", item_keys, format_func=lambda k: labels.get(k, k), key="inv_open_item")
+                existing = db_opening.get(sel_item)
+                current_val = existing["qty"] if existing else 0.0
+                if existing:
+                    st.caption(f"Currently set to **{current_val:,.2f}** — last updated by {existing['updated_by'] or 'unknown'} on {existing['updated_at']}.")
+                else:
+                    st.caption("Not set yet — defaults to 0.")
 
-            sel_item = oc2.selectbox("Item", item_keys, format_func=lambda k: labels.get(k, k), key="inv_open_item")
-            existing = db_opening.get(sel_item)
-            current_val = existing["qty"] if existing else 0.0
-            if existing:
-                st.caption(f"Currently set to **{current_val:,.2f}** — last updated by {existing['updated_by'] or 'unknown'} on {existing['updated_at']}.")
-            else:
-                st.caption("Not set yet — defaults to 0.")
-
-            new_val = st.number_input(f"Opening stock — {labels.get(sel_item, sel_item)}",
-                                       min_value=0.0, value=float(current_val), step=1.0,
-                                       key=f"inv_open_val_{sel_item}")
-            if st.button("💾 Save Opening Stock", key="inv_open_save"):
-                save_inventory_opening(sel_item, item_type, new_val, updated_by=name)
-                st.success(f"✅ Opening stock for {labels.get(sel_item, sel_item)} set to {new_val:,.2f}.")
-                st.rerun()
+                new_val = st.number_input(f"Opening stock — {labels.get(sel_item, sel_item)}",
+                                           min_value=0.0, value=float(current_val), step=1.0,
+                                           key=f"inv_open_val_{sel_item}")
+                if st.button("💾 Save Opening Stock", key="inv_open_save"):
+                    save_inventory_opening(sel_item, "raw_material", new_val, updated_by=name)
+                    st.success(f"✅ Opening stock for {labels.get(sel_item, sel_item)} set to {new_val:,.2f}.")
+                    st.rerun()
 
     # ── Finished Goods ─────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Finished Goods</div>', unsafe_allow_html=True)
