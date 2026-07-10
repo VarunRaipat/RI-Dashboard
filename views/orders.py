@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT
+from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
@@ -158,7 +158,8 @@ def show(PLOT):
     if di_mode == "Add product to existing DI" and existing_dis:
         di_no_display = str(di_no_val or "")
     elif sale_type in SALE_TYPES:
-        di_no_display = str(next_sequence_number(df_orders_raw, "di_no", sale_type))
+        di_no_display = str(next_sequence_number(df_orders_raw, "di_no", sale_type,
+                                                  start=DI_NO_START.get(sale_type, 1)))
     else:
         di_no_display = ""
 
