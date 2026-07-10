@@ -108,6 +108,25 @@ def _joint_types_for(diameter_mm, cls):
         return ["Collar", "M/F"]
     return ["Socket & Spigot", "M/F"]  # NP3
 
+# NP2 Collar and NP2 M/F (confirmed) are the exact same physical pipe cast —
+# the joint is only fitted/specified at dispatch, not during production — so
+# they share one production/inventory pool, with M/F as the canonical SKU
+# that's produced and stocked. Collar stays a separate, selectable line item
+# on Sales Order/Dispatch, but draws down the same M/F stock (see
+# INVENTORY_PRODUCTS below). NP3's Socket & Spigot vs M/F remain genuinely
+# separate physical SKUs — this fold does not apply to NP3.
+NP2_JOINTS_SHARE_STOCK = {"Collar", "M/F"}
+NP2_CANONICAL_JOINT    = "M/F"
+
+def _production_joint_types_for(diameter_mm, cls):
+    """Same as _joint_types_for, but collapses NP2 Collar into its canonical
+    M/F SKU — Collar isn't a separate production option since it's the same
+    casting."""
+    joints = _joint_types_for(diameter_mm, cls)
+    if cls == "NP2" and set(joints) >= NP2_JOINTS_SHARE_STOCK:
+        return [NP2_CANONICAL_JOINT]
+    return joints
+
 # All rates below are placeholders (0) until entered via Admin, except
 # concrete_volume_m3 for pipes, which is pre-computed from BARREL_THICKNESS_MM.
 #
@@ -209,7 +228,7 @@ _PIPE_SKUS_PRODUCTION = [
     f"Hume Pipe {d}mm {c} ({joint})"
     for d in HUME_PIPE_DIAMETERS_MM
     for c in HUME_PIPE_PRODUCTION_CLASSES
-    for joint in _joint_types_for(d, c)
+    for joint in _production_joint_types_for(d, c)
 ]
 _NON_PIPE_PRODUCTS = [p for p in PRODUCT_CONFIG if not p.startswith("Hume Pipe")]
 
@@ -296,19 +315,31 @@ INVENTORY_ANCHOR_DATE = str(date.today())
 INVENTORY_PRODUCTS = []
 for _d in HUME_PIPE_DIAMETERS_MM:
     for _c in HUME_PIPE_PRODUCTION_CLASSES:
-        for _joint in _joint_types_for(_d, _c):
+        for _joint in _production_joint_types_for(_d, _c):
             _sku = f"Hume Pipe {_d}mm {_c} ({_joint})"
+            _prod_names = [_sku]
             _disp_names = [_sku]
+            # NP2 Collar shares the M/F row's production+dispatch history —
+            # it was never a separate physical pipe, just an earlier way of
+            # specifying the same stock (see _production_joint_types_for).
+            if _c == "NP2" and _joint == NP2_CANONICAL_JOINT and "Collar" in _joint_types_for(_d, _c):
+                _collar_sku = f"Hume Pipe {_d}mm NP2 (Collar)"
+                if _collar_sku in _PIPE_SKUS:
+                    _prod_names.append(_collar_sku)
+                    _disp_names.append(_collar_sku)
             if _c == NP4_SHARES_CLASS:
                 _np4_sku = f"Hume Pipe {_d}mm NP4 ({_joint})"
                 if _np4_sku in _PIPE_SKUS:
                     _disp_names.append(_np4_sku)
-            INVENTORY_PRODUCTS.append(
-                (_sku, _sku, tuple(_disp_names) if len(_disp_names) > 1 else _sku, 0)
-            )
+            INVENTORY_PRODUCTS.append((
+                _sku,
+                tuple(_prod_names) if len(_prod_names) > 1 else _sku,
+                tuple(_disp_names) if len(_disp_names) > 1 else _sku,
+                0,
+            ))
 INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTS]
 
-del _d, _c, _joint, _sku, _disp_names, _np4_sku
+del _d, _c, _joint, _sku, _prod_names, _disp_names, _collar_sku, _np4_sku
 
 # Steel inventory: opening qty as of INVENTORY_ANCHOR_DATE. Current balance =
 # opening + received (Gate Entry "In" log) - consumed (computed from

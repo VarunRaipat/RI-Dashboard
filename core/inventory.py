@@ -28,13 +28,14 @@ def _since_anchor(df, date_col="date"):
     return df[df[date_col] >= _ANCHOR]
 
 
-def _matches_product(series, disp_name):
-    """disp_name is normally one SKU, but can be a tuple of SKUs that all
-    draw down the same physical stock (e.g. an NP4 pipe sold against its
-    matching NP3 SKU's inventory) — handle both."""
-    if isinstance(disp_name, (list, tuple, set)):
-        return series.isin(disp_name)
-    return series == disp_name
+def _matches_product(series, name):
+    """name is normally one SKU, but can be a tuple of SKUs that all draw
+    down the same physical stock (e.g. an NP4 pipe sold against its matching
+    NP3 SKU's inventory, or NP2 Collar/M-F sharing one production+dispatch
+    pool) — handle both."""
+    if isinstance(name, (list, tuple, set)):
+        return series.isin(name)
+    return series == name
 
 
 def finished_goods_summary():
@@ -47,7 +48,7 @@ def finished_goods_summary():
     rows = []
     for canonical, prod_name, disp_name, opening in INVENTORY_PRODUCTS:
         opening = db_opening.get(canonical, {}).get("qty", opening)
-        produced = float(df_prod.loc[df_prod["product"] == prod_name, "nos"].sum()) \
+        produced = float(df_prod.loc[_matches_product(df_prod["product"], prod_name), "nos"].sum()) \
             if prod_name and df_prod is not None and not df_prod.empty else 0.0
         dispatched = float(df_disp.loc[_matches_product(df_disp["product"], disp_name), "qty_dispatched"].sum()) \
             if df_disp is not None and not df_disp.empty else 0.0
@@ -119,7 +120,7 @@ def daily_breakdown(canonical_name, start, end):
     if prod_name and not df_prod.empty:
         df_prod = df_prod.copy()
         df_prod["date"] = pd.to_datetime(df_prod["date"], errors="coerce")
-        df_prod = df_prod[df_prod["product"] == prod_name]
+        df_prod = df_prod[_matches_product(df_prod["product"], prod_name)]
         if not df_prod.empty:
             daily_prod = df_prod.groupby("date")["nos"].sum()
 
