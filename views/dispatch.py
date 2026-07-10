@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT
+from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, DI_NO_START
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
 from core.ui import client_name_field, flash, show_flashes, transport_fields
@@ -129,7 +129,8 @@ def _show_dispatch_operator():
     known_clients = set(df_known["client_name"].dropna().astype(str)) if not df_known.empty and "client_name" in df_known.columns else set()
 
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
-    next_challan = next_sequence_number(df_known, "challan_no", sale_type, date_col="date")
+    next_challan = next_sequence_number(df_known, "challan_no", sale_type, date_col="date",
+                                        start=CHALLAN_NO_START.get(sale_type, 1))
     _init_lines("disp_op_lines")
 
     c1, c2, c3 = st.columns(3)
@@ -139,7 +140,13 @@ def _show_dispatch_operator():
     challan_no = c2.text_input("Challan No.", value=str(next_challan),
                                key=f"disp_op_challan_{next_challan}",
                                help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
-    di_no      = c3.text_input("DI No.", key="disp_op_di")
+    if sale_type in DI_NO_START:
+        next_di = next_sequence_number(df_known, "di_no", sale_type, date_col="date",
+                                       start=DI_NO_START[sale_type])
+        di_no = c3.text_input("DI No.", value=str(next_di), key=f"disp_op_di_{sale_type}_{next_di}",
+                              help=f"Pre-filled with the next {sale_type} DI number — edit if it differs.")
+    else:
+        di_no = c3.text_input("DI No.", key="disp_op_di")
 
     ca, cb = st.columns(2)
     client_name   = client_name_field(ca, known_clients, "disp_op_client")
@@ -401,7 +408,8 @@ def show(PLOT):
         st.caption("Add multiple products if one challan covers more than one.")
 
         sale_type          = st.selectbox("Sale Type", SALE_TYPES, key="disp_main_sale_type")
-        next_challan_main  = next_sequence_number(df_all, "challan_no", sale_type, date_col="date")
+        next_challan_main  = next_sequence_number(df_all, "challan_no", sale_type, date_col="date",
+                                                  start=CHALLAN_NO_START.get(sale_type, 1))
         _init_lines("disp_main_lines")
 
         c1, c2, c3, c4 = st.columns(4)
@@ -411,7 +419,13 @@ def show(PLOT):
         challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
                                    key=f"disp_main_challan_{next_challan_main}",
                                    help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
-        di_no      = c3.text_input("DI No.", key="disp_main_di")
+        if sale_type in DI_NO_START:
+            next_di_main = next_sequence_number(df_all, "di_no", sale_type, date_col="date",
+                                                start=DI_NO_START[sale_type])
+            di_no = c3.text_input("DI No.", value=str(next_di_main), key=f"disp_main_di_{sale_type}_{next_di_main}",
+                                  help=f"Pre-filled with the next {sale_type} DI number — edit if it differs.")
+        else:
+            di_no = c3.text_input("DI No.", key="disp_main_di")
         bill_no    = c4.text_input("Bill No.", key="disp_main_bill") if can_bill else None
 
         known_clients = set(df_all["client_name"].dropna().astype(str)) if not df_all.empty and "client_name" in df_all.columns else set()

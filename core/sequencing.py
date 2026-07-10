@@ -10,7 +10,7 @@ def fy_start(on_date=None):
     return date(year, 4, 1)
 
 
-def next_sequence_number(df, column, sale_type, date_col=None):
+def next_sequence_number(df, column, sale_type, date_col=None, start=1):
     """Next plain integer for `column`, scoped to rows matching `sale_type`.
 
     Only purely-numeric existing values count towards the max, so legacy
@@ -20,17 +20,23 @@ def next_sequence_number(df, column, sale_type, date_col=None):
     If `date_col` is given, only rows from the current financial year
     (Apr 1 onward) count towards the max — so the sequence resets to 1
     each new financial year instead of carrying last year's numbers forward.
+
+    `start` sets a floor for this sale_type (e.g. a sequence that should
+    begin at 356 instead of 1, confirmed per Sale Type) — it's only used
+    when there's no existing numeric data to continue from; once real data
+    exists, the sequence continues from its own max as usual and is never
+    pulled back down below that.
     """
     if df is None or df.empty or "sale_type" not in df.columns or column not in df.columns:
-        return 1
+        return start
     if date_col and date_col in df.columns:
         row_dates = pd.to_datetime(df[date_col], errors="coerce").dt.date
         df = df[row_dates >= fy_start()]
         if df.empty:
-            return 1
+            return start
     subset = df.loc[df["sale_type"] == sale_type, column].dropna().astype(str).str.strip()
     nums = pd.to_numeric(subset, errors="coerce").dropna()
-    return int(nums.max()) + 1 if not nums.empty else 1
+    return max(int(nums.max()) + 1, start) if not nums.empty else start
 
 
 def is_duplicate(df, column, value, sale_type=None, date_col=None):

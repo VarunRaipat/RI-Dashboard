@@ -262,6 +262,14 @@ PAYMENT_MODES = ["Cash", "Bank Transfer", "Credit", "GPAY", "PhonePe", "Other"]
 
 SALE_TYPES = ["Sale A", "Sale B"]
 
+# Floors for auto-suggested Challan No. / DI No. (core/sequencing.py's
+# next_sequence_number) — Sale A continues normally (last used + 1, no
+# floor needed) since it already has history. Sale B is a fresh sale type
+# with no dispatch history yet, so its Challan No. and DI No. sequences
+# need an explicit starting point instead of defaulting to 1 (confirmed).
+CHALLAN_NO_START = {"Sale B": 356}
+DI_NO_START      = {"Sale B": 1560}
+
 CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer"]
 
 FACTORIES = ["Rameshwaram Industries"]
