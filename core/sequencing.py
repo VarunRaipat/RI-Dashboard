@@ -10,7 +10,7 @@ def fy_start(on_date=None):
     return date(year, 4, 1)
 
 
-def next_sequence_number(df, column, sale_type, date_col=None, start=1):
+def next_sequence_number(df, column, sale_type, date_col=None, start=1, ignore=()):
     """Next plain integer for `column`, scoped to rows matching `sale_type`.
 
     Only purely-numeric existing values count towards the max, so legacy
@@ -26,6 +26,11 @@ def next_sequence_number(df, column, sale_type, date_col=None, start=1):
     when there's no existing numeric data to continue from; once real data
     exists, the sequence continues from its own max as usual and is never
     pulled back down below that.
+
+    `ignore` excludes specific known-bad numeric values (e.g. a confirmed
+    typo'd challan_no) from the max calculation, without touching the
+    stored record that still shows the typo — so a one-off out-of-sequence
+    number doesn't drag every future suggestion up with it.
     """
     if df is None or df.empty or "sale_type" not in df.columns or column not in df.columns:
         return start
@@ -36,6 +41,8 @@ def next_sequence_number(df, column, sale_type, date_col=None, start=1):
             return start
     subset = df.loc[df["sale_type"] == sale_type, column].dropna().astype(str).str.strip()
     nums = pd.to_numeric(subset, errors="coerce").dropna()
+    if ignore:
+        nums = nums[~nums.isin(ignore)]
     return max(int(nums.max()) + 1, start) if not nums.empty else start
 
 

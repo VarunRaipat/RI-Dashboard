@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START
+from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
 from core.ui import client_name_field, flash, show_flashes, transport_fields
@@ -130,7 +130,8 @@ def _show_dispatch_operator():
 
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
     next_challan = next_sequence_number(df_known, "challan_no", sale_type, date_col="date",
-                                        start=CHALLAN_NO_START.get(sale_type, 1))
+                                        start=CHALLAN_NO_START.get(sale_type, 1),
+                                        ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
     _init_lines("disp_op_lines")
 
     c1, c2, c3 = st.columns(3)
@@ -403,7 +404,8 @@ def show(PLOT):
 
         sale_type          = st.selectbox("Sale Type", SALE_TYPES, key="disp_main_sale_type")
         next_challan_main  = next_sequence_number(df_all, "challan_no", sale_type, date_col="date",
-                                                  start=CHALLAN_NO_START.get(sale_type, 1))
+                                                  start=CHALLAN_NO_START.get(sale_type, 1),
+                                                  ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
         _init_lines("disp_main_lines")
 
         c1, c2, c3, c4 = st.columns(4)

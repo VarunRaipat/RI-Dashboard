@@ -270,6 +270,13 @@ SALE_TYPES = ["Sale A", "Sale B"]
 CHALLAN_NO_START = {"Sale B": 356}
 DI_NO_START      = {"Sale B": 1560}
 
+# One-time correction: a Sale A dispatch entry (URC Construction, 1-Apr-2026)
+# has challan_no "212" — an out-of-sequence typo; the surrounding entries run
+# 2-73 this FY (confirmed). Excluded from the auto-suggest max calculation so
+# new Sale A challans suggest 74, 75, 76... instead of jumping to 213. The
+# stored record itself is untouched and still shows "212".
+CHALLAN_NO_IGNORE = {"Sale A": {212}}
+
 CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer"]
 
 FACTORIES = ["Rameshwaram Industries"]
