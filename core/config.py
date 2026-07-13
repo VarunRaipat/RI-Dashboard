@@ -318,7 +318,7 @@ LOAN_OBLIGATIONS = []
 # restart/redeploy was silently excluding all earlier production/dispatch
 # from the stock calculation each time. Update this only when a new physical
 # stock count is done (and re-enter opening quantities to match).
-INVENTORY_ANCHOR_DATE = "2026-07-10"
+INVENTORY_ANCHOR_DATE = "2026-07-01"
 
 # canonical name, production name, dispatch/order name(s), opening qty
 # Built from the SKU list (not PRODUCT_CONFIG) so Collar and M/F pipes of the
