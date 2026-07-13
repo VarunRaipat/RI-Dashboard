@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import timedelta
-from core.tz import today_ist
-from core.config import INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE
-from core.inventory import finished_goods_summary, rm_summary, daily_breakdown, gate_tracked_balance
+from core.config import INVENTORY_ANCHOR_DATE
+from core.inventory import finished_goods_summary, rm_summary, gate_tracked_balance
 from core.ui import interactive_table, show_flashes
 
 LAKH = 100_000
@@ -48,31 +46,6 @@ def show(PLOT):
 
     interactive_table(fg_disp, key="inv_fg", sum_cols=fg_sum_cols, show_cols=fg_cols,
                       show_export=can_export)
-
-    # ── Day-by-day drill-down ──────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown('<div class="section-header">Day-by-Day Detail</div>', unsafe_allow_html=True)
-
-    products = [row[0] for row in INVENTORY_PRODUCTS]
-    d1, d2, d3 = st.columns([2, 1, 1])
-    sel_product = d1.selectbox("Product", products, key="inv_detail_product")
-    anchor = pd.Timestamp(INVENTORY_ANCHOR_DATE).date()
-    start_default = max(anchor, today_ist() - timedelta(days=6))
-    detail_start = d2.date_input("From", value=start_default, min_value=anchor, key="inv_detail_start")
-    detail_end   = d3.date_input("To",   value=today_ist(),  min_value=anchor, key="inv_detail_end")
-
-    daily = daily_breakdown(sel_product, detail_start, detail_end)
-    if daily.empty:
-        st.info("No data for this range.")
-    else:
-        daily_disp = daily.copy()
-        for col in ["Opening", "Produced", "Dispatched", "Closing"]:
-            daily_disp[col] = daily_disp[col].round(2)
-        interactive_table(daily_disp, key="inv_daily",
-                          sum_cols=["Produced", "Dispatched"],
-                          show_cols=["Date", "Opening", "Produced", "Dispatched", "Closing"],
-                          col_config={"Date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
-                          show_export=can_export)
 
     # ── Raw Materials ────────────────────────────────────────────────────────
     st.markdown("---")
