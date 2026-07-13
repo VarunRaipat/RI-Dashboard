@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from core.tz import today_ist
 from core.config import GATE_CATEGORIES, GATE_DIRECTIONS, GATE_UNITS, GATE_RM_ITEMS
 from core.db import insert_gate_entry, get_gate_entries, delete_gate_entry
 from core.sequencing import is_duplicate
@@ -102,7 +102,7 @@ def show(PLOT):
     _init_lines("gate_lines")
 
     c1, c2, c3 = st.columns(3)
-    entry_date = c1.date_input("Date", date.today(), key="gate_date")
+    entry_date = c1.date_input("Date", today_ist(), key="gate_date")
     direction  = c2.selectbox("In / Out", GATE_DIRECTIONS, key="gate_direction")
     truck_no   = c3.text_input("Truck No.", key="gate_truck")
 

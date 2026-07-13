@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import timedelta
+from core.tz import today_ist
 from core.config import INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE, RM_INVENTORY_OPENING, INVENTORY_MATERIAL_LABELS
 from core.inventory import finished_goods_summary, rm_summary, daily_breakdown, gate_tracked_balance
 from core.db import get_inventory_opening, save_inventory_opening
@@ -70,7 +71,9 @@ def show(PLOT):
                 existing = db_opening.get(sel_item)
                 current_val = existing["qty"] if existing else 0.0
                 if existing:
-                    st.caption(f"Currently set to **{current_val:,.2f}** — last updated by {existing['updated_by'] or 'unknown'} on {existing['updated_at']}.")
+                    when = pd.to_datetime(existing["updated_at"], errors="coerce", utc=True)
+                    when_str = when.tz_convert("Asia/Kolkata").strftime("%d-%b-%Y %I:%M %p") if pd.notna(when) else "unknown time"
+                    st.caption(f"Currently set to **{current_val:,.2f}** — last updated by {existing['updated_by'] or 'unknown'} on {when_str}.")
                 else:
                     st.caption("Not set yet — defaults to 0.")
 
@@ -117,9 +120,9 @@ def show(PLOT):
     d1, d2, d3 = st.columns([2, 1, 1])
     sel_product = d1.selectbox("Product", products, key="inv_detail_product")
     anchor = pd.Timestamp(INVENTORY_ANCHOR_DATE).date()
-    start_default = max(anchor, date.today() - timedelta(days=6))
+    start_default = max(anchor, today_ist() - timedelta(days=6))
     detail_start = d2.date_input("From", value=start_default, min_value=anchor, key="inv_detail_start")
-    detail_end   = d3.date_input("To",   value=date.today(),  min_value=anchor, key="inv_detail_end")
+    detail_end   = d3.date_input("To",   value=today_ist(),  min_value=anchor, key="inv_detail_end")
 
     daily = daily_breakdown(sel_product, detail_start, detail_end)
     if daily.empty:

@@ -2,7 +2,8 @@
 Reusable interactive table component: column filters + totals row + Excel export.
 """
 import io
-from datetime import date, timedelta
+from datetime import timedelta
+from core.tz import today_ist, now_ist
 import streamlit as st
 import pandas as pd
 
@@ -29,9 +30,9 @@ def date_range_filter(key_prefix, default_start=None, default_end=None):
     filter is independent — picking a range on one page never affects
     another page's filter."""
     c1, c2 = st.columns(2)
-    start = c1.date_input("From", value=default_start or date.today().replace(day=1),
+    start = c1.date_input("From", value=default_start or today_ist().replace(day=1),
                           key=f"{key_prefix}_f_start")
-    end   = c2.date_input("To",   value=default_end or date.today(),
+    end   = c2.date_input("To",   value=default_end or today_ist(),
                           key=f"{key_prefix}_f_end")
     return start, end
 
@@ -40,7 +41,7 @@ def quick_date_range_filter(key_prefix, default_start=None, default_end=None):
     """Today / Yesterday / This Week / This Month / This Year quick buttons
     plus From/To date inputs, keyed per page (key_prefix) so each module's
     filter is independent."""
-    today = date.today()
+    today = today_ist()
     start_key, end_key = f"{key_prefix}_qf_start", f"{key_prefix}_qf_end"
 
     if start_key not in st.session_state:
@@ -246,7 +247,7 @@ def interactive_table(df, key, sum_cols=None, show_cols=None,
         st.download_button(
             "📥 Export to Excel",
             data=_to_excel_bytes(disp, sheet_name=key),
-            file_name=f"{key}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            file_name=f"{key}_{now_ist().strftime('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{key}_xlsx_export",
         )

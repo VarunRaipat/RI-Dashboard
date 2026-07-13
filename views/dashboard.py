@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import date, timedelta
+from datetime import timedelta
+from core.tz import today_ist
 from core.db import get_production, get_dispatch, get_orders
 from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG, parse_pipe_sku
 from core.calculations import daily_fixed_costs
@@ -906,7 +907,7 @@ def show(PLOT):
     """, unsafe_allow_html=True)
 
     # ── Date filter ───────────────────────────────────────────────────────────
-    today = date.today()
+    today = today_ist()
 
     if "dash_date_start" not in st.session_state:
         st.session_state["dash_date_start"] = today.replace(day=1)

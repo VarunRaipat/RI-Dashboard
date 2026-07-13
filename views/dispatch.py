@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import date
+from core.tz import today_ist
 from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
@@ -135,7 +135,7 @@ def _show_dispatch_operator():
     _init_lines("disp_op_lines")
 
     c1, c2, c3 = st.columns(3)
-    entry_date = c1.date_input("Date", date.today(), key="disp_op_date")
+    entry_date = c1.date_input("Date", today_ist(), key="disp_op_date")
     # Keyed to the value itself so a fixed key doesn't "stick" to a
     # stale number from an earlier Sale Type selection.
     challan_no = c2.text_input("Challan No.", value=str(next_challan),
@@ -247,8 +247,7 @@ def show(PLOT):
         df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
 
     # ── Date range filter ─────────────────────────────────────────────────────
-    from datetime import date as _date
-    _today = _date.today()
+    _today = today_ist()
     fa, fb, fc = st.columns([1, 1, 1])
     f_start = fa.date_input("From", _today.replace(day=1), key="disp_f_start")
     f_end   = fb.date_input("To",   _today,               key="disp_f_end")
@@ -409,7 +408,7 @@ def show(PLOT):
         _init_lines("disp_main_lines")
 
         c1, c2, c3, c4 = st.columns(4)
-        entry_date = c1.date_input("Date", date.today(), key="disp_main_date")
+        entry_date = c1.date_input("Date", today_ist(), key="disp_main_date")
         # Keyed to the value itself so a fixed key doesn't "stick" to a
         # stale number from an earlier Sale Type selection.
         challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
@@ -688,8 +687,8 @@ def show(PLOT):
             st.caption("Filter entries below, then delete all matching in one click.")
 
             da, db_, dc, dd = st.columns(4)
-            del_start  = da.date_input("From", value=df_edit["date"].min().date() if not df_edit.empty else _date.today(), key="del_from")
-            del_end    = db_.date_input("To",  value=df_edit["date"].max().date() if not df_edit.empty else _date.today(), key="del_to")
+            del_start  = da.date_input("From", value=df_edit["date"].min().date() if not df_edit.empty else today_ist(), key="del_from")
+            del_end    = db_.date_input("To",  value=df_edit["date"].max().date() if not df_edit.empty else today_ist(), key="del_to")
             all_clients  = ["All"] + sorted(df_edit["client_name"].dropna().unique().tolist())
             all_products = ["All"] + sorted(df_edit["product"].dropna().unique().tolist())
             del_client  = dc.selectbox("Client",  all_clients,  key="del_client")

@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import timedelta
+from core.tz import today_ist
 from core.db import get_production, get_dispatch, get_orders
 
 LAKH = 100_000
 
 
 def _build_context() -> str:
-    today = date.today()
+    today = today_ist()
     month_start = today.replace(day=1)
 
     df_prod = get_production()

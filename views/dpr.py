@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from core.tz import today_ist
 from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
 from core.calculations import calculate_production
 from core.db import (
@@ -36,7 +36,7 @@ def show(PLOT):
 
     st.markdown('<div class="section-header">Basic Info</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
-    entry_date = c1.date_input("Date", date.today(), key="dpr_date")
+    entry_date = c1.date_input("Date", today_ist(), key="dpr_date")
     plant      = c2.radio("Plant", PLANTS, horizontal=True, key="dpr_plant")
 
     st.markdown('<div class="section-header">Products Made Today</div>', unsafe_allow_html=True)

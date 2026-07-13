@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import timedelta
+from core.tz import today_ist
 from core.config import (ORDER_PRODUCTS, CLIENT_TYPES, QUOTATION_UNITS, QUOTATION_STATUS,
                          QUOTATION_VALIDITY_DAYS, PAYMENT_MODES, SALE_TYPES, GST_PCT)
 from core.db import (insert_quotation, get_quotations, update_quotation, delete_quotation,
@@ -53,7 +54,7 @@ def _auto_expire_quotes(df):
     if df.empty or "valid_until" not in df.columns or "status" not in df.columns:
         return df
     valid_dates = pd.to_datetime(df["valid_until"], errors="coerce").dt.date
-    lapsed = df["status"].isin(["Draft", "Sent"]) & valid_dates.notna() & (valid_dates < date.today())
+    lapsed = df["status"].isin(["Draft", "Sent"]) & valid_dates.notna() & (valid_dates < today_ist())
     if lapsed.any():
         for _, row in df[lapsed].iterrows():
             update_quotation(int(row["id"]), {"status": "Expired"})
@@ -137,9 +138,9 @@ def show(PLOT):
     _init_lines()
 
     h1, h2, h3, h4 = st.columns(4)
-    quote_date  = h1.date_input("Quote Date", value=date.today(), key="quo_date")
+    quote_date  = h1.date_input("Quote Date", value=today_ist(), key="quo_date")
     valid_until = h2.date_input(
-        "Valid Until", value=st.session_state.get("quo_date", date.today()) + timedelta(days=QUOTATION_VALIDITY_DAYS),
+        "Valid Until", value=st.session_state.get("quo_date", today_ist()) + timedelta(days=QUOTATION_VALIDITY_DAYS),
         key="quo_valid_until",
     )
     sales_person = h3.text_input("Sales Person Name", key="quo_sales_person")
@@ -421,7 +422,7 @@ def show(PLOT):
                     df_orders_raw = get_orders()
                     new_di = str(next_sequence_number(df_orders_raw, "di_no", cv_saletype))
                     common_ord = {
-                        "order_date":       str(date.today()),
+                        "order_date":       str(today_ist()),
                         "factory":          "Rameshwaram Industries",
                         "client_name":      qhdr.get("client_name", ""),
                         "contact_person":   qhdr.get("contact_person", ""),

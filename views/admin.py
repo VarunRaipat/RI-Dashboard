@@ -204,9 +204,9 @@ def show(PLOT):
     with tab3:
         st.markdown("### All Production Records")
         c1, c2 = st.columns(2)
-        from datetime import date
-        start = c1.date_input("From", date.today().replace(day=1), key="prod_start")
-        end   = c2.date_input("To",   date.today(), key="prod_end")
+        from core.tz import today_ist
+        start = c1.date_input("From", today_ist().replace(day=1), key="prod_start")
+        end   = c2.date_input("To",   today_ist(), key="prod_end")
 
         df = get_production(str(start), str(end))
         if df.empty:
@@ -326,9 +326,9 @@ def show(PLOT):
                             st.rerun()
             st.markdown("---")
         c3, c4 = st.columns(2)
-        from datetime import date
-        start2 = c3.date_input("From", date.today().replace(day=1), key="disp_start")
-        end2   = c4.date_input("To",   date.today(), key="disp_end")
+        from core.tz import today_ist
+        start2 = c3.date_input("From", today_ist().replace(day=1), key="disp_start")
+        end2   = c4.date_input("To",   today_ist(), key="disp_end")
 
         df2 = get_dispatch(str(start2), str(end2))
         if df2.empty:
@@ -543,9 +543,14 @@ def show(PLOT):
         if df_log.empty:
             st.info("No activity recorded yet.")
         else:
-            # Supabase's TIMESTAMPTZ comes back tz-aware; strip the tz so it
-            # can be compared against the tz-naive From/To date inputs below.
-            df_log["created_at"] = pd.to_datetime(df_log["created_at"], errors="coerce", utc=True).dt.tz_localize(None)
+            # Supabase's TIMESTAMPTZ comes back UTC; convert to IST before
+            # stripping the tz so it can be compared against the tz-naive
+            # From/To date inputs below — this used to just drop the tz
+            # without converting, showing raw UTC time as if it were IST.
+            df_log["created_at"] = (
+                pd.to_datetime(df_log["created_at"], errors="coerce", utc=True)
+                .dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+            )
             df_log = df_log.sort_values(["created_at", "id"], ascending=[False, False])
 
             log_start, log_end = date_range_filter(

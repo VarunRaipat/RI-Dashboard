@@ -490,8 +490,8 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # ── Today's snapshot ──────────────────────────────────────────────────────
-    import datetime as _dt
-    _today_str = str(_dt.date.today())
+    from core.tz import today_ist
+    _today_str = str(today_ist())
     try:
         _df_t = _get_today_stats(_today_str)
         if not _df_t.empty:

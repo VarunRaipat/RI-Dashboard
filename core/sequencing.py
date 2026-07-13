@@ -1,11 +1,12 @@
 """Auto-incrementing DI No. / Challan No. sequences, scoped per Sale Type."""
 from datetime import date
+from core.tz import today_ist
 import pandas as pd
 
 
 def fy_start(on_date=None):
     """Start date (Apr 1) of the Indian financial year containing `on_date`."""
-    d = on_date or date.today()
+    d = on_date or today_ist()
     year = d.year if d.month >= 4 else d.year - 1
     return date(year, 4, 1)
 

@@ -514,8 +514,8 @@ def get_rm_prices():
 
 
 def save_rm_prices(prices):
-    from datetime import date
-    data = {"effective_date": str(date.today()), **prices}
+    from core.tz import today_ist
+    data = {"effective_date": str(today_ist()), **prices}
     if _use_supabase(): _sb_insert("rm_prices", data)
     else: _sqlite_insert("rm_prices", data)
     _invalidate_cache()
@@ -673,10 +673,10 @@ def get_inventory_opening():
 
 
 def save_inventory_opening(item_key, item_type, qty, updated_by):
-    from datetime import datetime
+    from core.tz import now_ist
     payload = {
         "item_key": item_key, "item_type": item_type, "opening_qty": qty,
-        "updated_by": updated_by, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_by": updated_by, "updated_at": now_ist().isoformat(),
     }
     if _use_supabase():
         r = requests.post(

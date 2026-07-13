@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import date
+from core.tz import today_ist
 from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START, PRODUCT_TYPES
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
 from core.calculations import gst_split, transport_charge
@@ -171,7 +171,7 @@ def show(PLOT):
                                  help="Pre-filled with the next number for the selected Sale Type — edit if your paper DI differs."
                                  if not (di_mode == "Add product to existing DI" and existing_dis)
                                  else "Adding to an existing DI — number is fixed.")
-    order_date   = h2.date_input("Order Date", value=date.today(), key="ord_date")
+    order_date   = h2.date_input("Order Date", value=today_ist(), key="ord_date")
 
     _pm_opts    = [REQUIRED_PLACEHOLDER] + PAYMENT_MODES
     _pm_default = _hv("mode_of_payment")
@@ -317,7 +317,7 @@ def show(PLOT):
             st.error(f"DI No. {di_no_final} already exists. Refresh the page and try again.")
         else:
             common_fields = {
-                "order_date":       str(st.session_state.get("ord_date", date.today())),
+                "order_date":       str(st.session_state.get("ord_date", today_ist())),
                 "client_name":      client_name,
                 "contact_person":   contact_person,
                 "phone":            phone,
@@ -559,7 +559,7 @@ def show(PLOT):
             with st.form("edit_ord_form"):
                 ec1, ec2 = st.columns(2)
                 e_di     = ec1.text_input("DI No.",   value=str(erow.get("di_no","") or ""))
-                e_odate  = ec2.date_input("Order Date", value=pd.to_datetime(erow["order_date"]).date() if pd.notna(erow["order_date"]) else date.today())
+                e_odate  = ec2.date_input("Order Date", value=pd.to_datetime(erow["order_date"]).date() if pd.notna(erow["order_date"]) else today_ist())
 
                 ec3, ec4, ec5 = st.columns(3)
                 e_client = client_name_field(ec3, known_clients, "ord_edit_client",

@@ -1,6 +1,6 @@
 """Role-based data visibility rules that can't be expressed as a simple
 column filter (e.g. time-limited access after an order is fulfilled)."""
-from datetime import date
+from core.tz import today_ist
 import pandas as pd
 
 SALE_B_GRACE_DAYS = 5
@@ -35,7 +35,7 @@ def hidden_sale_b_dis(df_orders, df_disp, grace_days=SALE_B_GRACE_DAYS):
         dispatched_qty = pd.Series(dtype=float)
         last_dispatch  = pd.Series(dtype="datetime64[ns]")
 
-    today = pd.Timestamp(date.today())
+    today = pd.Timestamp(today_ist())
     hidden = set()
     for di_no, o_qty in ordered_qty.items():
         d_qty = dispatched_qty.get(di_no, 0) or 0

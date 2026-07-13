@@ -4,7 +4,7 @@ Minimalist, premium letterhead style — no marketing copy, generous
 whitespace, hairline rules, single muted accent colour.
 """
 import io
-from datetime import datetime
+from core.tz import now_ist
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -261,7 +261,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     story.append(HRFlowable(width="100%", thickness=0.4, color=HAIRLINE))
     story.append(Spacer(1, 2 * mm))
     story.append(Paragraph(
-        f"Generated {datetime.now().strftime('%d %b %Y, %I:%M %p')}",
+        f"Generated {now_ist().strftime('%d %b %Y, %I:%M %p')}",
         ss["FooterNote"],
     ))
 
@@ -437,7 +437,7 @@ def generate_quotation(quote_no, header, lines):
     story.append(HRFlowable(width="100%", thickness=0.4, color=HAIRLINE))
     story.append(Spacer(1, 2 * mm))
     story.append(Paragraph(
-        f"Generated {datetime.now().strftime('%d %b %Y, %I:%M %p')}",
+        f"Generated {now_ist().strftime('%d %b %Y, %I:%M %p')}",
         ss["FooterNote"],
     ))
 
