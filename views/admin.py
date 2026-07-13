@@ -13,6 +13,7 @@ from core.db import (
     get_activity_log, insert_production, insert_dispatch,
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
+from core.ui import sanitize_for_export
 from core.ui import interactive_table, date_range_filter
 
 LAKH = 100_000
@@ -220,7 +221,7 @@ def show(PLOT):
                          use_container_width=True, hide_index=True)
 
             # Export
-            csv = df.to_csv(index=False).encode("utf-8")
+            csv = sanitize_for_export(df).to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download CSV", csv,
                                f"production_{start}_{end}.csv", "text/csv")
 
@@ -367,7 +368,7 @@ def show(PLOT):
             st.dataframe(df2.drop(columns=["created_at"], errors="ignore"),
                          use_container_width=True, hide_index=True)
 
-            csv2 = df2.to_csv(index=False).encode("utf-8")
+            csv2 = sanitize_for_export(df2).to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download CSV", csv2,
                                f"dispatch_{start2}_{end2}.csv", "text/csv",
                                key="dl_disp")

@@ -8,6 +8,21 @@ import pandas as pd
 
 _CURRENCY_KW = {"cost", "value", "revenue", "profit", "amount", "pay"}
 
+_FORMULA_LEAD_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def sanitize_for_export(df):
+    """Neutralize CSV/Excel formula injection: free-text fields (client
+    names, remarks, etc.) are user-entered, and a value like "=cmd|'/c ...'"
+    would execute as a formula for whoever opens the exported file in Excel.
+    Prefixing a leading tick makes Excel/Sheets treat it as literal text."""
+    out = df.copy()
+    for col in out.select_dtypes(include="object").columns:
+        out[col] = out[col].apply(
+            lambda v: "'" + v if isinstance(v, str) and v.startswith(_FORMULA_LEAD_CHARS) else v
+        )
+    return out
+
 
 def date_range_filter(key_prefix, default_start=None, default_end=None):
     """From/To date inputs, keyed per page (key_prefix) so each module's
@@ -86,7 +101,7 @@ def _fmt(col, val):
 def _to_excel_bytes(df, sheet_name="Data"):
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name[:31] or "Data")
+        sanitize_for_export(df).to_excel(writer, index=False, sheet_name=sheet_name[:31] or "Data")
     return buf.getvalue()
 
 

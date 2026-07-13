@@ -8,6 +8,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from pathlib import Path
+from datetime import datetime, timedelta
 from core.config import DEFAULT_RM_PRICES
 
 DB_PATH = Path(__file__).parent.parent / "data" / "ecostructures.db"
@@ -312,6 +313,63 @@ def log_activity(action, module, detail=""):
         else: _sqlite_insert("activity_log", data)
     except Exception:
         pass
+
+
+LOGIN_LOCKOUT_THRESHOLD = 5
+LOGIN_LOCKOUT_WINDOW_MIN = 15
+
+
+def log_failed_login(username):
+    """Record a failed login attempt. Separate from log_activity() because
+    there's no session yet at this point to pull username/role/name from."""
+    data = {
+        "username": username or "",
+        "role":     "",
+        "name":     "",
+        "action":   "login_failed",
+        "module":   "Auth",
+        "detail":   "",
+    }
+    try:
+        if _use_supabase(): _sb_insert("activity_log", data)
+        else: _sqlite_insert("activity_log", data)
+    except Exception:
+        pass
+
+
+def recent_failed_login_count(username, minutes=LOGIN_LOCKOUT_WINDOW_MIN):
+    """Failed attempts for `username` in the last `minutes` — used to lock
+    out brute-force guessing. Fails open (returns 0) on any DB error so a
+    logging hiccup can't lock everyone out."""
+    if not username:
+        return 0
+    try:
+        if _use_supabase():
+            # created_at is TIMESTAMPTZ (UTC) on Supabase.
+            cutoff = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
+            df = _sb_select(
+                "activity_log",
+                filters={
+                    "username":   f"eq.{username}",
+                    "action":     "eq.login_failed",
+                    "created_at": f"gte.{cutoff}",
+                },
+                order="created_at.desc",
+                limit=50,
+            )
+            return len(df)
+        # SQLite fallback: created_at is stored as datetime('now','localtime').
+        con = _conn()
+        cur = con.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE username=? AND action='login_failed' "
+            "AND created_at >= datetime('now','localtime',?)",
+            (username, f"-{minutes} minutes"),
+        )
+        count = cur.fetchone()[0]
+        con.close()
+        return count
+    except Exception:
+        return 0
 
 
 @st.cache_data(ttl=15)

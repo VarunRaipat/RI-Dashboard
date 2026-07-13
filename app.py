@@ -1,5 +1,8 @@
 import streamlit as st
-from core.db import init_db, get_production
+from core.db import (
+    init_db, get_production, log_failed_login, recent_failed_login_count,
+    LOGIN_LOCKOUT_THRESHOLD, LOGIN_LOCKOUT_WINDOW_MIN,
+)
 from core.config import USERS as _USERS_DEFAULT
 
 def _load_users():
@@ -433,16 +436,24 @@ if st.session_state.role is None:
             submitted = st.form_submit_button("Sign In →", use_container_width=True, type="primary")
 
         if submitted:
-            user = USERS.get(username)
-            if user and user["password"] == password:
-                st.session_state.role     = user["role"]
-                st.session_state.username = username
-                st.session_state.name     = user["name"]
-                from core.db import log_activity
-                log_activity("login", "Auth", f"{username} ({user['role']}) logged in")
-                st.rerun()
+            attempts = recent_failed_login_count(username)
+            if attempts >= LOGIN_LOCKOUT_THRESHOLD:
+                st.error(
+                    f"Too many failed attempts for this username. "
+                    f"Try again in {LOGIN_LOCKOUT_WINDOW_MIN} minutes."
+                )
             else:
-                st.error("Invalid username or password.")
+                user = USERS.get(username)
+                if user and user["password"] == password:
+                    st.session_state.role     = user["role"]
+                    st.session_state.username = username
+                    st.session_state.name     = user["name"]
+                    from core.db import log_activity
+                    log_activity("login", "Auth", f"{username} ({user['role']}) logged in")
+                    st.rerun()
+                else:
+                    log_failed_login(username)
+                    st.error("Invalid username or password.")
 
         st.markdown("""
         <div style='text-align:center; margin-top:28px;
