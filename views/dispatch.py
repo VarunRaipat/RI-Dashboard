@@ -12,9 +12,15 @@ LAKH = 100_000
 
 
 def _pending_mask(df):
+    """'Pending invoice' only applies to Sale A — Sale B billing is handled
+    entirely outside this workflow, so Sale B challans are never pending."""
     if "bill_no" not in df.columns:
-        return pd.Series([True] * len(df), index=df.index)
-    return df["bill_no"].isna() | (df["bill_no"].astype(str).str.strip().isin(["", "None", "nan"]))
+        pending = pd.Series([True] * len(df), index=df.index)
+    else:
+        pending = df["bill_no"].isna() | (df["bill_no"].astype(str).str.strip().isin(["", "None", "nan"]))
+    if "sale_type" in df.columns:
+        pending = pending & (df["sale_type"] == "Sale A")
+    return pending
 
 
 def _show_headoffice():

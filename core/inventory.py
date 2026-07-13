@@ -13,11 +13,10 @@ _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
 _RM_LABEL = INVENTORY_MATERIAL_LABELS
 
-# Steel's consumption is computed automatically (Nos x product's steel_kg_per_unit,
-# summed from the production table's steel_qty column). Cement/GGBS aren't tied to
-# any single product — they're the day's total batch usage entered once per DPR
-# submission (see views/dpr.py), summed from the rm_usage table instead.
-_PRODUCTION_CONSUME_COL = {"steel": "steel_qty"}
+# Cement/GGBS aren't tied to any single product — they're the day's total
+# batch usage entered once per DPR submission (see views/dpr.py), summed
+# from the rm_usage table instead.
+_PRODUCTION_CONSUME_COL = {}
 _RM_USAGE_CONSUME_COL   = {"cement_ppc": "cement_bags", "ggbs": "ggbs_bags"}
 
 

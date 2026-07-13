@@ -369,12 +369,12 @@ del _d, _c, _joint, _sku, _prod_names, _disp_names, _collar_sku, _np4_sku
 # above. "Consumed" for these two comes from the rm_usage table (one row per
 # DPR submission, not tied to any single product), not from a production
 # table column.
-RM_INVENTORY_OPENING = {"steel": 0, "cement_ppc": 0, "ggbs": 0}
+RM_INVENTORY_OPENING = {"cement_ppc": 0, "ggbs": 0}
 CEMENT_GGBS_KG_PER_BAG = 50
 
-# Labels for every RM_INVENTORY_OPENING key — covers RAW_MATERIALS entries
-# (steel) plus the inventory-only entries (cement_ppc, ggbs) that aren't
-# priced/costed materials, just tracked for stock reconciliation.
+# Labels for every RM_INVENTORY_OPENING key — cement_ppc/ggbs are
+# inventory-only entries that aren't priced/costed materials, just tracked
+# for stock reconciliation.
 INVENTORY_MATERIAL_LABELS = {m["key"]: m["label"] for m in RAW_MATERIALS}
 INVENTORY_MATERIAL_LABELS.update({"cement_ppc": "PPC Cement", "ggbs": "GGBS"})
 
@@ -383,9 +383,9 @@ GATE_CATEGORIES = ["Raw Material", "Plant Equipment & Parts", "Miscellaneous Par
 GATE_DIRECTIONS = ["In", "Out"]
 GATE_UNITS      = ["Ton", "CFT", "Nos", "Kg", "Litre", "Bags", "Other"]
 
-# Nothing bulk/untracked for RI — Steel and Jalli both get a running balance
-# via RM_INVENTORY_OPENING.
-GATE_UNTRACKED_ITEMS = []
+# Steel is still loggable at the gate (for record-keeping) but no longer
+# gets a running inventory balance — moved out of RM_INVENTORY_OPENING.
+GATE_UNTRACKED_ITEMS = ["steel"]
 
 GATE_RM_TRACKED_ITEMS = list(RM_INVENTORY_OPENING.keys())
 
