@@ -3,13 +3,10 @@ import re
 from datetime import date
 
 # ── Users & Roles ─────────────────────────────────────────────────────────────
-USERS = {
-    "admin":      {"password": "***REMOVED***",     "role": "admin",      "name": "Admin"},
-    "production": {"password": "***REMOVED***",   "role": "production", "name": "Production Operator"},
-    "headoffice": {"password": "***REMOVED***",        "role": "headoffice", "name": "Head Office"},
-    "viewer":     {"password": "***REMOVED***",    "role": "viewer",     "name": "Viewer"},
-    "factory":    {"password": "***REMOVED***",   "role": "factory",    "name": "Factory"},
-}
+# Credentials live in Streamlit secrets (`[users]` in .streamlit/secrets.toml,
+# or the app's Secrets panel on Streamlit Cloud) — never hardcode them here.
+# If secrets aren't configured, login fails closed (no default users).
+USERS = {}
 
 # ── Raw materials: single source of truth ─────────────────────────────────────
 # Nothing is entered per DPR batch anymore — every material below is a fixed
