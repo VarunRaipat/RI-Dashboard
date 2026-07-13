@@ -1,6 +1,5 @@
 import math
 import re
-from datetime import date
 
 # ── Users & Roles ─────────────────────────────────────────────────────────────
 # Credentials live in Streamlit secrets (`[users]` in .streamlit/secrets.toml,
@@ -315,9 +314,11 @@ LOAN_OBLIGATIONS = []
 # ── Inventory ─────────────────────────────────────────────────────────────────
 # Opening stock as counted on INVENTORY_ANCHOR_DATE. Current balance for a
 # product = opening + (production since anchor) - (dispatched since anchor).
-# Set opening quantities below once a physical stock count is done — all
-# start at 0 (fresh app, no history yet).
-INVENTORY_ANCHOR_DATE = str(date.today())
+# Must stay a fixed date, not date.today() — this recomputing on every app
+# restart/redeploy was silently excluding all earlier production/dispatch
+# from the stock calculation each time. Update this only when a new physical
+# stock count is done (and re-enter opening quantities to match).
+INVENTORY_ANCHOR_DATE = "2026-07-10"
 
 # canonical name, production name, dispatch/order name(s), opening qty
 # Built from the SKU list (not PRODUCT_CONFIG) so Collar and M/F pipes of the
