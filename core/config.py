@@ -279,6 +279,8 @@ CHALLAN_NO_IGNORE = {"Sale A": {212}}
 
 CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer"]
 
+PRODUCT_TYPES = ["Pipe", "Boundary Wall"]
+
 FACTORIES = ["Rameshwaram Industries"]
 
 QUOTATION_UNITS         = ["Nos", "Rft", "Cft", "Sqft"]

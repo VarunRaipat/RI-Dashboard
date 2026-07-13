@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START
+from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START, PRODUCT_TYPES
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
@@ -214,20 +214,25 @@ def show(PLOT):
     contact_person = i2.text_input("Contact Person Name", value=_cv("contact_person"), key=f"ord_contact_person_{_ck}")
     phone          = i3.text_input("Phone",               value=_cv("phone"),          key=f"ord_phone_{_ck}")
 
-    j1, j2, j3 = st.columns(3)
+    j1, j2, j3, j4 = st.columns(4)
     _ct_opts    = [REQUIRED_PLACEHOLDER] + CLIENT_TYPES
     _ct_default = _cv("client_type")
     client_type = j1.selectbox("Client Type *", _ct_opts,
                  index=_ct_opts.index(_ct_default) if _ct_default in CLIENT_TYPES else 0,
                  key=f"ord_client_type_{_ck}")
-    office = j2.text_input("Office",  value=_cv("office"), key=f"ord_office_{_ck}")
-    gstin  = j3.text_input("GSTIN",   value=_cv("gstin"),  key=f"ord_gstin_{_ck}")
+    _pt_opts    = [REQUIRED_PLACEHOLDER] + PRODUCT_TYPES
+    _pt_default = _hv("product_type")
+    product_type = j2.selectbox("Product Type *", _pt_opts,
+                 index=_pt_opts.index(_pt_default) if _pt_default in PRODUCT_TYPES else 0,
+                 key="ord_product_type")
+    office = j3.text_input("Office",  value=_cv("office"), key=f"ord_office_{_ck}")
+    gstin  = j4.text_input("GSTIN",   value=_cv("gstin"),  key=f"ord_gstin_{_ck}")
 
     _gst_default = str(hdr_row.get("gst_applicable", False)).lower() in ("true", "1") if hdr_row is not None else False
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate for every line below",
                                   value=_gst_default, key="ord_gst_applicable")
 
-    st.caption("*Client Name, Client Type, Payment Mode, and Sale Type are required.")
+    st.caption("*Client Name, Client Type, Product Type, Payment Mode, and Sale Type are required.")
 
     delivery_addr = st.text_input("Site Address", value=_cv("delivery_address"), key=f"ord_addr_{_ck}")
 
@@ -296,11 +301,13 @@ def show(PLOT):
         _payment_val = st.session_state.get("ord_payment", REQUIRED_PLACEHOLDER)
         _sale_val    = st.session_state.get("ord_sale_type", REQUIRED_PLACEHOLDER)
         _ctype_val   = client_type
+        _ptype_val   = product_type
 
         missing = []
         if not di_no_final:            missing.append("DI No.")
         if not client_name.strip():    missing.append("Client Name")
         if _ctype_val == REQUIRED_PLACEHOLDER:   missing.append("Client Type")
+        if _ptype_val == REQUIRED_PLACEHOLDER:   missing.append("Product Type")
         if _payment_val == REQUIRED_PLACEHOLDER: missing.append("Payment Mode")
         if _sale_val == REQUIRED_PLACEHOLDER:    missing.append("Sale Type")
 
@@ -317,6 +324,7 @@ def show(PLOT):
                 "office":           office,
                 "gstin":            gstin,
                 "client_type":      _ctype_val,
+                "product_type":     _ptype_val,
                 "mode_of_payment":  _payment_val,
                 "sale_type":        _sale_val,
                 "delivery_address": delivery_addr,
@@ -409,6 +417,8 @@ def show(PLOT):
         _agg["transport_gst_amount"] = ("transport_gst_amount", "sum")
     if "client_type" in df_orders.columns:
         _agg["client_type"] = ("client_type", "first")
+    if "product_type" in df_orders.columns:
+        _agg["product_type"] = ("product_type", "first")
     if "sale_type" in df_orders.columns:
         _agg["sale_type"] = ("sale_type", "first")
     di_summary = df_orders.groupby("di_no").agg(**_agg).reset_index().sort_values("order_date", ascending=False)
@@ -444,14 +454,14 @@ def show(PLOT):
         if col in di_summary.columns:
             di_summary[col] = di_summary[col].round(0).astype(int)
 
-    show_cols = ["di_no","order_date","client_name","client_type","sale_type","products","Status",
+    show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","products","Status",
                  "qty_ordered","dispatched_qty","pending_qty",
                  "total_ordered","gst_amount","transport_value","transport_gst_amount",
                  "dispatched_value","pending_value","challans"]
     show_cols = [c for c in show_cols if c in di_summary.columns]
     rename_map = {
         "di_no":"DI No.","order_date":"Date","client_name":"Client",
-        "client_type":"Client Type","sale_type":"Sale Type",
+        "client_type":"Client Type","product_type":"Product Type","sale_type":"Sale Type",
         "products":"Products","qty_ordered":"Ord Qty","dispatched_qty":"Disp Qty",
         "pending_qty":"Pending Qty","total_ordered":"Material Val (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
@@ -483,6 +493,7 @@ def show(PLOT):
         st.markdown(
             f"**DI {sel_detail_di}** &nbsp;|&nbsp; {hdr.get('client_name','')} &nbsp;|&nbsp; "
             f"🏷️ {hdr.get('client_type','—')} &nbsp;|&nbsp; "
+            f"📦 {hdr.get('product_type','—')} &nbsp;|&nbsp; "
             f"📅 {pd.to_datetime(hdr['order_date']).strftime('%d-%b-%Y') if pd.notna(hdr['order_date']) else '—'} &nbsp;|&nbsp; "
             f"💳 {hdr.get('mode_of_payment','')}"
         )
@@ -511,6 +522,7 @@ def show(PLOT):
             "office":           hdr.get("office", ""),
             "gstin":            hdr.get("gstin", ""),
             "client_type":      hdr.get("client_type", ""),
+            "product_type":     hdr.get("product_type", ""),
             "mode_of_payment":  hdr.get("mode_of_payment", ""),
             "sale_type":        hdr.get("sale_type", ""),
             "delivery_address": hdr.get("delivery_address", ""),
@@ -555,12 +567,15 @@ def show(PLOT):
                 e_contact = ec4.text_input("Contact Person Name", value=str(erow.get("contact_person","") or ""))
                 e_phone   = ec5.text_input("Phone",               value=str(erow.get("phone","") or ""))
 
-                ec6, ec7, ec8 = st.columns(3)
+                ec6, ec7, ec8, ec8b = st.columns(4)
                 _ect     = str(erow.get("client_type","") or "")
                 e_ctype  = ec6.selectbox("Client Type", CLIENT_TYPES,
                                          index=CLIENT_TYPES.index(_ect) if _ect in CLIENT_TYPES else 0)
-                e_office = ec7.text_input("Office", value=str(erow.get("office","") or ""))
-                e_gstin  = ec8.text_input("GSTIN",  value=str(erow.get("gstin","") or ""))
+                _ept     = str(erow.get("product_type","") or "")
+                e_ptype  = ec7.selectbox("Product Type", PRODUCT_TYPES,
+                                         index=PRODUCT_TYPES.index(_ept) if _ept in PRODUCT_TYPES else 0)
+                e_office = ec8.text_input("Office", value=str(erow.get("office","") or ""))
+                e_gstin  = ec8b.text_input("GSTIN",  value=str(erow.get("gstin","") or ""))
 
                 e_addr = st.text_input("Site Address", value=str(erow.get("delivery_address","") or ""))
 
@@ -606,6 +621,7 @@ def show(PLOT):
                         "di_no": e_di, "order_date": str(e_odate),
                         "client_name": e_client, "contact_person": e_contact, "phone": e_phone,
                         "office": e_office, "gstin": e_gstin, "client_type": e_ctype,
+                        "product_type": e_ptype,
                         "delivery_address": e_addr, "site_person": e_site_person, "site_phone": e_site_phone,
                         "product": e_prod, "qty_ordered": e_qty, "rate": e_rate,
                         "total_amount": e_total if e_total > 0 else round(e_qty * e_rate, 2),

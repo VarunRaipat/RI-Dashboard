@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS orders (
     gst_amount        REAL DEFAULT 0,
     delivery_date     TEXT,
     sale_type         TEXT DEFAULT 'Sale A',
+    product_type      TEXT,
     remarks           TEXT,
     created_at        TIMESTAMPTZ DEFAULT NOW()
 );
@@ -309,6 +310,7 @@ ALTER TABLE product_config ADD COLUMN IF NOT EXISTS steel_kg_per_unit REAL DEFAU
 -- portion of that total, kept separately for reporting.
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS gst_amount REAL DEFAULT 0;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS product_type TEXT;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS gst_amount REAL DEFAULT 0;
 
