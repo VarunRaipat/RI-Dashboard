@@ -101,9 +101,13 @@ def show(PLOT):
             st.error("Enter Nos. > 0 for at least one product line.")
         else:
             if cement_bags > 0 or ggbs_bags > 0:
-                insert_rm_usage({
-                    "date": str(entry_date), "cement_bags": cement_bags, "ggbs_bags": ggbs_bags,
-                })
+                try:
+                    insert_rm_usage({
+                        "date": str(entry_date), "cement_bags": cement_bags, "ggbs_bags": ggbs_bags,
+                    })
+                except Exception:
+                    st.warning("⚠️ Product lines saved, but Cement/GGBS usage could not be recorded "
+                               "(reconciliation only — doesn't affect cost/profit).")
 
             st.toast("✅ DPR entry saved!")
             st.markdown(
