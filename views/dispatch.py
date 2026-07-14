@@ -4,9 +4,10 @@ import plotly.graph_objects as go
 from core.tz import today_ist
 from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE, selling_price_unit
 from core.calculations import dispatch_value, gst_split, transport_charge
-from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
+from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch
 from core.ui import client_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
+from core.visibility import di_dispatch_warnings
 
 LAKH = 100_000
 
@@ -107,6 +108,24 @@ def _product_lines(prefix, n_lines):
         st.rerun()
 
 
+def _line_products(prefix, n_lines):
+    """Products currently selected with Qty Dispatched > 0, read back from
+    the plain session_state widgets _product_lines() renders."""
+    return [
+        st.session_state.get(f"{prefix}_prod_{i}")
+        for i in range(n_lines)
+        if (st.session_state.get(f"{prefix}_qd_{i}", 0) or 0) > 0
+    ]
+
+
+def _show_di_warnings(di_no, products, df_orders, df_disp):
+    """Surface di_dispatch_warnings() as inline warnings under the DI No.
+    field — non-blocking, since a legitimate dispatch can predate its Sales
+    Order or reference legacy data the operator knows is fine."""
+    for w in di_dispatch_warnings(di_no, products, df_orders, df_disp):
+        st.warning(f"⚠️ {w}")
+
+
 def _reset_lines(prefix, n_lines):
     for i in range(n_lines):
         for f in ("prod", "qo", "qd", "rate"):
@@ -134,7 +153,8 @@ def _show_dispatch_operator():
     <div class="page-subtitle">Enter challan details below — add multiple products if one challan covers more than one.</div>
     """, unsafe_allow_html=True)
 
-    df_known = get_dispatch()
+    df_known  = get_dispatch()
+    df_orders = get_orders()
     known_clients = set(df_known["client_name"].dropna().astype(str)) if not df_known.empty and "client_name" in df_known.columns else set()
 
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
@@ -158,6 +178,7 @@ def _show_dispatch_operator():
 
     st.markdown("**Products in this Challan**")
     _product_lines("disp_op", st.session_state["disp_op_lines"])
+    _show_di_warnings(di_no, _line_products("disp_op", st.session_state["disp_op_lines"]), df_orders, df_known)
 
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")
     transport_mode, transport_rate, transport_gst_applicable = transport_fields("disp_op")
@@ -251,7 +272,8 @@ def show(PLOT):
     <div class="page-subtitle">Challan entry · Dashboard · Invoice tracking</div>
     """, unsafe_allow_html=True)
 
-    df_all = get_dispatch()
+    df_all    = get_dispatch()
+    df_orders = get_orders()
     if not df_all.empty:
         df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
 
@@ -433,6 +455,7 @@ def show(PLOT):
 
         st.markdown("**Products in this Challan**")
         _product_lines("disp_main", st.session_state["disp_main_lines"])
+        _show_di_warnings(di_no, _line_products("disp_main", st.session_state["disp_main_lines"]), df_orders, df_all)
 
         gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_main_gst")
         transport_mode, transport_rate, transport_gst_applicable = transport_fields("disp_main")
@@ -635,6 +658,8 @@ def show(PLOT):
                 if can_bill and e_bill is not None:
                     payload["bill_no"] = e_bill.strip() if e_bill.strip() else None
                 update_dispatch(int(erow["id"]), payload)
+                for w in di_dispatch_warnings(e_di, [e_prod], df_orders, df_edit):
+                    st.warning(f"⚠️ {w}")
                 flash("✅ Dispatch entry updated!")
                 st.success(f"✅ Entry updated. Dispatch Value = ₹{new_dv:,.0f}")
                 st.rerun()
