@@ -196,6 +196,7 @@ for _pillar in ["Pillar 8'", "Pillar 10'", "Pillar 12'", "Pillar 14'"]:
 
 PRODUCT_CONFIG["Fencing Pillar"] = {"display": "Fencing Pillar", **_blank_rates()}
 PRODUCT_CONFIG["PSC Pole"]       = {"display": "PSC Pole", **_blank_rates()}
+PRODUCT_CONFIG["Boundary Wall"]  = {"display": "Boundary Wall", **_blank_rates()}  # priced Rs./sqft; quantity still entered as Nos.
 
 del _blank_rates, _d, _c, _name, _slab, _pillar, _thickness_class, _thickness
 
@@ -275,7 +276,7 @@ CHALLAN_NO_IGNORE = {"Sale A": {212}}
 
 CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer"]
 
-PRODUCT_TYPES = ["Pipe", "Boundary Wall"]
+PRODUCT_TYPES = ["Pipe", "Boundary Wall", "PSC Pole", "Fencing Post"]
 
 FACTORIES = ["Rameshwaram Industries"]
 
