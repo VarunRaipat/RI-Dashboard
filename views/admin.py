@@ -4,7 +4,7 @@ import pandas as pd
 from core.config import (
     DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT,
     PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES,
-    EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT,
+    EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, selling_price_unit,
 )
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
@@ -87,8 +87,9 @@ def show(PLOT):
                 is_pipe = sel_prod.startswith("Hume Pipe")
 
                 with st.form("product_cfg_form"):
-                    new_sell = st.number_input("Selling Price (Rs./nos)", value=float(cfg["selling_price"]), min_value=0.0, step=0.5)
-                    st.caption(f"Invoice total incl. {GST_PCT:.0f}% GST: ₹{cfg['selling_price'] * (1 + GST_PCT/100):,.2f}/nos "
+                    _unit = selling_price_unit(sel_prod)
+                    new_sell = st.number_input(f"Selling Price (Rs./{_unit})", value=float(cfg["selling_price"]), min_value=0.0, step=0.5)
+                    st.caption(f"Invoice total incl. {GST_PCT:.0f}% GST: ₹{cfg['selling_price'] * (1 + GST_PCT/100):,.2f}/{_unit} "
                                f"— GST is collected from the customer but owed to the government, so it's shown here for "
                                f"reference only and never counted as profit.")
 

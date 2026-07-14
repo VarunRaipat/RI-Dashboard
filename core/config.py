@@ -196,7 +196,14 @@ for _pillar in ["Pillar 8'", "Pillar 10'", "Pillar 12'", "Pillar 14'"]:
 
 PRODUCT_CONFIG["Fencing Pillar"] = {"display": "Fencing Pillar", **_blank_rates()}
 PRODUCT_CONFIG["PSC Pole"]       = {"display": "PSC Pole", **_blank_rates()}
-PRODUCT_CONFIG["Boundary Wall"]  = {"display": "Boundary Wall", **_blank_rates()}  # priced Rs./sqft; quantity still entered as Nos.
+PRODUCT_CONFIG["Boundary Wall"]  = {"display": "Boundary Wall", **_blank_rates()}  # quantity still entered as Nos.
+
+# Selling Price unit shown in Admin > Product Cost Configuration — every
+# product prices per nos except Boundary Wall, which is quoted Rs./sqft
+# (quantity/production/dispatch tracking is unaffected, still counted in Nos).
+SELLING_PRICE_UNIT = {"Boundary Wall": "sqft"}
+def selling_price_unit(product: str) -> str:
+    return SELLING_PRICE_UNIT.get(product, "nos")
 
 del _blank_rates, _d, _c, _name, _slab, _pillar, _thickness_class, _thickness
 
