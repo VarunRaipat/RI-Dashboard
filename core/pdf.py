@@ -1,7 +1,7 @@
 """
-PDF generation — Dispatch Instruction for Sales Orders.
-Minimalist, premium letterhead style — no marketing copy, generous
-whitespace, hairline rules, single muted accent colour.
+PDF generation — Dispatch Instruction and Quotation.
+Premium letterhead style: gold/ink palette, tinted header card, dark
+ink+gold table headers, and a running gold-bar/footer on every page.
 """
 import io
 from core.tz import now_ist
@@ -10,6 +10,7 @@ from pathlib import Path
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable,
 )
@@ -18,12 +19,33 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
 LOGO_PATH = Path(__file__).parent.parent / "assets" / "Logo.png"
 
-INK      = colors.HexColor("#181818")   # near-black body text
-MUTED    = colors.HexColor("#8C8C8C")   # grey labels / secondary text
-ACCENT   = colors.HexColor("#A8843C")   # muted bronze/gold — used sparingly
-HAIRLINE = colors.HexColor("#E4E1D8")   # warm light hairline rule
-ZEBRA    = colors.HexColor("#FAF9F6")   # near-white warm row tint
-LAKH     = 100_000
+INK         = colors.HexColor("#181818")   # near-black body text
+MUTED       = colors.HexColor("#8C8C8C")   # grey labels / secondary text
+ACCENT      = colors.HexColor("#A8843C")   # muted bronze/gold — rules & emphasis
+GOLD_ON_DARK = colors.HexColor("#D3B673")  # brighter gold, for text on ink background
+GOLD_TINT   = colors.HexColor("#F6EEDD")   # soft gold wash — total/subtotal rows
+HAIRLINE    = colors.HexColor("#E4E1D8")   # warm light hairline rule
+ZEBRA       = colors.HexColor("#FAF9F6")   # near-white warm row tint
+LAKH = 100_000
+
+MARGIN = 18 * mm
+
+# Logo.png is 1600x716px — width/height below preserve that aspect ratio
+# instead of stretching it into a squashed banner.
+LOGO_W = 28 * mm
+LOGO_H = LOGO_W * 716 / 1600
+
+
+def _tracked(text):
+    """Letter-spaced caps for section headers — a light, editorial touch
+    that's safe to use only where the text has a full line to itself
+    (narrow columns would wrap awkwardly with the extra spacing). Words are
+    tracked individually and rejoined with a wider gap so word boundaries
+    (e.g. "Sales Person") stay legible instead of reading as one word.
+    Uses non-breaking spaces (\\xa0) since Paragraph's XML parser collapses
+    runs of regular spaces down to one, which would erase the tracking."""
+    letter_gap, word_gap = "\xa0", "\xa0" * 3
+    return word_gap.join(letter_gap.join(word) for word in str(text).split(" "))
 
 
 def _styles():
@@ -40,11 +62,23 @@ def _styles():
                           textColor=MUTED, leading=10))
     ss.add(ParagraphStyle("Value", fontName="Helvetica-Bold", fontSize=9.5,
                           textColor=INK, leading=13))
-    ss.add(ParagraphStyle("SectionLabel", fontName="Helvetica-Bold", fontSize=7.5,
+    ss.add(ParagraphStyle("SectionLabel", fontName="Helvetica-Bold", fontSize=7.8,
                           textColor=ACCENT, leading=10))
     ss.add(ParagraphStyle("FooterNote", fontName="Helvetica", fontSize=7.3,
                           textColor=MUTED, alignment=TA_RIGHT))
+    ss.add(ParagraphStyle("TableHeadL", fontName="Helvetica-Bold", fontSize=6.3,
+                          textColor=GOLD_ON_DARK, leading=7.6))
+    ss.add(ParagraphStyle("TableHeadR", fontName="Helvetica-Bold", fontSize=6.3,
+                          textColor=GOLD_ON_DARK, leading=7.6, alignment=TA_RIGHT))
     return ss
+
+
+def _header_row(head, ss):
+    """Wrap table header labels in Paragraphs so long ones (e.g. "TRANSPORT
+    (RS.)") wrap onto a second line instead of overflowing into the next
+    column — plain strings in a Table cell never wrap, only Flowables do."""
+    return [Paragraph(head[0], ss["TableHeadL"])] + \
+        [Paragraph(h, ss["TableHeadR"]) for h in head[1:]]
 
 
 def _info_block(ss, label, value):
@@ -68,6 +102,110 @@ def _detail_grid(ss, pairs, col_widths):
     return tbl
 
 
+def _section_label(ss, text):
+    return Paragraph(_tracked(text), ss["SectionLabel"])
+
+
+def _letterhead(ss, doc_title, subtitle_lines):
+    """Logo + doc title inside a soft-tinted card, closed off with a gold
+    rule over a thin hairline (a "double rule") for a premium letterhead feel."""
+    if LOGO_PATH.exists():
+        logo = Image(str(LOGO_PATH), width=LOGO_W, height=LOGO_H)
+    else:
+        logo = Paragraph("RAMESHWARAM INDUSTRIES", ss["Wordmark"])
+
+    title_block = [Paragraph(doc_title, ss["DocTitle"])] + \
+        [Paragraph(t, ss["DocSub"]) for t in subtitle_lines]
+
+    header_tbl = Table([[logo, title_block]], colWidths=[85 * mm, 89 * mm])
+    header_tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, 0), (-1, -1), ZEBRA),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+    ]))
+    return [
+        header_tbl,
+        Spacer(1, 2.4 * mm),
+        HRFlowable(width="100%", thickness=1.1, color=ACCENT),
+        Spacer(1, 0.6 * mm),
+        HRFlowable(width="100%", thickness=0.4, color=HAIRLINE),
+        Spacer(1, 7 * mm),
+    ]
+
+
+def _style_product_table(rows, col_widths, total_rows=1):
+    """Shared styling for the dispatch/quotation line-item tables: a dark
+    ink header band with gold text, warm zebra striping, and a soft gold
+    wash on the closing total/subtotal row(s)."""
+    body_end = -1 - (total_rows - 1) if total_rows > 1 else -2
+    tbl = Table(rows, colWidths=col_widths, repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), INK),
+        ("FONTSIZE", (0, 1), (-1, -1), 9.3),
+        ("FONTNAME", (0, -total_rows), (-1, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, -total_rows), (-1, -1), INK),
+        ("BACKGROUND", (0, -total_rows), (-1, -1), GOLD_TINT),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.0, ACCENT),
+        ("LINEABOVE", (0, -total_rows), (-1, -total_rows), 0.8, ACCENT),
+        ("ROWBACKGROUNDS", (0, 1), (-1, body_end), [colors.white, ZEBRA]),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 1), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, 0), 3),
+        ("RIGHTPADDING", (0, 0), (-1, 0), 3),
+        ("LINEBELOW", (0, 1), (-1, body_end), 0.3, HAIRLINE),
+    ]
+    tbl.setStyle(TableStyle(style))
+    return tbl
+
+
+def _make_canvas(footer_right_text):
+    """Canvas that stamps a thin gold bar across the top and a page-number
+    + timestamp footer on every page — done as a two-pass canvas since the
+    total page count isn't known until the whole story is laid out."""
+
+    class _NumberedCanvas(pdfcanvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            pdfcanvas.Canvas.__init__(self, *args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total_pages = len(self._saved_page_states)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                self._draw_decorations(total_pages)
+                pdfcanvas.Canvas.showPage(self)
+            pdfcanvas.Canvas.save(self)
+
+        def _draw_decorations(self, total_pages):
+            w, h = A4
+            self.saveState()
+            self.setFillColor(ACCENT)
+            self.rect(0, h - 2 * mm, w, 2 * mm, stroke=0, fill=1)
+            self.setStrokeColor(HAIRLINE)
+            self.setLineWidth(0.6)
+            self.line(MARGIN, 13 * mm, w - MARGIN, 13 * mm)
+            self.setFont("Helvetica", 7.3)
+            self.setFillColor(MUTED)
+            self.drawString(MARGIN, 9 * mm, f"Page {self._pageNumber} of {total_pages}")
+            self.drawRightString(w - MARGIN, 9 * mm, footer_right_text)
+            self.restoreState()
+
+    return _NumberedCanvas
+
+
 def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     """
     Build a Dispatch Instruction PDF for one DI.
@@ -89,31 +227,14 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         topMargin=18 * mm, bottomMargin=16 * mm,
-        leftMargin=18 * mm, rightMargin=18 * mm,
+        leftMargin=MARGIN, rightMargin=MARGIN,
     )
     story = []
 
-    # ── Letterhead: logo + doc title, no marketing copy ─────────────────────
-    if LOGO_PATH.exists():
-        logo = Image(str(LOGO_PATH), width=32 * mm, height=8 * mm)
-    else:
-        logo = Paragraph("RAMESHWARAM INDUSTRIES", ss["Wordmark"])
-
-    title_block = [
-        Paragraph("DISPATCH INSTRUCTION", ss["DocTitle"]),
-        Paragraph(f"DI No. {di_no}", ss["DocSub"]),
-    ]
-    header_tbl = Table([[logo, title_block]], colWidths=[85 * mm, 89 * mm])
-    header_tbl.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    story.append(header_tbl)
-    story.append(Spacer(1, 5 * mm))
-    story.append(HRFlowable(width="100%", thickness=0.8, color=ACCENT))
-    story.append(Spacer(1, 7 * mm))
+    story += _letterhead(ss, "DISPATCH INSTRUCTION", [f"DI No. {di_no}"])
 
     # ── Order details ─────────────────────────────────────────────────────
-    story.append(Paragraph("ORDER", ss["SectionLabel"]))
+    story.append(_section_label(ss, "Order"))
     story.append(Spacer(1, 2 * mm))
     order_pairs = [
         [("DI No.", di_no), ("Order Date", header.get("order_date", "—"))],
@@ -123,7 +244,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     story.append(Spacer(1, 5 * mm))
 
     # ── Client details ───────────────────────────────────────────────────
-    story.append(Paragraph("CLIENT", ss["SectionLabel"]))
+    story.append(_section_label(ss, "Client"))
     story.append(Spacer(1, 2 * mm))
     client_pairs = [
         [("Client Name", header.get("client_name", "—")), ("Contact Person", header.get("contact_person", "—"))],
@@ -134,7 +255,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     story.append(Spacer(1, 5 * mm))
 
     # ── Site details ──────────────────────────────────────────────────────
-    story.append(Paragraph("SITE / DELIVERY", ss["SectionLabel"]))
+    story.append(_section_label(ss, "Site / Delivery"))
     story.append(Spacer(1, 2 * mm))
     site_pairs = [
         [("Site Address", header.get("delivery_address", "—")), ("Site Person", header.get("site_person", "—"))],
@@ -157,7 +278,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
         head += ["TRANSPORT (RS.)"]
     head += ["TOTAL (RS.)"]
 
-    rows = [head]
+    rows = [_header_row(head, ss)]
     total_amount    = 0.0
     total_gst       = 0.0
     total_qty       = 0.0
@@ -204,25 +325,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     other_w = remaining / (n_cols - 1)
     col_widths = [prod_w] + [other_w] * (n_cols - 1)
 
-    prod_tbl = Table(rows, colWidths=col_widths, repeatRows=1)
-    prod_tbl.setStyle(TableStyle([
-        ("TEXTCOLOR", (0, 0), (-1, 0), MUTED),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7.3),
-        ("FONTSIZE", (0, 1), (-1, -1), 9.3),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("TEXTCOLOR", (0, -1), (-1, -1), INK),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.8, ACCENT),
-        ("LINEABOVE", (0, -1), (-1, -1), 0.8, ACCENT),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, ZEBRA]),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("LINEBELOW", (0, 1), (-1, -2), 0.3, HAIRLINE),
-    ]))
-    story.append(prod_tbl)
+    story.append(_style_product_table(rows, col_widths))
     if has_transport:
         story.append(Spacer(1, 2 * mm))
         story.append(Paragraph(
@@ -233,7 +336,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
 
     remarks = (header.get("remarks") or "").strip()
     if remarks:
-        story.append(Paragraph("REMARKS", ss["SectionLabel"]))
+        story.append(_section_label(ss, "Remarks"))
         story.append(Spacer(1, 1.5 * mm))
         story.append(Paragraph(remarks, ss["Value"]))
         story.append(Spacer(1, 8 * mm))
@@ -257,21 +360,14 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
     ]))
     story.append(sign_tbl)
-    story.append(Spacer(1, 10 * mm))
-    story.append(HRFlowable(width="100%", thickness=0.4, color=HAIRLINE))
-    story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(
-        f"Generated {now_ist().strftime('%d %b %Y, %I:%M %p')}",
-        ss["FooterNote"],
-    ))
 
-    doc.build(story)
+    doc.build(story, canvasmaker=_make_canvas(f"Generated {now_ist().strftime('%d %b %Y, %I:%M %p')}"))
     return buf.getvalue()
 
 
 def generate_quotation(quote_no, header, lines):
     """
-    Build a client-facing Quotation PDF — same minimalist letterhead style as
+    Build a client-facing Quotation PDF — same premium letterhead style as
     generate_dispatch_instruction (logo + doc title, no fabricated company
     address/GSTIN/bank details since we don't have real values for those).
 
@@ -289,29 +385,17 @@ def generate_quotation(quote_no, header, lines):
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         topMargin=18 * mm, bottomMargin=16 * mm,
-        leftMargin=18 * mm, rightMargin=18 * mm,
+        leftMargin=MARGIN, rightMargin=MARGIN,
     )
     story = []
 
-    if LOGO_PATH.exists():
-        logo = Image(str(LOGO_PATH), width=32 * mm, height=8 * mm)
-    else:
-        logo = Paragraph("RAMESHWARAM INDUSTRIES", ss["Wordmark"])
+    story += _letterhead(ss, "QUOTATION", [
+        f"No. {quote_no}",
+        f"Date: {header.get('quote_date', '—')}",
+        f"Valid Until: {header.get('valid_until', '—')}",
+    ])
 
-    title_block = [
-        Paragraph("QUOTATION", ss["DocTitle"]),
-        Paragraph(f"No. {quote_no}", ss["DocSub"]),
-        Paragraph(f"Date: {header.get('quote_date', '—')}", ss["DocSub"]),
-        Paragraph(f"Valid Until: {header.get('valid_until', '—')}", ss["DocSub"]),
-    ]
-    header_tbl = Table([[logo, title_block]], colWidths=[85 * mm, 89 * mm])
-    header_tbl.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-    story.append(header_tbl)
-    story.append(Spacer(1, 5 * mm))
-    story.append(HRFlowable(width="100%", thickness=0.8, color=ACCENT))
-    story.append(Spacer(1, 7 * mm))
-
-    story.append(Paragraph("CLIENT", ss["SectionLabel"]))
+    story.append(_section_label(ss, "Client"))
     story.append(Spacer(1, 2 * mm))
     client_pairs = [
         [("Client Name", header.get("client_name", "—")), ("Contact Person", header.get("contact_person", "—"))],
@@ -330,7 +414,7 @@ def generate_quotation(quote_no, header, lines):
         head += ["TRANSPORT (RS.)"]
     head += ["AMOUNT (RS.)"]
 
-    rows = [head]
+    rows = [_header_row(head, ss)]
     subtotal = 0.0
     total_gst = 0.0
     total_transport = 0.0
@@ -372,25 +456,7 @@ def generate_quotation(quote_no, header, lines):
     other_w = remaining / (n_cols - 1)
     col_widths = [prod_w] + [other_w] * (n_cols - 1)
 
-    prod_tbl = Table(rows, colWidths=col_widths, repeatRows=1)
-    prod_tbl.setStyle(TableStyle([
-        ("TEXTCOLOR", (0, 0), (-1, 0), MUTED),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7.3),
-        ("FONTSIZE", (0, 1), (-1, -1), 9.3),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("TEXTCOLOR", (0, -1), (-1, -1), INK),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.8, ACCENT),
-        ("LINEABOVE", (0, -1), (-1, -1), 0.8, ACCENT),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, ZEBRA]),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("LINEBELOW", (0, 1), (-1, -2), 0.3, HAIRLINE),
-    ]))
-    story.append(prod_tbl)
+    story.append(_style_product_table(rows, col_widths))
     story.append(Spacer(1, 3 * mm))
 
     summary_lines = []
@@ -403,14 +469,14 @@ def generate_quotation(quote_no, header, lines):
 
     sales_person = (header.get("sales_person") or "").strip()
     if sales_person:
-        story.append(Paragraph("SALES PERSON", ss["SectionLabel"]))
+        story.append(_section_label(ss, "Sales Person"))
         story.append(Spacer(1, 1.5 * mm))
         story.append(Paragraph(sales_person, ss["Value"]))
         story.append(Spacer(1, 5 * mm))
 
     remarks = (header.get("remarks") or "").strip()
     if remarks:
-        story.append(Paragraph("REMARKS", ss["SectionLabel"]))
+        story.append(_section_label(ss, "Remarks"))
         story.append(Spacer(1, 1.5 * mm))
         story.append(Paragraph(remarks, ss["Value"]))
         story.append(Spacer(1, 8 * mm))
@@ -433,13 +499,6 @@ def generate_quotation(quote_no, header, lines):
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
     ]))
     story.append(sign_tbl)
-    story.append(Spacer(1, 10 * mm))
-    story.append(HRFlowable(width="100%", thickness=0.4, color=HAIRLINE))
-    story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(
-        f"Generated {now_ist().strftime('%d %b %Y, %I:%M %p')}",
-        ss["FooterNote"],
-    ))
 
-    doc.build(story)
+    doc.build(story, canvasmaker=_make_canvas(f"Generated {now_ist().strftime('%d %b %Y, %I:%M %p')}"))
     return buf.getvalue()
