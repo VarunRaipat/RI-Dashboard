@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from core.tz import today_ist
-from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE
+from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE, selling_price_unit
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, delete_row, update_dispatch
 from core.ui import client_name_field, flash, show_flashes, transport_fields
@@ -91,6 +91,9 @@ def _product_lines(prefix, n_lines):
         cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
         cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
         cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
+        _row_unit = selling_price_unit(st.session_state.get(f"{prefix}_prod_{i}", ""))
+        if _row_unit != "nos":
+            cols[3].caption(f"₹/{_row_unit} for this product")
         if n_lines > 1:
             if cols[4].button("✕", key=f"{prefix}_rem_{i}"):
                 for j in range(i, n_lines - 1):

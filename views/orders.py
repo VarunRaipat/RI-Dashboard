@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from core.tz import today_ist
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START, PRODUCT_TYPES
+from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START, PRODUCT_TYPES, selling_price_unit
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
@@ -265,6 +265,9 @@ def show(PLOT):
         cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"ord_prod_{i}", label_visibility="collapsed")
         cols[1].number_input("Qty", min_value=0.0, step=100.0,   key=f"ord_qty_{i}",   label_visibility="collapsed")
         cols[2].number_input("Rate", min_value=0.0, step=0.5, key=f"ord_rate_{i}", label_visibility="collapsed")
+        _row_unit = selling_price_unit(st.session_state.get(f"ord_prod_{i}", ""))
+        if _row_unit != "nos":
+            cols[2].caption(f"₹/{_row_unit} for this product")
         # Live total — plain markdown (not a keyed widget) so it always reflects
         # the current Qty/Rate instead of a stale value from a previous rerun.
         qty_v  = st.session_state.get(f"ord_qty_{i}", 0) or 0
