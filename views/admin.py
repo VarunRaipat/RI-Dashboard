@@ -1,4 +1,5 @@
 import re
+import json
 import streamlit as st
 import pandas as pd
 from core.config import (
@@ -11,6 +12,7 @@ from core.db import (
     get_product_config, save_product_config, get_pipe_diameter_config, save_pipe_diameter_config,
     get_orders, update_order, update_dispatch,
     get_activity_log, insert_production, insert_dispatch,
+    get_edit_requests, approve_edit_request, reject_edit_request,
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import sanitize_for_export
@@ -30,9 +32,14 @@ def show(PLOT):
     if not can_edit:
         st.caption("👁️ View-only — you can see configuration and history here, but only Admin can make changes.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    _pending_reqs = get_edit_requests(status="pending")
+    if can_edit and not _pending_reqs.empty:
+        st.warning(f"📝 **{len(_pending_reqs)} edit request(s)** waiting for review — see the "
+                   f"**Edit Requests** tab below.")
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         ["💰 RM Prices", "📦 Product Config", "📋 All Production", "🚚 All Dispatch",
-         "🧩 Merge Client Names", "🕵️ Activity Log"]
+         "🧩 Merge Client Names", "🕵️ Activity Log", f"📝 Edit Requests ({len(_pending_reqs)})"]
     )
 
     # ── Tab 1: RM Prices ──────────────────────────────────────────────────────
@@ -568,3 +575,67 @@ def show(PLOT):
             }
             col_cfg = {"created_at": st.column_config.DatetimeColumn("When", format="DD-MMM-YYYY HH:mm")}
             interactive_table(df_log, key="activity_log", show_cols=show_cols, rename=rename, col_config=col_cfg)
+
+    # ── Tab 7: Edit Requests ───────────────────────────────────────────────────
+    with tab7:
+        st.markdown("### Pending Edit Requests")
+        st.caption(
+            "Submitted by roles that can't edit directly (Production/Factory on DPR, Dispatch/Factory "
+            "on Dispatch, Headoffice on Sales Orders). Approving applies the change to the live record "
+            "immediately; rejecting discards it — nothing here touches real data until you decide."
+        )
+
+        df_reqs = get_edit_requests()
+        if df_reqs.empty:
+            st.info("No edit requests yet.")
+        else:
+            pending = df_reqs[df_reqs["status"] == "pending"].sort_values("created_at")
+            if pending.empty:
+                st.success("✅ No pending requests.")
+            else:
+                for _, req in pending.iterrows():
+                    old = json.loads(req["old_data"]) if req.get("old_data") else {}
+                    new = json.loads(req["new_data"]) if req.get("new_data") else {}
+                    changed = {k: (old.get(k), new.get(k)) for k in new if str(old.get(k)) != str(new.get(k))}
+
+                    header = f"{req['module_label']} — {req['summary']} · by {req.get('requested_by_name') or req.get('requested_by')}"
+                    with st.expander(header):
+                        st.caption(f"Submitted {req['created_at']} by {req.get('requested_by_name','')} "
+                                  f"({req.get('requested_role','')})")
+                        if changed:
+                            diff_rows = [
+                                {"Field": k.replace("_", " ").title(), "Current": v_old, "Requested": v_new}
+                                for k, (v_old, v_new) in changed.items()
+                            ]
+                            st.dataframe(pd.DataFrame(diff_rows), use_container_width=True, hide_index=True)
+                        else:
+                            st.caption("No field-level changes detected.")
+
+                        if can_edit:
+                            ac1, ac2 = st.columns(2)
+                            if ac1.button("✅ Approve", type="primary", key=f"appr_{req['id']}", use_container_width=True):
+                                try:
+                                    approve_edit_request(int(req["id"]))
+                                    st.success("Approved and applied.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Could not apply: {e}")
+                            note_key = f"rej_note_{req['id']}"
+                            ac2.text_input("Rejection note (optional)", key=note_key,
+                                          label_visibility="collapsed", placeholder="Reason (optional)")
+                            if ac2.button("❌ Reject", key=f"rej_{req['id']}", use_container_width=True):
+                                reject_edit_request(int(req["id"]), st.session_state.get(note_key, ""))
+                                st.success("Rejected.")
+                                st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Recent decisions**")
+            decided = df_reqs[df_reqs["status"] != "pending"].sort_values("created_at", ascending=False).head(50)
+            if decided.empty:
+                st.caption("No decisions yet.")
+            else:
+                dd = decided[["created_at", "module_label", "summary", "status", "reviewed_by", "review_note"]].rename(columns={
+                    "created_at": "Submitted", "module_label": "Module", "summary": "Entry",
+                    "status": "Status", "reviewed_by": "Reviewed By", "review_note": "Note",
+                })
+                st.dataframe(dd, use_container_width=True, hide_index=True)

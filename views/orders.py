@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from core.tz import today_ist
 from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START, PRODUCT_TYPES, selling_price_unit
-from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch
+from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch, create_edit_request, get_edit_requests
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
 from core.ui import client_name_field, flash, show_flashes, transport_fields
@@ -642,3 +642,72 @@ def show(PLOT):
                     flash("🗑️ Order line deleted.")
                     st.success("✅ Deleted.")
                     st.rerun()
+
+    elif role == "headoffice":
+        st.markdown("---")
+        with st.expander("🔧 Spotted a mistake? Request an edit"):
+            st.caption("Pick the order line, enter the corrected values, and submit — an admin reviews "
+                       "and approves before it changes the live record.")
+            if df_orders.empty:
+                st.info("No order lines to request an edit for.")
+            else:
+                df_req = df_orders.copy()
+                df_req["label"] = (
+                    "DI " + df_req["di_no"].astype(str) + " | " +
+                    df_req["client_name"].fillna("").astype(str) + " | " +
+                    df_req["product"].fillna("").astype(str) + " | " +
+                    df_req["qty_ordered"].fillna(0).astype(int).astype(str) + " nos | ID:" + df_req["id"].astype(str)
+                )
+                sel_req = st.selectbox("Select order line", df_req["label"].tolist(), key="ord_req_sel")
+                rrow    = df_req.loc[df_req["label"] == sel_req].iloc[0]
+                rrow_id = int(rrow["id"])
+
+                with st.form(f"ord_req_form_{rrow_id}"):
+                    qc1, qc2 = st.columns(2)
+                    r_di    = qc1.text_input("DI No.", value=str(rrow.get("di_no", "") or ""))
+                    r_odate = qc2.date_input("Order Date",
+                                             value=pd.to_datetime(rrow["order_date"]).date()
+                                             if pd.notna(rrow["order_date"]) else today_ist())
+
+                    qc3, qc4 = st.columns(2)
+                    r_client = client_name_field(qc3, known_clients, "ord_req_client",
+                                                 default=str(rrow.get("client_name", "") or ""))
+                    r_addr   = qc4.text_input("Site Address", value=str(rrow.get("delivery_address", "") or ""))
+
+                    qc5, qc6, qc7 = st.columns(3)
+                    r_prod = qc5.selectbox("Product", ORDER_PRODUCTS,
+                                           index=ORDER_PRODUCTS.index(rrow["product"]) if rrow.get("product") in ORDER_PRODUCTS else 0)
+                    r_qty  = qc6.number_input("Qty Ordered", value=float(rrow.get("qty_ordered", 0) or 0), min_value=0.0, step=100.0)
+                    r_rate = qc7.number_input("Rate", value=float(rrow.get("rate", 0) or 0), min_value=0.0, step=0.5)
+
+                    r_rem  = st.text_input("Remarks", value=str(rrow.get("remarks", "") or ""))
+
+                    submit_req = st.form_submit_button("📨 Submit Edit Request", type="primary", use_container_width=True)
+
+                if submit_req:
+                    new_data = {
+                        "di_no": r_di, "order_date": str(r_odate),
+                        "client_name": r_client, "delivery_address": r_addr,
+                        "product": r_prod, "qty_ordered": r_qty, "rate": r_rate,
+                        "total_amount": round(r_qty * r_rate, 2), "remarks": r_rem,
+                    }
+                    old_data = {k: rrow.get(k) for k in new_data}
+                    create_edit_request(
+                        "orders", "Sales Orders", rrow_id,
+                        f"DI {rrow.get('di_no','')} · {rrow.get('product','')} · {rrow.get('client_name','')}",
+                        old_data, new_data,
+                    )
+                    flash("📨 Edit request submitted — pending admin approval.")
+                    st.success("✅ Request submitted. An admin will review it.")
+                    st.rerun()
+
+        my_reqs = get_edit_requests()
+        if not my_reqs.empty:
+            mine = my_reqs[(my_reqs["table_name"] == "orders") &
+                          (my_reqs["requested_by"] == st.session_state.get("username"))]
+            if not mine.empty:
+                st.markdown('<div class="section-header">My Edit Requests</div>', unsafe_allow_html=True)
+                mine_disp = mine[["created_at", "summary", "status", "review_note"]].rename(columns={
+                    "created_at": "Submitted", "summary": "Order Line", "status": "Status", "review_note": "Admin Note",
+                })
+                st.dataframe(mine_disp, use_container_width=True, hide_index=True)

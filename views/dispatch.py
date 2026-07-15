@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from core.tz import today_ist
 from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE, selling_price_unit
 from core.calculations import dispatch_value, gst_split, transport_charge
-from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch
+from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch, create_edit_request, get_edit_requests
 from core.ui import client_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 from core.visibility import di_dispatch_warnings
@@ -251,6 +251,102 @@ def _show_dispatch_operator():
             _reset_lines("disp_op", n_lines)
             _reset_challan_fields("disp_op")
             st.rerun()
+
+    # ── Recent challans + request-an-edit ──────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<div class="section-header">Recent Challans</div>', unsafe_allow_html=True)
+    df_op_rec = get_dispatch()
+    if not df_op_rec.empty:
+        df_op_rec["date"] = pd.to_datetime(df_op_rec["date"], errors="coerce")
+        df_op_rec = df_op_rec.sort_values(["date", "id"], ascending=[False, False]).head(200).reset_index(drop=True)
+        from core.ui import interactive_table
+        interactive_table(
+            df_op_rec, key="disp_op_rec",
+            show_cols=["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched", "rate", "dispatch_value"],
+            rename={"date": "Date", "challan_no": "Challan", "di_no": "DI No.", "client_name": "Client",
+                    "product": "Product", "qty_dispatched": "Qty Dispatched", "rate": "Rate", "dispatch_value": "Value (₹)"},
+            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+            show_export=False,
+        )
+    else:
+        st.info("No challans yet.")
+
+    st.markdown("---")
+    with st.expander("🔧 Spotted a mistake? Request an edit"):
+        st.caption("Pick the challan, enter the corrected values, and submit — an admin reviews "
+                   "and approves before it changes the live record.")
+        df_req = get_dispatch()
+        if df_req.empty:
+            st.info("No challans to request an edit for.")
+        else:
+            df_req["date"] = pd.to_datetime(df_req["date"], errors="coerce")
+            df_req = df_req.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+            df_req["label"] = (
+                df_req["date"].dt.strftime("%d-%b-%Y") + " | Challan " +
+                df_req["challan_no"].fillna("").astype(str) + " | " +
+                df_req["client_name"].fillna("").astype(str) + " | " +
+                df_req["product"].fillna("").astype(str) + " | ID:" + df_req["id"].astype(str)
+            )
+            sel_req = st.selectbox("Select challan", df_req["label"].tolist(), key="disp_req_sel")
+            rrow    = df_req.loc[df_req["label"] == sel_req].iloc[0]
+            rrow_id = int(rrow["id"])
+
+            with st.form(f"disp_req_form_{rrow_id}"):
+                ra, rb, rc = st.columns(3)
+                r_date    = ra.date_input("Date", pd.to_datetime(rrow["date"]))
+                r_challan = rb.text_input("Challan No.", value=str(rrow.get("challan_no", "") or ""))
+                r_di      = rc.text_input("DI No.", value=str(rrow.get("di_no", "") or ""))
+
+                rd, re_, rf = st.columns(3)
+                r_client = rd.text_input("Client Name", value=str(rrow.get("client_name", "") or ""))
+                r_prod   = re_.selectbox("Product", DISPATCH_PRODUCTS,
+                                         index=DISPATCH_PRODUCTS.index(rrow["product"])
+                                         if rrow.get("product") in DISPATCH_PRODUCTS else 0)
+                r_addr   = rf.text_input("Delivery Address", value=str(rrow.get("delivery_address", "") or ""))
+
+                rg, rh, ri_ = st.columns(3)
+                r_qty_o = rg.number_input("Qty Ordered", value=float(rrow.get("qty_ordered", 0) or 0), min_value=0.0, step=100.0)
+                r_qty_d = rh.number_input("Qty Dispatched", value=float(rrow.get("qty_dispatched", 0) or 0), min_value=0.0, step=100.0)
+                r_rate  = ri_.number_input("Rate (₹/nos.)", value=float(rrow.get("rate", 0) or 0), min_value=0.0, step=0.5)
+
+                r_truck  = st.text_input("Truck No.", value=str(rrow.get("truck_no", "") or ""))
+                r_driver = st.text_input("Driver Name", value=str(rrow.get("driver_name", "") or ""))
+                r_rem    = st.text_input("Remarks", value=str(rrow.get("remarks", "") or ""))
+
+                submit_req = st.form_submit_button("📨 Submit Edit Request", type="primary", use_container_width=True)
+
+            if submit_req:
+                _gst_flag = str(rrow.get("gst_applicable", False)).lower() in ("true", "1")
+                new_base = round(float(r_qty_d) * float(r_rate), 2)
+                new_gst, new_dv = gst_split(new_base, _gst_flag)
+                new_data = {
+                    "date": str(r_date), "challan_no": r_challan, "di_no": r_di,
+                    "client_name": r_client, "delivery_address": r_addr, "product": r_prod,
+                    "qty_ordered": r_qty_o, "qty_dispatched": r_qty_d, "rate": r_rate,
+                    "dispatch_value": new_dv, "gst_amount": new_gst,
+                    "truck_no": r_truck, "driver_name": r_driver, "remarks": r_rem,
+                }
+                old_data = {k: rrow.get(k) for k in new_data}
+                create_edit_request(
+                    "dispatch", "Dispatch", rrow_id,
+                    f"Challan {rrow.get('challan_no','')} · {rrow.get('product','')} · "
+                    f"{pd.to_datetime(rrow['date']).strftime('%d-%b-%Y')}",
+                    old_data, new_data,
+                )
+                flash("📨 Edit request submitted — pending admin approval.")
+                st.success("✅ Request submitted. An admin will review it.")
+                st.rerun()
+
+    my_reqs = get_edit_requests()
+    if not my_reqs.empty:
+        mine = my_reqs[(my_reqs["table_name"] == "dispatch") &
+                      (my_reqs["requested_by"] == st.session_state.get("username"))]
+        if not mine.empty:
+            st.markdown('<div class="section-header">My Edit Requests</div>', unsafe_allow_html=True)
+            mine_disp = mine[["created_at", "summary", "status", "review_note"]].rename(columns={
+                "created_at": "Submitted", "summary": "Challan", "status": "Status", "review_note": "Admin Note",
+            })
+            st.dataframe(mine_disp, use_container_width=True, hide_index=True)
 
 
 def show(PLOT):

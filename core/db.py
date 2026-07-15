@@ -259,6 +259,23 @@ def init_db():
         updated_by TEXT,
         updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS edit_requests (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_name        TEXT NOT NULL,
+        module_label      TEXT NOT NULL,
+        row_id            INTEGER NOT NULL,
+        summary           TEXT,
+        old_data          TEXT,
+        new_data          TEXT,
+        status            TEXT DEFAULT 'pending',
+        requested_by      TEXT,
+        requested_by_name TEXT,
+        requested_role    TEXT,
+        reviewed_by       TEXT,
+        review_note       TEXT,
+        created_at        TEXT DEFAULT (datetime('now','localtime')),
+        reviewed_at       TEXT
+    );
     """)
     # Lightweight migration for columns added after a table already existed —
     # CREATE TABLE IF NOT EXISTS above only helps fresh databases.
@@ -1009,3 +1026,101 @@ def delete_gate_entry(row_id):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("delete", "Gate Entry", f"ID {row_id}")
+
+
+# ── Edit Requests (non-admin "propose a fix, admin approves" workflow) ───────
+# Roles that can't directly edit a record (production/factory on DPR,
+# dispatch/factory on Dispatch, headoffice on Sales Orders) submit the same
+# edit form as admin, but instead of writing straight to the table it's held
+# here as a pending before/after diff until an admin approves or rejects it —
+# nothing touches the live record until then.
+_EDIT_REQUEST_UPDATE_FN = {}  # populated below, after update_production/update_dispatch/update_order exist
+
+
+def create_edit_request(table_name, module_label, row_id, summary, old_data, new_data):
+    from core.tz import now_ist
+    data = {
+        "table_name":        table_name,
+        "module_label":      module_label,
+        "row_id":            int(row_id),
+        "summary":           summary,
+        "old_data":          json.dumps(old_data, default=str),
+        "new_data":          json.dumps(new_data, default=str),
+        "status":            "pending",
+        "requested_by":      st.session_state.get("username") or "",
+        "requested_by_name": st.session_state.get("name") or "",
+        "requested_role":    st.session_state.get("role") or "",
+    }
+    if _use_supabase(): _sb_insert("edit_requests", data)
+    else: _sqlite_insert("edit_requests", data)
+    _invalidate_cache()
+    log_activity("request_edit", module_label, summary)
+
+
+@st.cache_data(ttl=15)
+def get_edit_requests(status=None):
+    if _use_supabase():
+        filters = {"status": f"eq.{status}"} if status else None
+        return _sb_select("edit_requests", filters=filters, order="created_at.desc,id.desc", limit=2000)
+    try:
+        con = _conn()
+        q = "SELECT * FROM edit_requests"
+        params = ()
+        if status:
+            q += " WHERE status = ?"
+            params = (status,)
+        q += " ORDER BY created_at DESC, id DESC"
+        df = pd.read_sql(q, con, params=params)
+        con.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def _set_edit_request_status(req_id, status, note=""):
+    from core.tz import now_ist
+    data = {
+        "status":      status,
+        "reviewed_by": st.session_state.get("username") or "",
+        "review_note": note,
+        "reviewed_at": str(now_ist()),
+    }
+    if _use_supabase():
+        _sb_update("edit_requests", req_id, data)
+    else:
+        con = _conn()
+        con.execute(
+            "UPDATE edit_requests SET status = ?, reviewed_by = ?, review_note = ?, reviewed_at = ? WHERE id = ?",
+            (data["status"], data["reviewed_by"], data["review_note"], data["reviewed_at"], req_id),
+        )
+        con.commit(); con.close()
+    _invalidate_cache()
+
+
+def approve_edit_request(req_id):
+    df = get_edit_requests()
+    match = df.loc[df["id"] == req_id]
+    if match.empty:
+        raise Exception("Edit request not found.")
+    row = match.iloc[0]
+    fn = _EDIT_REQUEST_UPDATE_FN.get(row["table_name"])
+    if fn is None:
+        raise Exception(f"Unknown table for edit request: {row['table_name']}")
+    fn(int(row["row_id"]), json.loads(row["new_data"]))
+    _set_edit_request_status(req_id, "approved")
+    log_activity("approve_edit", row["module_label"], row["summary"])
+
+
+def reject_edit_request(req_id, note=""):
+    df = get_edit_requests()
+    match = df.loc[df["id"] == req_id]
+    row = match.iloc[0] if not match.empty else {"module_label": "", "summary": ""}
+    _set_edit_request_status(req_id, "rejected", note)
+    log_activity("reject_edit", row["module_label"], row["summary"])
+
+
+_EDIT_REQUEST_UPDATE_FN.update({
+    "production": update_production,
+    "dispatch":   update_dispatch,
+    "orders":     update_order,
+})

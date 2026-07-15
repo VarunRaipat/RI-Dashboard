@@ -381,6 +381,31 @@ ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
 
+-- ── Migration: Edit Requests (non-admin "propose a fix, admin approves") ────
+-- Roles that can't directly edit a record (production/factory on DPR,
+-- dispatch/factory on Dispatch, headoffice on Sales Orders) submit the same
+-- edit form as admin, but it's held here as a pending before/after diff
+-- (old_data/new_data as JSON text, same shape as the update_* payload) until
+-- an admin approves or rejects it via Admin > Edit Requests.
+CREATE TABLE IF NOT EXISTS edit_requests (
+    id                BIGSERIAL PRIMARY KEY,
+    table_name        TEXT NOT NULL,
+    module_label      TEXT NOT NULL,
+    row_id            BIGINT NOT NULL,
+    summary           TEXT,
+    old_data          TEXT,
+    new_data          TEXT,
+    status            TEXT DEFAULT 'pending',
+    requested_by      TEXT,
+    requested_by_name TEXT,
+    requested_role    TEXT,
+    reviewed_by       TEXT,
+    review_note       TEXT,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    reviewed_at       TEXT
+);
+ALTER TABLE edit_requests DISABLE ROW LEVEL SECURITY;
+
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via
 -- its own login screen (not Supabase Auth) and talks to Supabase with one

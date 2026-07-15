@@ -5,7 +5,7 @@ from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLAN
 from core.calculations import calculate_production
 from core.db import (
     insert_production, insert_rm_usage, get_rm_prices, get_production, delete_row, update_production,
-    get_product_config, get_pipe_diameter_config,
+    get_product_config, get_pipe_diameter_config, create_edit_request, get_edit_requests,
 )
 from core.ui import flash, show_flashes
 
@@ -137,6 +137,89 @@ def show(PLOT):
             st.rerun()
 
     if role in ("production", "factory"):
+        # No cost/profit columns here — those stay admin/viewer-only. This is
+        # just enough to find an entry and request a correction on it.
+        st.markdown("---")
+        st.markdown('<div class="section-header">Recent DPR Entries</div>', unsafe_allow_html=True)
+        from core.ui import interactive_table, date_range_filter
+        op_start, op_end = date_range_filter("dpr_op")
+
+        df_op = get_production()
+        if not df_op.empty:
+            df_op["date"] = pd.to_datetime(df_op["date"], errors="coerce")
+            df_op = df_op[(df_op["date"] >= pd.Timestamp(op_start)) & (df_op["date"] <= pd.Timestamp(op_end))]
+            df_op = df_op.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+            interactive_table(
+                df_op, key="dpr_op_rec",
+                show_cols=["date", "product", "nos", "plant"],
+                rename={"date": "Date", "product": "Product", "nos": "Nos.", "plant": "Plant"},
+                col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+                show_export=False,
+            )
+        else:
+            st.info("No entries yet.")
+
+        st.markdown("---")
+        with st.expander("🔧 Spotted a mistake? Request an edit"):
+            st.caption("Pick the entry, enter the corrected values, and submit — an admin reviews "
+                       "and approves before it changes the live record.")
+            df_req = get_production()
+            if df_req.empty:
+                st.info("No entries to request an edit for.")
+            else:
+                df_req["date"] = pd.to_datetime(df_req["date"], errors="coerce")
+                df_req = df_req.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+                df_req["label"] = (
+                    df_req["date"].dt.strftime("%d-%b-%Y") + " | " +
+                    df_req["product"].astype(str) + " | " +
+                    df_req["nos"].astype(int).astype(str) + " nos | ID:" +
+                    df_req["id"].astype(str)
+                )
+                sel_req = st.selectbox("Select entry", df_req["label"].tolist(), key="dpr_req_sel")
+                rrow    = df_req.loc[df_req["label"] == sel_req].iloc[0]
+                rrow_id = int(rrow["id"])
+
+                with st.form(f"dpr_req_form_{rrow_id}"):
+                    rc1, rc2, rc3 = st.columns(3)
+                    r_date    = rc1.date_input("Date", pd.to_datetime(rrow["date"]))
+                    r_product = rc2.selectbox("Product", PRODUCTION_PRODUCTS,
+                                              index=PRODUCTION_PRODUCTS.index(rrow["product"])
+                                              if rrow["product"] in PRODUCTION_PRODUCTS else 0)
+                    r_nos     = rc3.number_input("Nos.", min_value=0, value=int(rrow["nos"]), step=100)
+                    r_plant   = st.radio("Plant", PLANTS,
+                                        index=PLANTS.index(rrow["plant"]) if rrow.get("plant") in PLANTS else 0,
+                                        horizontal=True)
+                    submit_req = st.form_submit_button("📨 Submit Edit Request", type="primary", use_container_width=True)
+
+                if submit_req:
+                    r_pricing_key = SKU_TO_PRICING_KEY.get(r_product, r_product)
+                    r_result = calculate_production(r_pricing_key, r_nos, rm, prod_cfg,
+                                                     pipe_diameter_config=pipe_dia_cfg)
+                    new_data = {
+                        "date": str(r_date), "product": r_product, "nos": r_nos,
+                        "plant": r_plant,
+                        **{k: r_result[k] for k in _RM_COST_FIELDS},
+                    }
+                    old_data = {k: rrow.get(k) for k in new_data}
+                    create_edit_request(
+                        "production", "DPR Entry", rrow_id,
+                        f"{rrow['product']} · {int(rrow['nos'])} nos · {pd.to_datetime(rrow['date']).strftime('%d-%b-%Y')}",
+                        old_data, new_data,
+                    )
+                    flash("📨 Edit request submitted — pending admin approval.")
+                    st.success("✅ Request submitted. An admin will review it.")
+                    st.rerun()
+
+        my_reqs = get_edit_requests()
+        if not my_reqs.empty:
+            mine = my_reqs[(my_reqs["table_name"] == "production") &
+                          (my_reqs["requested_by"] == st.session_state.get("username"))]
+            if not mine.empty:
+                st.markdown('<div class="section-header">My Edit Requests</div>', unsafe_allow_html=True)
+                mine_disp = mine[["created_at", "summary", "status", "review_note"]].rename(columns={
+                    "created_at": "Submitted", "summary": "Entry", "status": "Status", "review_note": "Admin Note",
+                })
+                st.dataframe(mine_disp, use_container_width=True, hide_index=True)
         return
 
     # ── Recent entries ────────────────────────────────────────────────────────
