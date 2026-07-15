@@ -281,7 +281,7 @@ DI_NO_START      = {"Sale B": 1560}
 # stored record itself is untouched and still shows "212".
 CHALLAN_NO_IGNORE = {"Sale A": {212}}
 
-CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer"]
+CLIENT_TYPES = ["Govt Contractor", "Private Contractor", "Retail", "Developer", "Inter Company"]
 
 PRODUCT_TYPES = ["Pipe", "Boundary Wall", "PSC Pole", "Fencing Post"]
 
