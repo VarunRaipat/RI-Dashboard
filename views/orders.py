@@ -379,12 +379,22 @@ def show(PLOT):
                 st.session_state["last_di_pdf"] = generate_dispatch_instruction(di_no_final, pdf_header, pdf_lines)
                 st.session_state["last_di_no"]  = di_no_final
                 flash(f"✅ Order saved — DI {di_no_final}")
-                # reset lines
+                # Reset lines plus every header/client field so the next order
+                # starts from a clean form instead of silently reusing this
+                # one's client/GST/remarks — same reasoning as dispatch's
+                # _reset_challan_fields. Date and Sale Type are left as-is so
+                # entering several orders in a row doesn't require reselecting
+                # them each time.
                 st.session_state.order_lines = 1
                 for k in list(st.session_state.keys()):
-                    if k.startswith(("ord_prod_","ord_qty_","ord_rate_","ord_total_")):
+                    if k.startswith(("ord_prod_", "ord_qty_", "ord_rate_", "ord_total_",
+                                      "ord_contact_person_", "ord_phone_", "ord_office_",
+                                      "ord_client_type_", "ord_addr_", "ord_site_person_",
+                                      "ord_site_phone_")):
                         del st.session_state[k]
-                for k in ("ord_transport_mode", "ord_transport_rate", "ord_transport_gst"):
+                for k in ("ord_transport_mode", "ord_transport_rate", "ord_transport_gst",
+                          "ord_payment", "ord_product_type", "ord_gst_applicable", "ord_remarks",
+                          "ord_client_pick", "ord_client_new"):
                     st.session_state.pop(k, None)
                 st.rerun()
             else:
