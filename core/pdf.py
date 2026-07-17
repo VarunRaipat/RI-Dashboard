@@ -4,6 +4,7 @@ Premium letterhead style: gold/ink palette, tinted header card, dark
 ink+gold table headers, and a running gold-bar/footer on every page.
 """
 import io
+from core.config import GST_PCT
 from core.tz import now_ist
 from pathlib import Path
 
@@ -64,12 +65,18 @@ def _styles():
                           textColor=INK, leading=13))
     ss.add(ParagraphStyle("SectionLabel", fontName="Helvetica-Bold", fontSize=7.8,
                           textColor=ACCENT, leading=10))
-    ss.add(ParagraphStyle("FooterNote", fontName="Helvetica", fontSize=7.3,
-                          textColor=MUTED, alignment=TA_RIGHT))
     ss.add(ParagraphStyle("TableHeadL", fontName="Helvetica-Bold", fontSize=8.2,
                           textColor=GOLD_ON_DARK, leading=10))
     ss.add(ParagraphStyle("TableHeadR", fontName="Helvetica-Bold", fontSize=8.2,
                           textColor=GOLD_ON_DARK, leading=10, alignment=TA_RIGHT))
+    ss.add(ParagraphStyle("SummaryLabel", fontName="Helvetica", fontSize=8.7,
+                          textColor=INK, leading=13))
+    ss.add(ParagraphStyle("SummaryValue", fontName="Helvetica-Bold", fontSize=8.7,
+                          textColor=INK, leading=13, alignment=TA_RIGHT))
+    ss.add(ParagraphStyle("SummaryTotalLabel", fontName="Helvetica-Bold", fontSize=11,
+                          textColor=INK, leading=15))
+    ss.add(ParagraphStyle("SummaryTotalValue", fontName="Helvetica-Bold", fontSize=11,
+                          textColor=ACCENT, leading=15, alignment=TA_RIGHT))
     return ss
 
 
@@ -165,6 +172,43 @@ def _style_product_table(rows, col_widths, total_rows=1):
     ]
     tbl.setStyle(TableStyle(style))
     return tbl
+
+
+def _summary_box(ss, rows, box_width=78 * mm, page_width=174 * mm):
+    """Right-aligned, gold-tinted settlement box (Untaxed Amount / GST /
+    Total) below the line-item table — pulled out of the plain footer text
+    so the figures that actually matter for payment stand out instead of
+    blending into small grey print."""
+    body = []
+    for label, value, is_total in rows:
+        lstyle = ss["SummaryTotalLabel"] if is_total else ss["SummaryLabel"]
+        vstyle = ss["SummaryTotalValue"] if is_total else ss["SummaryValue"]
+        body.append([Paragraph(label, lstyle), Paragraph(value, vstyle)])
+
+    box = Table(body, colWidths=[box_width * 0.5, box_width * 0.5])
+    style = [
+        ("BACKGROUND", (0, 0), (-1, -1), GOLD_TINT),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("BOX", (0, 0), (-1, -1), 0.7, ACCENT),
+    ]
+    if len(body) > 1:
+        style.append(("LINEABOVE", (0, -1), (-1, -1), 0.8, ACCENT))
+        style.append(("TOPPADDING", (0, -1), (-1, -1), 6))
+    box.setStyle(TableStyle(style))
+
+    wrapper = Table([["", box]], colWidths=[page_width - box_width, box_width])
+    wrapper.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return wrapper
 
 
 def _make_canvas(footer_right_text):
@@ -326,12 +370,16 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     col_widths = [prod_w] + [other_w] * (n_cols - 1)
 
     story.append(_style_product_table(rows, col_widths))
+    story.append(Spacer(1, 3 * mm))
+
+    untaxed_amount = total_amount - total_gst
+    summary_rows = [("Untaxed Amount", f"Rs. {untaxed_amount:,.2f}", False)]
+    if has_gst:
+        summary_rows.append((f"GST @ {GST_PCT:.0f}%", f"Rs. {total_gst:,.2f}", False))
     if has_transport:
-        story.append(Spacer(1, 2 * mm))
-        story.append(Paragraph(
-            f"GRAND TOTAL (incl. Transport): RS. {total_amount + total_transport:,.2f}",
-            ss["FooterNote"],
-        ))
+        summary_rows.append(("Transport (incl. GST)", f"Rs. {total_transport:,.2f}", False))
+    summary_rows.append(("TOTAL AMOUNT", f"Rs. {total_amount + total_transport:,.2f}", True))
+    story.append(_summary_box(ss, summary_rows))
     story.append(Spacer(1, 7 * mm))
 
     remarks = (header.get("remarks") or "").strip()
@@ -459,12 +507,15 @@ def generate_quotation(quote_no, header, lines):
     story.append(_style_product_table(rows, col_widths))
     story.append(Spacer(1, 3 * mm))
 
-    summary_lines = []
+    summary_rows = [("Untaxed Amount", f"Rs. {subtotal:,.2f}", False)]
+    if has_gst:
+        summary_rows.append((f"GST @ {GST_PCT:.0f}%", f"Rs. {total_gst:,.2f}", False))
     if discount_pct:
-        summary_lines.append(f"Discount ({discount_pct:g}%): -Rs. {discount_amt:,.2f}")
-    summary_lines.append(f"GRAND TOTAL: Rs. {grand_total:,.2f}")
-    for sl in summary_lines:
-        story.append(Paragraph(sl, ss["FooterNote"]))
+        summary_rows.append((f"Discount ({discount_pct:g}%)", f"-Rs. {discount_amt:,.2f}", False))
+    if has_transport:
+        summary_rows.append(("Transport (incl. GST)", f"Rs. {total_transport:,.2f}", False))
+    summary_rows.append(("GRAND TOTAL", f"Rs. {grand_total:,.2f}", True))
+    story.append(_summary_box(ss, summary_rows))
     story.append(Spacer(1, 7 * mm))
 
     sales_person = (header.get("sales_person") or "").strip()
