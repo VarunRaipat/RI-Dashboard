@@ -59,8 +59,8 @@ def _styles():
                           textColor=INK, alignment=TA_RIGHT, spaceAfter=0))
     ss.add(ParagraphStyle("DocSub", fontName="Helvetica", fontSize=9,
                           textColor=MUTED, alignment=TA_RIGHT))
-    ss.add(ParagraphStyle("Label", fontName="Helvetica", fontSize=7.3,
-                          textColor=MUTED, leading=10))
+    ss.add(ParagraphStyle("Label", fontName="Helvetica-Bold", fontSize=8.6,
+                          textColor=MUTED, leading=11))
     ss.add(ParagraphStyle("Value", fontName="Helvetica-Bold", fontSize=9.5,
                           textColor=INK, leading=13))
     ss.add(ParagraphStyle("SectionLabel", fontName="Helvetica-Bold", fontSize=7.8,
