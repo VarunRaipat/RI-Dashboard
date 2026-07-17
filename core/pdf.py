@@ -66,10 +66,10 @@ def _styles():
                           textColor=ACCENT, leading=10))
     ss.add(ParagraphStyle("FooterNote", fontName="Helvetica", fontSize=7.3,
                           textColor=MUTED, alignment=TA_RIGHT))
-    ss.add(ParagraphStyle("TableHeadL", fontName="Helvetica-Bold", fontSize=6.3,
-                          textColor=GOLD_ON_DARK, leading=7.6))
-    ss.add(ParagraphStyle("TableHeadR", fontName="Helvetica-Bold", fontSize=6.3,
-                          textColor=GOLD_ON_DARK, leading=7.6, alignment=TA_RIGHT))
+    ss.add(ParagraphStyle("TableHeadL", fontName="Helvetica-Bold", fontSize=8.2,
+                          textColor=GOLD_ON_DARK, leading=10))
+    ss.add(ParagraphStyle("TableHeadR", fontName="Helvetica-Bold", fontSize=8.2,
+                          textColor=GOLD_ON_DARK, leading=10, alignment=TA_RIGHT))
     return ss
 
 
