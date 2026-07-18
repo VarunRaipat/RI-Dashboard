@@ -1,4 +1,3 @@
-from datetime import timedelta
 import pandas as pd
 from core.config import (
     PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
@@ -102,37 +101,32 @@ def daily_fixed_costs(production_days: int) -> dict:
     }
 
 
-def weekly_liability(df_production: pd.DataFrame) -> pd.DataFrame:
-    """Group DPR production data into Monday-Sunday weeks and compute the
-    labour liability accrued each week: LIABILITY_PCT% of (Production +
-    Jalli + Welding + Repairing) cost, where Repairing is always
-    REPAIRING_PCT_OF_PRODUCTION% of that week's Production cost (confirmed
-    rate — there's no separate Repairing figure entered per DPR line).
-    Returns one row per week with columns: week_start, week_end,
-    production_cost, welding_cost, jalli_cost, repairing_cost,
-    liability_base, accrued_liability — sorted oldest week first."""
-    cols = ["week_start", "week_end", "production_cost", "welding_cost",
-            "jalli_cost", "repairing_cost", "liability_base", "accrued_liability"]
+def liability_totals(df_production: pd.DataFrame) -> dict:
+    """Labour liability accrued across the given (already date-filtered)
+    production rows: LIABILITY_PCT% of (Production + Jalli + Welding +
+    Repairing) cost, where Repairing is always REPAIRING_PCT_OF_PRODUCTION%
+    of Production cost (confirmed rate — there's no separate Repairing
+    figure entered per DPR line)."""
+    keys = ["production_cost", "welding_cost", "jalli_cost", "repairing_cost",
+            "liability_base", "accrued_liability"]
     if df_production is None or df_production.empty:
-        return pd.DataFrame(columns=cols)
+        return {k: 0.0 for k in keys}
 
-    df = df_production.copy()
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"])
-    if df.empty:
-        return pd.DataFrame(columns=cols)
+    production_cost = float(df_production.get("production_cost", 0).sum())
+    welding_cost     = float(df_production.get("welding_cost", 0).sum())
+    jalli_cost       = float(df_production.get("jalli_cost", 0).sum())
+    repairing_cost   = production_cost * (REPAIRING_PCT_OF_PRODUCTION / 100)
+    liability_base    = production_cost + welding_cost + jalli_cost + repairing_cost
+    accrued_liability = liability_base * (LIABILITY_PCT / 100)
 
-    for c in ("production_cost", "welding_cost", "jalli_cost"):
-        if c not in df.columns:
-            df[c] = 0.0
-
-    df["week_start"] = (df["date"] - pd.to_timedelta(df["date"].dt.weekday, unit="D")).dt.date
-    grp = df.groupby("week_start")[["production_cost", "welding_cost", "jalli_cost"]].sum().reset_index()
-    grp["repairing_cost"]    = grp["production_cost"] * (REPAIRING_PCT_OF_PRODUCTION / 100)
-    grp["liability_base"]    = grp["production_cost"] + grp["welding_cost"] + grp["jalli_cost"] + grp["repairing_cost"]
-    grp["accrued_liability"] = grp["liability_base"] * (LIABILITY_PCT / 100)
-    grp["week_end"]          = grp["week_start"].apply(lambda d: d + timedelta(days=6))
-    return grp.sort_values("week_start")[cols].reset_index(drop=True)
+    return {
+        "production_cost":   round(production_cost, 2),
+        "welding_cost":      round(welding_cost, 2),
+        "jalli_cost":        round(jalli_cost, 2),
+        "repairing_cost":    round(repairing_cost, 2),
+        "liability_base":    round(liability_base, 2),
+        "accrued_liability": round(accrued_liability, 2),
+    }
 
 
 def dispatch_value(qty: float, rate: float) -> float:
