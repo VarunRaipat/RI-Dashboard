@@ -639,12 +639,12 @@ def show(PLOT):
 
     from core.ui import table_by_sale_type
 
-    show_cols = ["date","challan_no","bill_no","sale_type","client_name","product",
+    show_cols = ["date","challan_no","di_no","bill_no","sale_type","client_name","product",
                  "qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount",
                  "truck_no","driver_name","trip_distance","remarks"]
     show_cols = [c for c in show_cols if c in df.columns]
     rename_map = {
-        "date":"Date","challan_no":"Challan","bill_no":"Bill No.","sale_type":"Sale Type",
+        "date":"Date","challan_no":"Challan","di_no":"DI No.","bill_no":"Bill No.","sale_type":"Sale Type",
         "client_name":"Client","product":"Product",
         "qty_dispatched":"Qty","dispatch_value":"Material Value (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
