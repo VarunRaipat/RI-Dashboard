@@ -320,13 +320,13 @@ VENDOR_CATEGORY_MAP = {
 LOAN_OBLIGATIONS = []
 
 # ── Labour Liability ──────────────────────────────────────────────────────────
-# Weekly amount owed to production labour, accrued automatically from DPR
-# data (no separate entry needed) and paid out weekly — see views/liability.py.
-# Liability = LIABILITY_PCT% of (Production + Jalli + Welding + Repairing)
-# cost for the week. Repairing isn't a separate DPR field — it's always
-# REPAIRING_PCT_OF_PRODUCTION% of that week's Production cost (confirmed
-# rate, not measured per repair job).
-LIABILITY_PCT             = 30.0
+# Weekly amount owed to production labour, computed live from DPR/Dispatch
+# data (nothing entered manually) — see views/liability.py. Cost heads are
+# Production + Jalli + Welding + Repairing + Loading/Unloading. Repairing
+# isn't a separate DPR field — it's always REPAIRING_PCT_OF_PRODUCTION% of
+# that period's Production cost (confirmed rate, not measured per repair
+# job). Loading/Unloading is costed off Dispatch quantity, not DPR Nos,
+# since that labour happens when goods go out, not when they're cast.
 REPAIRING_PCT_OF_PRODUCTION = 20.0
 
 # ── Inventory ─────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 import pandas as pd
 from core.config import (
     PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
-    EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, GST_PCT,
-    LIABILITY_PCT, REPAIRING_PCT_OF_PRODUCTION,
+    SKU_TO_PRICING_KEY, EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, GST_PCT,
+    REPAIRING_PCT_OF_PRODUCTION,
 )
 
 
@@ -101,31 +101,58 @@ def daily_fixed_costs(production_days: int) -> dict:
     }
 
 
-def liability_totals(df_production: pd.DataFrame) -> dict:
-    """Labour liability accrued across the given (already date-filtered)
-    production rows: LIABILITY_PCT% of (Production + Jalli + Welding +
-    Repairing) cost, where Repairing is always REPAIRING_PCT_OF_PRODUCTION%
-    of Production cost (confirmed rate — there's no separate Repairing
-    figure entered per DPR line)."""
-    keys = ["production_cost", "welding_cost", "jalli_cost", "repairing_cost",
-            "liability_base", "accrued_liability"]
-    if df_production is None or df_production.empty:
-        return {k: 0.0 for k in keys}
+def loading_unloading_for_dispatch(df_dispatch: pd.DataFrame, product_config: dict = None,
+                                    pipe_diameter_config: dict = None) -> float:
+    """Total Loading/Unloading cost for the given (already date-filtered)
+    dispatch rows: qty_dispatched x the product's Loading/Unloading rate
+    (Pipe Diameter Rates for Hume Pipes, Product Cost Configuration for
+    everything else — same rate table DPR uses, see calculate_production).
+    Costed off Dispatch quantity rather than DPR Nos, since loading/
+    unloading labour happens when goods go out, not when they're cast."""
+    if df_dispatch is None or df_dispatch.empty or "product" not in df_dispatch.columns:
+        return 0.0
+    cfg_map  = product_config or PRODUCT_CONFIG
+    pipe_cfg = pipe_diameter_config or PIPE_DIAMETER_CONFIG
 
-    production_cost = float(df_production.get("production_cost", 0).sum())
-    welding_cost     = float(df_production.get("welding_cost", 0).sum())
-    jalli_cost       = float(df_production.get("jalli_cost", 0).sum())
-    repairing_cost   = production_cost * (REPAIRING_PCT_OF_PRODUCTION / 100)
-    liability_base    = production_cost + welding_cost + jalli_cost + repairing_cost
-    accrued_liability = liability_base * (LIABILITY_PCT / 100)
+    total = 0.0
+    for product, qty in df_dispatch.groupby("product")["qty_dispatched"].sum().items():
+        pricing_key = SKU_TO_PRICING_KEY.get(product, product)
+        cfg = cfg_map.get(pricing_key)
+        if cfg is None:
+            continue
+        diameter = PRICING_KEY_TO_DIAMETER_MM.get(pricing_key)
+        rate = pipe_cfg.get(diameter, {}).get("loading_unloading_cost", 0) if diameter is not None \
+            else cfg.get("loading_unloading_cost", 0)
+        total += float(rate or 0) * float(qty or 0)
+    return round(total, 2)
+
+
+def liability_totals(df_production: pd.DataFrame, df_dispatch: pd.DataFrame = None,
+                      product_config: dict = None, pipe_diameter_config: dict = None) -> dict:
+    """Labour cost totals for the given (already date-filtered) period:
+    Production + Jalli + Welding (from DPR), Repairing (always
+    REPAIRING_PCT_OF_PRODUCTION% of Production cost — not a separate DPR
+    figure), and Loading/Unloading (from Dispatch quantity, not DPR Nos —
+    see loading_unloading_for_dispatch). "total_cost" is the plain sum of
+    all five — no percentage/markup applied."""
+    if df_production is not None and not df_production.empty:
+        production_cost = float(df_production.get("production_cost", 0).sum())
+        welding_cost    = float(df_production.get("welding_cost", 0).sum())
+        jalli_cost      = float(df_production.get("jalli_cost", 0).sum())
+    else:
+        production_cost = welding_cost = jalli_cost = 0.0
+
+    repairing_cost         = production_cost * (REPAIRING_PCT_OF_PRODUCTION / 100)
+    loading_unloading_cost = loading_unloading_for_dispatch(df_dispatch, product_config, pipe_diameter_config)
+    total_cost = production_cost + welding_cost + jalli_cost + repairing_cost + loading_unloading_cost
 
     return {
-        "production_cost":   round(production_cost, 2),
-        "welding_cost":      round(welding_cost, 2),
-        "jalli_cost":        round(jalli_cost, 2),
-        "repairing_cost":    round(repairing_cost, 2),
-        "liability_base":    round(liability_base, 2),
-        "accrued_liability": round(accrued_liability, 2),
+        "production_cost":        round(production_cost, 2),
+        "welding_cost":           round(welding_cost, 2),
+        "jalli_cost":             round(jalli_cost, 2),
+        "repairing_cost":         round(repairing_cost, 2),
+        "loading_unloading_cost": round(loading_unloading_cost, 2),
+        "total_cost":             round(total_cost, 2),
     }
 
 
