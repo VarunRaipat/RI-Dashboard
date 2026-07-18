@@ -534,6 +534,8 @@ with st.sidebar:
         pages.append("🏭  Inventory")
     if role in ("admin", "dispatch", "factory", "viewer"):
         pages.append("🚧  Gate Entry")
+    if role == "admin":
+        pages.append("💰  Liability")
     if role in ("admin", "viewer"):
         pages.append("⚙️  Admin")
 
@@ -574,5 +576,7 @@ elif page == "🏭  Inventory":
     from views.inventory import show; show(PLOT)
 elif page == "🚧  Gate Entry":
     from views.gate_entry import show; show(PLOT)
+elif page == "💰  Liability":
+    from views.liability import show; show(PLOT)
 elif page == "⚙️  Admin":
     from views.admin import show; show(PLOT)

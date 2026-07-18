@@ -319,6 +319,16 @@ VENDOR_CATEGORY_MAP = {
 # TODO: add real loan/EMI obligations if applicable.
 LOAN_OBLIGATIONS = []
 
+# ── Labour Liability ──────────────────────────────────────────────────────────
+# Weekly amount owed to production labour, accrued automatically from DPR
+# data (no separate entry needed) and paid out weekly — see views/liability.py.
+# Liability = LIABILITY_PCT% of (Production + Jalli + Welding + Repairing)
+# cost for the week. Repairing isn't a separate DPR field — it's always
+# REPAIRING_PCT_OF_PRODUCTION% of that week's Production cost (confirmed
+# rate, not measured per repair job).
+LIABILITY_PCT             = 30.0
+REPAIRING_PCT_OF_PRODUCTION = 20.0
+
 # ── Inventory ─────────────────────────────────────────────────────────────────
 # Opening stock as counted on INVENTORY_ANCHOR_DATE. Current balance for a
 # product = opening + (production since anchor) - (dispatched since anchor).
