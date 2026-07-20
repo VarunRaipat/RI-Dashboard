@@ -100,8 +100,8 @@ def _detail_grid(ss, pairs, col_widths):
     tbl = Table(rows, colWidths=col_widths)
     style = [
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]
     for i in range(len(rows) - 1):
         style.append(("LINEBELOW", (0, i), (-1, i), 0.4, HAIRLINE))
@@ -130,16 +130,16 @@ def _letterhead(ss, doc_title, subtitle_lines):
         ("BACKGROUND", (0, 0), (-1, -1), ZEBRA),
         ("LEFTPADDING", (0, 0), (-1, -1), 10),
         ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-        ("TOPPADDING", (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     return [
         header_tbl,
-        Spacer(1, 2.4 * mm),
+        Spacer(1, 2 * mm),
         HRFlowable(width="100%", thickness=1.1, color=ACCENT),
         Spacer(1, 0.6 * mm),
         HRFlowable(width="100%", thickness=0.4, color=HAIRLINE),
-        Spacer(1, 7 * mm),
+        Spacer(1, 2 * mm),
     ]
 
 
@@ -151,7 +151,7 @@ def _style_product_table(rows, col_widths, total_rows=1):
     tbl = Table(rows, colWidths=col_widths, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), INK),
-        ("FONTSIZE", (0, 1), (-1, -1), 9.3),
+        ("FONTSIZE", (0, 1), (-1, -1), 8.8),
         ("FONTNAME", (0, -total_rows), (-1, -1), "Helvetica-Bold"),
         ("TEXTCOLOR", (0, -total_rows), (-1, -1), INK),
         ("BACKGROUND", (0, -total_rows), (-1, -1), GOLD_TINT),
@@ -160,10 +160,10 @@ def _style_product_table(rows, col_widths, total_rows=1):
         ("ROWBACKGROUNDS", (0, 1), (-1, body_end), [colors.white, ZEBRA]),
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, 0), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("TOPPADDING", (0, 1), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 3.5),
+        ("TOPPADDING", (0, 1), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 2),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, 0), 3),
@@ -270,7 +270,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        topMargin=18 * mm, bottomMargin=16 * mm,
+        topMargin=8 * mm, bottomMargin=14 * mm,
         leftMargin=MARGIN, rightMargin=MARGIN,
     )
     story = []
@@ -279,34 +279,34 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
 
     # ── Order details ─────────────────────────────────────────────────────
     story.append(_section_label(ss, "Order"))
-    story.append(Spacer(1, 2 * mm))
+    story.append(Spacer(1, 1.5 * mm))
     order_pairs = [
         [("DI No.", di_no), ("Order Date", header.get("order_date", "—"))],
         [("Payment Mode", header.get("mode_of_payment", "—")), ("Sale Type", header.get("sale_type", "—"))],
     ]
     story.append(_detail_grid(ss, order_pairs, [43 * mm, 43 * mm, 43 * mm, 45 * mm]))
-    story.append(Spacer(1, 5 * mm))
+    story.append(Spacer(1, 2 * mm))
 
     # ── Client details ───────────────────────────────────────────────────
     story.append(_section_label(ss, "Client"))
-    story.append(Spacer(1, 2 * mm))
+    story.append(Spacer(1, 1.5 * mm))
     client_pairs = [
         [("Client Name", header.get("client_name", "—")), ("Contact Person", header.get("contact_person", "—"))],
         [("Phone", header.get("phone", "—")), ("Client Type", header.get("client_type", "—"))],
         [("Office", header.get("office", "—")), ("GSTIN", header.get("gstin", "—"))],
     ]
     story.append(_detail_grid(ss, client_pairs, [43 * mm, 43 * mm, 43 * mm, 45 * mm]))
-    story.append(Spacer(1, 5 * mm))
+    story.append(Spacer(1, 2 * mm))
 
     # ── Site details ──────────────────────────────────────────────────────
     story.append(_section_label(ss, "Site / Delivery"))
-    story.append(Spacer(1, 2 * mm))
+    story.append(Spacer(1, 1.5 * mm))
     site_pairs = [
         [("Site Address", header.get("delivery_address", "—")), ("Site Person", header.get("site_person", "—"))],
         [("Site Phone No.", header.get("site_phone", "—")), ("", "")],
     ]
     story.append(_detail_grid(ss, site_pairs, [43 * mm, 43 * mm, 43 * mm, 45 * mm]))
-    story.append(Spacer(1, 7 * mm))
+    story.append(Spacer(1, 3 * mm))
 
     # ── Product lines table ─────────────────────────────────────────────────
     has_pending   = dispatched is not None
@@ -370,7 +370,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     col_widths = [prod_w] + [other_w] * (n_cols - 1)
 
     story.append(_style_product_table(rows, col_widths))
-    story.append(Spacer(1, 3 * mm))
+    story.append(Spacer(1, 2.5 * mm))
 
     untaxed_amount = total_amount - total_gst
     summary_rows = [("Untaxed Amount", f"Rs. {untaxed_amount:,.2f}", False)]
@@ -380,18 +380,18 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
         summary_rows.append(("Transport (incl. GST)", f"Rs. {total_transport:,.2f}", False))
     summary_rows.append(("TOTAL AMOUNT", f"Rs. {total_amount + total_transport:,.2f}", True))
     story.append(_summary_box(ss, summary_rows))
-    story.append(Spacer(1, 7 * mm))
+    story.append(Spacer(1, 3 * mm))
 
     remarks = (header.get("remarks") or "").strip()
     if remarks:
         story.append(_section_label(ss, "Remarks"))
-        story.append(Spacer(1, 1.5 * mm))
+        story.append(Spacer(1, 0.8 * mm))
         story.append(Paragraph(remarks, ss["Value"]))
-        story.append(Spacer(1, 8 * mm))
+        story.append(Spacer(1, 3 * mm))
 
     # ── Signature blocks ─────────────────────────────────────────────────────
     story.append(HRFlowable(width="100%", thickness=0.4, color=HAIRLINE))
-    story.append(Spacer(1, 12 * mm))
+    story.append(Spacer(1, 3 * mm))
     sign_tbl = Table(
         [["", "", ""],
          ["Prepared By", "Dispatch Approved By", "Received By (Client)"]],
@@ -399,6 +399,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     )
     sign_tbl.setStyle(TableStyle([
         ("LINEABOVE", (0, 0), (-1, 0), 0.5, MUTED),
+        ("FONTSIZE", (0, 0), (-1, 0), 6),
         ("TOPPADDING", (0, 0), (-1, 0), 0),
         ("BOTTOMPADDING", (0, 0), (-1, 0), 0),
         ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
