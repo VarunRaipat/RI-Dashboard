@@ -1,6 +1,6 @@
 import streamlit as st
 from core.db import (
-    init_db, get_production, log_failed_login, recent_failed_login_count,
+    init_db, sync_custom_products, get_production, log_failed_login, recent_failed_login_count,
     LOGIN_LOCKOUT_THRESHOLD, LOGIN_LOCKOUT_WINDOW_MIN,
 )
 from core.config import USERS as _USERS_DEFAULT
@@ -28,6 +28,7 @@ st.set_page_config(
 )
 
 init_db()
+sync_custom_products()
 
 PLOT = dict(
     plot_bgcolor="rgba(0,0,0,0)",

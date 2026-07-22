@@ -406,6 +406,23 @@ CREATE TABLE IF NOT EXISTS edit_requests (
 );
 ALTER TABLE edit_requests DISABLE ROW LEVEL SECURITY;
 
+-- ── Migration: Custom Products (admin adds a new non-pipe product) ─────────
+-- The pipe catalog and the original fixed non-pipe list (Slab/Pillar/PSC
+-- Pole/etc.) are hardcoded in core/config.py — fine for the fixed pipe
+-- catalog, but it meant a brand new product always needed a code change.
+-- This table just stores name+unit; core/db.py's sync_custom_products()
+-- merges each row into the live config lists at runtime, so a new product
+-- shows up in DPR Entry, Sales Order, Dispatch, Inventory, and Product
+-- Config without a deploy. See Admin > Product Config > Add New Product.
+CREATE TABLE IF NOT EXISTS custom_products (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT UNIQUE NOT NULL,
+    unit       TEXT DEFAULT 'nos',
+    added_by   TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE custom_products DISABLE ROW LEVEL SECURITY;
+
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via
 -- its own login screen (not Supabase Auth) and talks to Supabase with one

@@ -259,6 +259,13 @@ def init_db():
         updated_by TEXT,
         updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS custom_products (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT UNIQUE NOT NULL,
+        unit       TEXT DEFAULT 'nos',
+        added_by   TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     CREATE TABLE IF NOT EXISTS edit_requests (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
         table_name        TEXT NOT NULL,
@@ -664,6 +671,72 @@ def save_product_config(product, data):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("update", "Admin", f"Product config updated: {product}")
+
+
+# ── Custom (admin-added) non-pipe products ────────────────────────────────────
+# Every other product list (PRODUCT_CONFIG, PRODUCTION_PRODUCTS, ORDER_PRODUCTS,
+# DISPATCH_PRODUCTS, INVENTORY_PRODUCTS, SKU_TO_PRICING_KEY) is a hardcoded
+# module-level structure in core/config.py, built once at import time — that's
+# fine for the fixed pipe catalog, but meant a brand new non-pipe product
+# (e.g. a new precast item) always needed a code change. custom_products
+# stores just the name+unit an admin enters; sync_custom_products() merges
+# each row into those same in-memory structures (in place, so every module
+# that already imported them sees the addition) — called once at app startup
+# and again after every add, so a new product shows up everywhere (DPR entry,
+# Sales Order, Dispatch, Inventory, Product Config) without a deploy.
+@st.cache_data(ttl=60)
+def get_custom_products():
+    if _use_supabase():
+        r = requests.get(_sb_url("custom_products"), headers=_headers(),
+                          params={"select": "*", "order": "name.asc", "limit": 500})
+        rows = r.json() if r.status_code == 200 else []
+    else:
+        con = _conn()
+        rows = pd.read_sql("SELECT * FROM custom_products ORDER BY name", con).to_dict("records")
+        con.close()
+    return rows
+
+
+def add_custom_product(name, unit, added_by):
+    payload = {"name": name, "unit": unit or "nos", "added_by": added_by}
+    if _use_supabase():
+        r = requests.post(_sb_url("custom_products"), headers=_headers(), json=payload)
+        if r.status_code not in (200, 201):
+            raise Exception(f"Save failed: {r.text}")
+    else:
+        _sqlite_insert("custom_products", payload)
+    _invalidate_cache()
+    log_activity("create", "Admin", f"New product added: {name}")
+
+
+def sync_custom_products():
+    """Merge every row from custom_products into the live config structures.
+    Idempotent — already-merged names are skipped, so this is safe to call on
+    every rerun."""
+    from core.config import (PRODUCT_CONFIG, PRODUCTION_PRODUCTS, ORDER_PRODUCTS,
+                              DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, INVENTORY_PRODUCTS,
+                              SELLING_PRICE_UNIT)
+    try:
+        rows = get_custom_products()
+    except Exception:
+        return  # DB not reachable yet (e.g. first-ever boot) — try again next rerun
+    for row in rows:
+        name = (row.get("name") or "").strip()
+        if not name or name in PRODUCT_CONFIG:
+            continue
+        PRODUCT_CONFIG[name] = {
+            "display": name, "selling_price": 0.0, "production_cost": 0.0,
+            "loading_unloading_cost": 0.0, "welding_cost": 0.0, "jalli_cost": 0.0,
+            "concrete_volume_m3": 0.0, "steel_kg_per_unit": 0.0,
+        }
+        PRODUCTION_PRODUCTS.append(name)
+        ORDER_PRODUCTS.append(name)
+        DISPATCH_PRODUCTS.append(name)
+        SKU_TO_PRICING_KEY[name] = name
+        INVENTORY_PRODUCTS.append((name, name, name, 0))
+        unit = (row.get("unit") or "nos").strip()
+        if unit and unit != "nos":
+            SELLING_PRICE_UNIT[name] = unit
 
 
 @st.cache_data(ttl=60)

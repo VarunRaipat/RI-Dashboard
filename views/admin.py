@@ -15,6 +15,7 @@ from core.db import (
     get_activity_log, insert_production, insert_dispatch,
     get_edit_requests, approve_edit_request, reject_edit_request,
     get_inventory_opening, save_inventory_opening, delete_inventory_opening,
+    get_custom_products, add_custom_product,
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import sanitize_for_export
@@ -75,7 +76,9 @@ def show(PLOT):
     with tab2:
         st.markdown("### Product Cost Configuration")
 
-        cfg_sub1, cfg_sub2 = st.tabs(["💲 Selling Price & Concrete", "📏 Pipe Diameter Rates"])
+        cfg_sub1, cfg_sub2, cfg_sub3 = st.tabs(
+            ["💲 Selling Price & Concrete", "📏 Pipe Diameter Rates", "➕ Add New Product"]
+        )
 
         # For Hume Pipes, Production/Loading/Power/Welding/Jalli/Steel are the
         # same for a given diameter regardless of class or Joint Type — set
@@ -209,6 +212,49 @@ def show(PLOT):
                     "Steel (Kg)":     c.get("steel_kg_per_unit", 0),
                 })
             st.dataframe(pd.DataFrame(drows), use_container_width=True, hide_index=True)
+
+        # ── Add New Product ──────────────────────────────────────────────────
+        with cfg_sub3:
+            st.caption(
+                "Add a brand new non-pipe product (e.g. a new precast item). It shows up "
+                "immediately in DPR Entry, Sales Order, Dispatch, Inventory, and above in "
+                "**Selling Price & Concrete** — set its rates there right after adding it. "
+                "Hume Pipe diameters/classes aren't addable here since they need engineering "
+                "data (barrel thickness, joint types) wired in by code."
+            )
+
+            existing_custom = get_custom_products()
+
+            if can_edit:
+                with st.form("add_product_form", clear_on_submit=True):
+                    new_name = st.text_input("Product Name", placeholder="e.g. Manhole Cover")
+                    new_unit = st.selectbox("Selling Price Unit", ["nos", "sqft"], index=0)
+                    if st.form_submit_button("➕ Add Product", type="primary", use_container_width=True):
+                        cleaned = new_name.strip()
+                        if not cleaned:
+                            st.error("Enter a product name.")
+                        elif cleaned in PRODUCT_CONFIG:
+                            st.error(f"\"{cleaned}\" already exists.")
+                        elif cleaned.startswith("Hume Pipe"):
+                            st.error("Hume Pipe products can't be added here — ask to have a new "
+                                      "diameter/class wired in with its engineering data.")
+                        else:
+                            add_custom_product(cleaned, new_unit, st.session_state.get("username") or "")
+                            st.success(f"✅ \"{cleaned}\" added — set its rates in "
+                                       f"**Selling Price & Concrete** above.")
+                            st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Admin-added products**")
+            if existing_custom:
+                st.dataframe(
+                    pd.DataFrame([{"Product": r["name"], "Unit": r.get("unit", "nos"),
+                                    "Added By": r.get("added_by", ""), "Added": r.get("created_at", "")}
+                                  for r in existing_custom]),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.caption("None yet — every product currently in the app was set up in code.")
 
     # ── Tab 2b: Inventory Opening Balances ────────────────────────────────────
     with tab2b:
