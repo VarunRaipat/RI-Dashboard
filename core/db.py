@@ -719,6 +719,25 @@ def save_inventory_opening(item_key, item_type, qty, updated_by):
     log_activity("update", "Inventory", f"Opening stock set for {item_key}: {qty}")
 
 
+def delete_inventory_opening(item_key):
+    """Remove a DB override so the item falls back to the hardcoded default
+    in core/config.py."""
+    if _use_supabase():
+        r = requests.delete(
+            _sb_url("inventory_opening"),
+            headers={**_headers(), "Prefer": ""},
+            params={"item_key": f"eq.{item_key}"},
+        )
+        if r.status_code not in (200, 204):
+            raise Exception(f"Delete failed: {r.text}")
+    else:
+        con = _conn()
+        con.execute("DELETE FROM inventory_opening WHERE item_key = ?", (item_key,))
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Inventory", f"Opening stock override cleared for {item_key}")
+
+
 def update_production(row_id, data):
     if _use_supabase():
         _sb_update("production", row_id, data)

@@ -6,6 +6,7 @@ from core.config import (
     DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT,
     PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES,
     EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, selling_price_unit,
+    INVENTORY_PRODUCTS, RM_INVENTORY_OPENING, INVENTORY_MATERIAL_LABELS, INVENTORY_ANCHOR_DATE,
 )
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
@@ -13,6 +14,7 @@ from core.db import (
     get_orders, update_order, update_dispatch,
     get_activity_log, insert_production, insert_dispatch,
     get_edit_requests, approve_edit_request, reject_edit_request,
+    get_inventory_opening, save_inventory_opening, delete_inventory_opening,
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import sanitize_for_export
@@ -37,8 +39,8 @@ def show(PLOT):
         st.warning(f"📝 **{len(_pending_reqs)} edit request(s)** waiting for review — see the "
                    f"**Edit Requests** tab below.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
-        ["💰 RM Prices", "📦 Product Config", "📋 All Production", "🚚 All Dispatch",
+    tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        ["💰 RM Prices", "📦 Product Config", "🏭 Inventory Opening", "📋 All Production", "🚚 All Dispatch",
          "🧩 Merge Client Names", "🕵️ Activity Log", f"📝 Edit Requests ({len(_pending_reqs)})"]
     )
 
@@ -207,6 +209,110 @@ def show(PLOT):
                     "Steel (Kg)":     c.get("steel_kg_per_unit", 0),
                 })
             st.dataframe(pd.DataFrame(drows), use_container_width=True, hide_index=True)
+
+    # ── Tab 2b: Inventory Opening Balances ────────────────────────────────────
+    with tab2b:
+        st.markdown("### Inventory Opening Balances")
+        st.caption(
+            f"Opening stock as counted on {pd.Timestamp(INVENTORY_ANCHOR_DATE).strftime('%d-%b-%Y')}. "
+            "Current stock everywhere else in the app = this opening qty + received/produced − "
+            "consumed/dispatched since that date. Set these here directly — no code changes needed."
+        )
+
+        db_opening = get_inventory_opening()
+
+        fg_sub, rm_sub = st.tabs(["📦 Finished Goods", "🧱 Raw Materials"])
+
+        with fg_sub:
+            fg_options = [row[0] for row in INVENTORY_PRODUCTS]
+            fg_defaults = {row[0]: row[3] for row in INVENTORY_PRODUCTS}
+
+            if can_edit:
+                sel_fg = st.selectbox("Select Product", fg_options, key="inv_open_fg_sel")
+                override = db_opening.get(sel_fg)
+                current_val = override["qty"] if override else fg_defaults[sel_fg]
+
+                with st.form("inv_open_fg_form"):
+                    new_val = st.number_input(
+                        "Opening Qty (Nos)", value=float(current_val), min_value=0.0, step=1.0,
+                    )
+                    if override:
+                        st.caption(f"Currently a manual override — last set to {override['qty']:.0f} "
+                                   f"by {override['updated_by'] or 'unknown'} on {override['updated_at']}.")
+                    else:
+                        st.caption(f"Currently using the hardcoded default ({fg_defaults[sel_fg]:.0f}).")
+                    fc1, fc2 = st.columns(2)
+                    save_fg = fc1.form_submit_button("💾 Save Opening Qty", type="primary", use_container_width=True)
+                    reset_fg = fc2.form_submit_button("↩️ Reset to Default", use_container_width=True,
+                                                       disabled=not override)
+                    if save_fg:
+                        save_inventory_opening(sel_fg, "finished_good", new_val,
+                                                st.session_state.get("username") or "")
+                        st.success(f"✅ Opening qty for {sel_fg} set to {new_val:.0f}.")
+                        st.rerun()
+                    if reset_fg:
+                        delete_inventory_opening(sel_fg)
+                        st.success(f"✅ {sel_fg} reset to hardcoded default ({fg_defaults[sel_fg]:.0f}).")
+                        st.rerun()
+
+            st.markdown("---")
+            st.markdown("**All finished-good opening balances**")
+            fg_rows = []
+            for canonical in fg_options:
+                override = db_opening.get(canonical)
+                fg_rows.append({
+                    "Product": canonical,
+                    "Opening Qty": override["qty"] if override else fg_defaults[canonical],
+                    "Source": "Manual override" if override else "Default",
+                })
+            st.dataframe(pd.DataFrame(fg_rows), use_container_width=True, hide_index=True)
+
+        with rm_sub:
+            rm_options = list(RM_INVENTORY_OPENING.keys())
+
+            if can_edit:
+                sel_rm = st.selectbox(
+                    "Select Material", rm_options, key="inv_open_rm_sel",
+                    format_func=lambda k: INVENTORY_MATERIAL_LABELS.get(k, k),
+                )
+                override_rm = db_opening.get(sel_rm)
+                current_rm_val = override_rm["qty"] if override_rm else RM_INVENTORY_OPENING[sel_rm]
+
+                with st.form("inv_open_rm_form"):
+                    new_rm_val = st.number_input(
+                        "Opening Qty (Bags)", value=float(current_rm_val), min_value=0.0, step=1.0,
+                    )
+                    if override_rm:
+                        st.caption(f"Currently a manual override — last set to {override_rm['qty']:.0f} "
+                                   f"by {override_rm['updated_by'] or 'unknown'} on {override_rm['updated_at']}.")
+                    else:
+                        st.caption(f"Currently using the hardcoded default ({RM_INVENTORY_OPENING[sel_rm]:.0f}).")
+                    rc1, rc2 = st.columns(2)
+                    save_rm_open = rc1.form_submit_button("💾 Save Opening Qty", type="primary", use_container_width=True)
+                    reset_rm = rc2.form_submit_button("↩️ Reset to Default", use_container_width=True,
+                                                       disabled=not override_rm)
+                    if save_rm_open:
+                        save_inventory_opening(sel_rm, "raw_material", new_rm_val,
+                                                st.session_state.get("username") or "")
+                        st.success(f"✅ Opening qty for {INVENTORY_MATERIAL_LABELS.get(sel_rm, sel_rm)} set to {new_rm_val:.0f}.")
+                        st.rerun()
+                    if reset_rm:
+                        delete_inventory_opening(sel_rm)
+                        st.success(f"✅ {INVENTORY_MATERIAL_LABELS.get(sel_rm, sel_rm)} reset to hardcoded "
+                                   f"default ({RM_INVENTORY_OPENING[sel_rm]:.0f}).")
+                        st.rerun()
+
+            st.markdown("---")
+            st.markdown("**All raw material opening balances**")
+            rm_rows = []
+            for key in rm_options:
+                override_rm = db_opening.get(key)
+                rm_rows.append({
+                    "Material": INVENTORY_MATERIAL_LABELS.get(key, key),
+                    "Opening Qty": override_rm["qty"] if override_rm else RM_INVENTORY_OPENING[key],
+                    "Source": "Manual override" if override_rm else "Default",
+                })
+            st.dataframe(pd.DataFrame(rm_rows), use_container_width=True, hide_index=True)
 
     # ── Tab 3: All Production ─────────────────────────────────────────────────
     with tab3:
