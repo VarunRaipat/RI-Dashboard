@@ -266,6 +266,14 @@ def init_db():
         added_by   TEXT,
         created_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS custom_diameters (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        diameter_mm      INTEGER UNIQUE NOT NULL,
+        np2_thickness_mm REAL DEFAULT 0,
+        np3_thickness_mm REAL DEFAULT 0,
+        added_by         TEXT,
+        created_at       TEXT DEFAULT (datetime('now','localtime'))
+    );
     CREATE TABLE IF NOT EXISTS edit_requests (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
         table_name        TEXT NOT NULL,
@@ -739,6 +747,61 @@ def sync_custom_products():
             SELLING_PRICE_UNIT[name] = unit
 
 
+# ── Custom (admin-added) pipe diameters ───────────────────────────────────────
+# Same idea as custom_products, but for a brand new Hume Pipe diameter — the
+# only extra thing needed is barrel thickness per class (NP2/NP3; NP4 shares
+# NP3's), since that's real engineering data, not something that can default
+# to 0 the way a new product's cost rates can (0 thickness = 0 concrete
+# volume = free pipe). Leave a class's thickness at 0 if that class isn't
+# actually made at this diameter — same convention BARREL_THICKNESS_MM
+# already uses in core/config.py.
+@st.cache_data(ttl=60)
+def get_custom_diameters():
+    if _use_supabase():
+        r = requests.get(_sb_url("custom_diameters"), headers=_headers(),
+                          params={"select": "*", "order": "diameter_mm.asc", "limit": 200})
+        rows = r.json() if r.status_code == 200 else []
+    else:
+        con = _conn()
+        rows = pd.read_sql("SELECT * FROM custom_diameters ORDER BY diameter_mm", con).to_dict("records")
+        con.close()
+    return rows
+
+
+def add_custom_diameter(diameter_mm, np2_thickness_mm, np3_thickness_mm, added_by):
+    payload = {
+        "diameter_mm": int(diameter_mm),
+        "np2_thickness_mm": np2_thickness_mm or 0,
+        "np3_thickness_mm": np3_thickness_mm or 0,
+        "added_by": added_by,
+    }
+    if _use_supabase():
+        r = requests.post(_sb_url("custom_diameters"), headers=_headers(), json=payload)
+        if r.status_code not in (200, 201):
+            raise Exception(f"Save failed: {r.text}")
+    else:
+        _sqlite_insert("custom_diameters", payload)
+    _invalidate_cache()
+    log_activity("create", "Admin", f"New pipe diameter added: {diameter_mm}mm")
+
+
+def sync_custom_diameters():
+    """Merge every row from custom_diameters into the live config structures
+    via core.config.register_diameter(). Idempotent — already-registered
+    diameters are skipped there, so this is safe to call on every rerun."""
+    from core.config import register_diameter
+    try:
+        rows = get_custom_diameters()
+    except Exception:
+        return  # DB not reachable yet (e.g. first-ever boot) — try again next rerun
+    for row in rows:
+        register_diameter(
+            row["diameter_mm"],
+            row.get("np2_thickness_mm") or 0,
+            row.get("np3_thickness_mm") or 0,
+        )
+
+
 @st.cache_data(ttl=60)
 def get_inventory_opening():
     """{item_key: {"qty": float, "updated_by": str, "updated_at": str}} for
@@ -1118,6 +1181,18 @@ def delete_gate_entry(row_id):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("delete", "Gate Entry", f"ID {row_id}")
+
+
+def update_gate_entry(row_id, data):
+    if _use_supabase():
+        _sb_update("gate_entries", row_id, data)
+    else:
+        con = _conn()
+        sets = ", ".join(f"{k} = ?" for k in data)
+        con.execute(f"UPDATE gate_entries SET {sets} WHERE id = ?", list(data.values()) + [row_id])
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Gate Entry", f"ID {row_id}")
 
 
 # ── Edit Requests (non-admin "propose a fix, admin approves" workflow) ───────

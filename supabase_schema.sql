@@ -423,6 +423,25 @@ CREATE TABLE IF NOT EXISTS custom_products (
 );
 ALTER TABLE custom_products DISABLE ROW LEVEL SECURITY;
 
+-- ── Migration: Custom Pipe Diameters (admin adds a new Hume Pipe size) ─────
+-- Same idea as custom_products, but for a brand new pipe diameter. Barrel
+-- thickness per class (NP2/NP3 — NP4 shares NP3's) is real engineering data
+-- so it's entered explicitly rather than defaulted; leaving a class's
+-- thickness at 0 means that class isn't made at this diameter (same
+-- convention as gaps already in core/config.py's BARREL_THICKNESS_MM).
+-- core/config.py's register_diameter() merges each row into the live
+-- product/inventory structures at runtime. See Admin > Product Config >
+-- Add New Diameter.
+CREATE TABLE IF NOT EXISTS custom_diameters (
+    id               BIGSERIAL PRIMARY KEY,
+    diameter_mm      INTEGER UNIQUE NOT NULL,
+    np2_thickness_mm REAL DEFAULT 0,
+    np3_thickness_mm REAL DEFAULT 0,
+    added_by         TEXT,
+    created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE custom_diameters DISABLE ROW LEVEL SECURITY;
+
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via
 -- its own login screen (not Supabase Auth) and talks to Supabase with one

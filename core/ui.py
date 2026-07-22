@@ -133,6 +133,14 @@ def client_name_field(container, known_clients, key, default=""):
     return _name_picker_field(container, "Client Name", "client", known_clients, key, default)
 
 
+def truck_name_field(container, known_trucks, key, default=""):
+    return _name_picker_field(container, "Truck No.", "truck", known_trucks, key, default)
+
+
+def driver_name_field(container, known_drivers, key, default=""):
+    return _name_picker_field(container, "Driver Name", "driver", known_drivers, key, default)
+
+
 def supplier_name_field(container, known_suppliers, key, default=""):
     return _name_picker_field(container, "Supplier Name", "supplier", known_suppliers, key, default)
 

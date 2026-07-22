@@ -16,6 +16,7 @@ from core.db import (
     get_edit_requests, approve_edit_request, reject_edit_request,
     get_inventory_opening, save_inventory_opening, delete_inventory_opening,
     get_custom_products, add_custom_product,
+    get_custom_diameters, add_custom_diameter,
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import sanitize_for_export
@@ -76,8 +77,8 @@ def show(PLOT):
     with tab2:
         st.markdown("### Product Cost Configuration")
 
-        cfg_sub1, cfg_sub2, cfg_sub3 = st.tabs(
-            ["💲 Selling Price & Concrete", "📏 Pipe Diameter Rates", "➕ Add New Product"]
+        cfg_sub1, cfg_sub2, cfg_sub3, cfg_sub4 = st.tabs(
+            ["💲 Selling Price & Concrete", "📏 Pipe Diameter Rates", "➕ Add New Product", "➕ Add New Diameter"]
         )
 
         # For Hume Pipes, Production/Loading/Power/Welding/Jalli/Steel are the
@@ -255,6 +256,56 @@ def show(PLOT):
                 )
             else:
                 st.caption("None yet — every product currently in the app was set up in code.")
+
+        # ── Add New Diameter ─────────────────────────────────────────────────
+        with cfg_sub4:
+            st.caption(
+                "Add a brand new Hume Pipe diameter. NP2/NP3/NP4 (Collar, Socket & Spigot, "
+                "M/F) and their sharing rules apply automatically, same as every built-in "
+                "diameter — the only thing needed is barrel thickness (mm) per class, since "
+                "that's real engineering data, not a rate. Leave a class's thickness at 0 if "
+                "it isn't actually made at this diameter (matches how a few existing diameters "
+                "already have a 0-thickness gap for NP2). After adding, set Production/Loading/"
+                "Welding/Jalli/Steel rates in **Pipe Diameter Rates**, and Selling Price in "
+                "**Selling Price & Concrete**, for each class."
+            )
+
+            existing_diameters = get_custom_diameters()
+
+            if can_edit:
+                with st.form("add_diameter_form", clear_on_submit=True):
+                    new_dia = st.number_input("Diameter (mm)", min_value=1, step=10)
+                    dc1, dc2 = st.columns(2)
+                    new_np2_t = dc1.number_input("NP2 Barrel Thickness (mm)", min_value=0.0, step=1.0,
+                                                  help="Leave at 0 if NP2 isn't made at this diameter.")
+                    new_np3_t = dc2.number_input("NP3 Barrel Thickness (mm)", min_value=0.0, step=1.0,
+                                                  help="NP4 uses this same thickness (it's the same physical pipe as NP3).")
+                    if st.form_submit_button("➕ Add Diameter", type="primary", use_container_width=True):
+                        if int(new_dia) in HUME_PIPE_DIAMETERS_MM:
+                            st.error(f"{int(new_dia)}mm already exists.")
+                        elif not new_np2_t and not new_np3_t:
+                            st.error("Enter at least one class's barrel thickness.")
+                        else:
+                            add_custom_diameter(int(new_dia), new_np2_t, new_np3_t,
+                                                 st.session_state.get("username") or "")
+                            st.success(f"✅ {int(new_dia)}mm added — set its rates in "
+                                       f"**Pipe Diameter Rates** and selling price in "
+                                       f"**Selling Price & Concrete**.")
+                            st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Admin-added diameters**")
+            if existing_diameters:
+                st.dataframe(
+                    pd.DataFrame([{"Diameter (mm)": r["diameter_mm"],
+                                    "NP2 Thickness (mm)": r.get("np2_thickness_mm", 0),
+                                    "NP3 Thickness (mm)": r.get("np3_thickness_mm", 0),
+                                    "Added By": r.get("added_by", ""), "Added": r.get("created_at", "")}
+                                  for r in existing_diameters]),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.caption("None yet — every diameter currently in the app was set up in code.")
 
     # ── Tab 2b: Inventory Opening Balances ────────────────────────────────────
     with tab2b:

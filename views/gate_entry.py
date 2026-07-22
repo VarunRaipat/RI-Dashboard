@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from core.tz import today_ist
 from core.config import GATE_CATEGORIES, GATE_DIRECTIONS, GATE_UNITS, GATE_RM_ITEMS
-from core.db import insert_gate_entry, get_gate_entries, delete_gate_entry
+from core.db import insert_gate_entry, get_gate_entries, delete_gate_entry, update_gate_entry
 from core.sequencing import is_duplicate
 from core.ui import (interactive_table, flash, show_flashes, date_range_filter,
                      supplier_name_field, site_name_field, unit_field, item_name_field)
@@ -182,10 +182,50 @@ def show(PLOT):
                 df["item"].fillna("").astype(str) + " | " + df["direction"].fillna("") +
                 " | ID:" + df["id"].astype(str)
             )
-            with st.expander("🗑️ Delete an entry"):
-                sel = st.selectbox("Select entry", df["label"].tolist(), key="gate_del_sel")
-                if st.button("Delete", key="gate_del_btn"):
-                    rid = int(df.loc[df["label"] == sel, "id"].iloc[0])
-                    delete_gate_entry(rid)
-                    flash("🗑️ Gate entry deleted.")
-                    st.rerun()
+            with st.expander("✏️ Edit an entry"):
+                esel = st.selectbox("Select entry", df["label"].tolist(), key="gate_edit_sel")
+                erow = df.loc[df["label"] == esel].iloc[0]
+                eid  = int(erow["id"])
+
+                with st.form(f"gate_edit_form_{eid}"):
+                    ec1, ec2, ec3 = st.columns(3)
+                    e_date = ec1.date_input("Date", pd.to_datetime(erow["date"]))
+                    e_cat  = ec2.selectbox("Category", GATE_CATEGORIES,
+                                          index=GATE_CATEGORIES.index(erow["category"])
+                                          if erow.get("category") in GATE_CATEGORIES else 0)
+                    e_dir  = ec3.selectbox("In / Out", GATE_DIRECTIONS,
+                                          index=GATE_DIRECTIONS.index(erow["direction"])
+                                          if erow.get("direction") in GATE_DIRECTIONS else 0)
+
+                    ec4, ec5 = st.columns(2)
+                    e_item = ec4.text_input("Item", value=str(erow.get("item", "") or ""))
+                    e_qty  = ec5.number_input("Quantity", min_value=0.0, step=1.0, value=float(erow.get("qty", 0) or 0))
+
+                    ec6, ec7 = st.columns(2)
+                    e_unit  = ec6.text_input("Unit", value=str(erow.get("unit", "") or ""))
+                    e_truck = ec7.text_input("Truck No.", value=str(erow.get("truck_no", "") or ""))
+
+                    ec8, ec9 = st.columns(2)
+                    e_challan = ec8.text_input("Challan No.", value=str(erow.get("challan_no", "") or ""))
+                    e_invoice = ec9.text_input("Invoice No.", value=str(erow.get("invoice_no", "") or ""))
+
+                    ec10, ec11 = st.columns(2)
+                    e_supplier = ec10.text_input("Supplier Name", value=str(erow.get("supplier_name", "") or ""))
+                    e_site     = ec11.text_input("Site", value=str(erow.get("site", "") or ""))
+
+                    e_remarks = st.text_input("Remarks", value=str(erow.get("remarks", "") or ""))
+
+                    esub1, esub2 = st.columns(2)
+                    if esub1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                        update_gate_entry(eid, {
+                            "date": str(e_date), "category": e_cat, "direction": e_dir,
+                            "item": e_item, "qty": e_qty, "unit": e_unit, "truck_no": e_truck,
+                            "challan_no": e_challan, "invoice_no": e_invoice,
+                            "supplier_name": e_supplier, "site": e_site, "remarks": e_remarks,
+                        })
+                        flash(f"✅ Gate entry ID {eid} updated!")
+                        st.rerun()
+                    if esub2.form_submit_button("🗑️ Delete this entry", use_container_width=True):
+                        delete_gate_entry(eid)
+                        flash("🗑️ Gate entry deleted.")
+                        st.rerun()

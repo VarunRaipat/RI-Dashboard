@@ -408,3 +408,85 @@ GATE_UNTRACKED_ITEMS = ["steel"]
 GATE_RM_TRACKED_ITEMS = list(RM_INVENTORY_OPENING.keys())
 
 GATE_RM_ITEMS = GATE_UNTRACKED_ITEMS + GATE_RM_TRACKED_ITEMS + ["Other"]
+
+# ── Runtime-registered pipe diameters (admin-added, no code change) ──────────
+# Every Hume Pipe diameter above was built into PRODUCT_CONFIG /
+# HUME_PIPE_JOINT_TYPES / SKU_TO_PRICING_KEY / PRODUCTION_PRODUCTS /
+# ORDER_PRODUCTS / DISPATCH_PRODUCTS / INVENTORY_PRODUCTS at import time, from
+# HUME_PIPE_DIAMETERS_MM + BARREL_THICKNESS_MM. register_diameter() does the
+# same construction for ONE new diameter, called at runtime (by
+# core.db.sync_custom_diameters(), itself called from app.py on every rerun)
+# so a diameter an admin adds via Admin > Product Config > Add New Diameter
+# shows up everywhere immediately, in place, no deploy needed. Only the
+# barrel thickness per class is admin-supplied (a physical fact about the
+# pipe, same kind of number as a price) — the joint-type rules (>600mm is
+# M/F-only, NP2 gets Collar/M-F, NP3 gets Socket&Spigot/M-F, NP2 Collar
+# shares NP2 M/F stock, NP4 shares NP3 stock) are the existing generic
+# functions above, so a new diameter behaves identically to a built-in one.
+# Leaving a class's thickness at 0 means "not made at this diameter" —
+# same convention as the gaps already in BARREL_THICKNESS_MM (e.g. NP2 above
+# 900mm): the SKU still exists (sellable) but concrete_volume_m3 is 0 until
+# a real thickness is entered.
+def register_diameter(diameter_mm, np2_thickness_mm=0, np3_thickness_mm=0):
+    diameter_mm = int(diameter_mm)
+    if diameter_mm in HUME_PIPE_DIAMETERS_MM:
+        return  # idempotent — safe to call every rerun
+
+    HUME_PIPE_DIAMETERS_MM.append(diameter_mm)
+    HUME_PIPE_DIAMETERS_MM.sort()
+
+    if np2_thickness_mm:
+        BARREL_THICKNESS_MM[("NP2", diameter_mm)] = np2_thickness_mm
+    if np3_thickness_mm:
+        BARREL_THICKNESS_MM[("NP3", diameter_mm)] = np3_thickness_mm
+
+    PIPE_DIAMETER_CONFIG[diameter_mm] = _blank_diameter_rates()
+
+    joint_types_by_base = {}
+    for c in HUME_PIPE_SALE_CLASSES:
+        name = f"Hume Pipe {diameter_mm}mm {c}"
+        PRICING_KEY_TO_DIAMETER_MM[name] = diameter_mm
+        thickness_class = NP4_SHARES_CLASS if c == "NP4" else c
+        thickness = BARREL_THICKNESS_MM.get((thickness_class, diameter_mm), 0)
+        PRODUCT_CONFIG[name] = {
+            "display": name, "selling_price": 0.0,
+            "concrete_volume_m3": _concrete_volume_m3(diameter_mm, thickness),
+        }
+        joints = _joint_types_for(diameter_mm, c)
+        HUME_PIPE_JOINT_TYPES[name] = joints
+        joint_types_by_base[name] = joints
+
+    new_pipe_skus = [
+        f"{base} ({joint})"
+        for base, joints in joint_types_by_base.items()
+        for joint in joints
+    ]
+    for sku in new_pipe_skus:
+        SKU_TO_PRICING_KEY[sku] = sku.rsplit(" (", 1)[0]
+    HUME_PIPE_PRODUCTS.extend(new_pipe_skus)
+    ORDER_PRODUCTS.extend(new_pipe_skus)
+    DISPATCH_PRODUCTS.extend(new_pipe_skus)
+
+    for c in HUME_PIPE_PRODUCTION_CLASSES:
+        for joint in _production_joint_types_for(diameter_mm, c):
+            sku = f"Hume Pipe {diameter_mm}mm {c} ({joint})"
+            PRODUCTION_PRODUCTS.append(sku)
+
+            prod_names = [sku]
+            disp_names = [sku]
+            if c == "NP2" and joint == NP2_CANONICAL_JOINT and "Collar" in _joint_types_for(diameter_mm, c):
+                collar_sku = f"Hume Pipe {diameter_mm}mm NP2 (Collar)"
+                if collar_sku in new_pipe_skus:
+                    prod_names.append(collar_sku)
+                    disp_names.append(collar_sku)
+            if c == NP4_SHARES_CLASS:
+                np4_sku = f"Hume Pipe {diameter_mm}mm NP4 ({joint})"
+                if np4_sku in new_pipe_skus:
+                    disp_names.append(np4_sku)
+
+            INVENTORY_PRODUCTS.append((
+                sku,
+                tuple(prod_names) if len(prod_names) > 1 else sku,
+                tuple(disp_names) if len(disp_names) > 1 else sku,
+                0,
+            ))

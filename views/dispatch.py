@@ -5,7 +5,7 @@ from core.tz import today_ist
 from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE, selling_price_unit
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch, create_edit_request, get_edit_requests
-from core.ui import client_name_field, flash, show_flashes, transport_fields
+from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 from core.visibility import di_dispatch_warnings
 
@@ -156,6 +156,10 @@ def _show_dispatch_operator():
     df_known  = get_dispatch()
     df_orders = get_orders()
     known_clients = set(df_known["client_name"].dropna().astype(str)) if not df_known.empty and "client_name" in df_known.columns else set()
+    known_trucks  = set(t for t in TRUCKS if t != "Other") | (
+        set(df_known["truck_no"].dropna().astype(str)) if not df_known.empty and "truck_no" in df_known.columns else set())
+    known_drivers = set(d for d in DRIVERS if d != "Other") | (
+        set(df_known["driver_name"].dropna().astype(str)) if not df_known.empty and "driver_name" in df_known.columns else set())
 
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
     next_challan = next_sequence_number(df_known, "challan_no", sale_type, date_col="date",
@@ -184,8 +188,8 @@ def _show_dispatch_operator():
     transport_mode, transport_rate, transport_gst_applicable = transport_fields("disp_op")
 
     cg, ch, ci, cj = st.columns(4)
-    truck_no       = cg.selectbox("Truck No.", TRUCKS, key="disp_op_truck")
-    driver_name    = ch.selectbox("Driver Name", DRIVERS, key="disp_op_driver")
+    truck_no       = truck_name_field(cg, known_trucks, "disp_op_truck")
+    driver_name    = driver_name_field(ch, known_drivers, "disp_op_driver")
     trip_distance  = ci.number_input("Distance (km)", min_value=0.0, step=5.0, key="disp_op_dist")
     remarks        = cj.text_input("Remarks", key="disp_op_remarks")
     form_filled_by = st.text_input("Form Filled By", key="disp_op_filled_by")
@@ -545,6 +549,10 @@ def show(PLOT):
         bill_no    = c4.text_input("Bill No.", key="disp_main_bill") if can_bill else None
 
         known_clients = set(df_all["client_name"].dropna().astype(str)) if not df_all.empty and "client_name" in df_all.columns else set()
+        known_trucks  = set(t for t in TRUCKS if t != "Other") | (
+            set(df_all["truck_no"].dropna().astype(str)) if not df_all.empty and "truck_no" in df_all.columns else set())
+        known_drivers = set(d for d in DRIVERS if d != "Other") | (
+            set(df_all["driver_name"].dropna().astype(str)) if not df_all.empty and "driver_name" in df_all.columns else set())
         ca, cb = st.columns(2)
         client_name   = client_name_field(ca, known_clients, "disp_main_client")
         delivery_addr = cb.text_input("Delivery Address", key="disp_main_addr")
@@ -557,8 +565,8 @@ def show(PLOT):
         transport_mode, transport_rate, transport_gst_applicable = transport_fields("disp_main")
 
         cg, ch, ci, cj = st.columns(4)
-        truck_no       = cg.selectbox("Truck No.", TRUCKS, key="disp_main_truck")
-        driver_name    = ch.selectbox("Driver Name", DRIVERS, key="disp_main_driver")
+        truck_no       = truck_name_field(cg, known_trucks, "disp_main_truck")
+        driver_name    = driver_name_field(ch, known_drivers, "disp_main_driver")
         trip_distance  = ci.number_input("Distance (km)", min_value=0.0, step=5.0, key="disp_main_dist")
         remarks        = cj.text_input("Remarks", key="disp_main_remarks")
         form_filled_by = st.text_input("Form Filled By", key="disp_main_filled_by")
