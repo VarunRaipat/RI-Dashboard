@@ -387,7 +387,7 @@ del _d, _c, _joint, _sku, _prod_names, _disp_names, _collar_sku, _np4_sku
 # above. "Consumed" for these two comes from the rm_usage table (one row per
 # DPR submission, not tied to any single product), not from a production
 # table column.
-RM_INVENTORY_OPENING = {"cement_ppc": 0, "ggbs": 0}
+RM_INVENTORY_OPENING = {"cement_ppc": 82, "ggbs": 0}
 CEMENT_GGBS_KG_PER_BAG = 50
 
 # Labels for every RM_INVENTORY_OPENING key — cement_ppc/ggbs are
