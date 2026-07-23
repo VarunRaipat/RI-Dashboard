@@ -412,6 +412,76 @@ input[type="text"], input[type="password"] {
     letter-spacing: 0.01em !important;
 }
 [data-testid="stExpander"] summary:hover { color: #EDF0F2 !important; }
+
+/* ── Mobile ─────────────────────────────────────────────────────────────────
+   Below ~768px: stack every multi-column row full-width instead of letting
+   flexbox squeeze 3-5 columns into a phone-width screen (that's what was
+   making numbers/labels truncate and become unreadable). Also forces every
+   input to 16px so iOS Safari doesn't auto-zoom on focus — that zoom is what
+   makes the rest of the page look "shrunk" and scrolled out of view after
+   tapping any field. */
+@media (max-width: 768px) {
+    .block-container { padding-top: 2.6rem !important; padding-left: 0.9rem !important; padding-right: 0.9rem !important; }
+
+    /* Stack columns vertically, full width, with breathing room between them */
+    [data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+    }
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        width: 100% !important;
+        min-width: 100% !important;
+        flex: 1 1 100% !important;
+        margin-bottom: 10px;
+    }
+    /* Metric rows and short label/value pairs (Truck/Driver, Distance/Remarks,
+       small numeric fields) read fine side-by-side even on a phone — only
+       un-stack these specific narrow pairings so the form isn't excessively
+       long, while everything else (tables, product lines, big fields) stacks. */
+    [data-testid="stMetric"] { padding: 14px 16px !important; }
+    [data-testid="stMetricValue"] > div { font-size: 1.3rem !important; white-space: normal !important; overflow-wrap: anywhere !important; }
+    [data-testid="stMetricLabel"] > div { font-size: 0.62rem !important; white-space: normal !important; }
+
+    /* 16px prevents iOS Safari's auto-zoom-on-focus, which is the usual
+       cause of a mobile Streamlit app looking "shrunk" after tapping a field */
+    input, select, textarea, .stSelectbox div[data-baseweb="select"] { font-size: 16px !important; }
+
+    .page-title { font-size: 1.30rem !important; }
+    .page-subtitle { font-size: 0.72rem !important; }
+    h1 { font-size: 1.30rem !important; }
+    h2 { font-size: 1.08rem !important; }
+    h3 { font-size: 0.98rem !important; }
+
+    /* Tables/dataframes: scroll horizontally in their own box instead of
+       squeezing every column down to unreadable width */
+    [data-testid="stDataFrame"], [data-testid="stTable"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    /* Tab list: scroll sideways rather than wrapping/shrinking tab labels */
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 8px 14px !important;
+        font-size: 0.80rem !important;
+        white-space: nowrap !important;
+    }
+
+    [data-testid="stForm"] { padding: 16px 14px !important; }
+
+    /* Full-width, comfortably tappable buttons */
+    .stButton > button, [data-testid="stFormSubmitButton"] > button, button[kind="primary"] {
+        width: 100% !important;
+        min-height: 44px !important;
+        font-size: 0.95rem !important;
+    }
+
+    /* Plotly charts: let them use the full stacked-column width */
+    [data-testid="stPlotlyChart"] { width: 100% !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
