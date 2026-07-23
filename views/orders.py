@@ -434,6 +434,8 @@ def show(PLOT):
         _agg["product_type"] = ("product_type", "first")
     if "sale_type" in df_orders.columns:
         _agg["sale_type"] = ("sale_type", "first")
+    if "created_at" in df_orders.columns:
+        _agg["created_at"] = ("created_at", "first")
     di_summary = df_orders.groupby("di_no").agg(**_agg).reset_index().sort_values("order_date", ascending=False)
 
     if not disp_summary.empty:
@@ -460,7 +462,9 @@ def show(PLOT):
 
     di_summary["Status"] = di_summary.apply(_status, axis=1)
 
-    from core.ui import table_by_sale_type
+    from core.ui import table_by_sale_type, add_ist_timestamp, timestamp_col_config
+
+    di_summary = add_ist_timestamp(di_summary)
 
     for col in ["total_ordered","dispatched_value","pending_value","qty_ordered","dispatched_qty",
                 "pending_qty","gst_amount","transport_value","transport_gst_amount"]:
@@ -470,7 +474,7 @@ def show(PLOT):
     show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","products","Status",
                  "qty_ordered","dispatched_qty","pending_qty",
                  "total_ordered","gst_amount","transport_value","transport_gst_amount",
-                 "dispatched_value","pending_value","challans"]
+                 "dispatched_value","pending_value","challans","created_at"]
     show_cols = [c for c in show_cols if c in di_summary.columns]
     rename_map = {
         "di_no":"DI No.","order_date":"Date","client_name":"Client",
@@ -479,13 +483,14 @@ def show(PLOT):
         "pending_qty":"Pending Qty","total_ordered":"Material Val (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "dispatched_value":"Disp Val (₹)","pending_value":"Pending Val (₹)",
-        "challans":"Challans",
+        "challans":"Challans","created_at":"Entered At",
     }
     sum_cols = [c for c in ["qty_ordered","dispatched_qty","pending_qty",
                              "total_ordered","gst_amount","transport_value","transport_gst_amount",
                              "dispatched_value","pending_value"]
                 if c in di_summary.columns] if role != "headoffice" else None
-    col_cfg = {"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
+    col_cfg = {"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+               "created_at": timestamp_col_config()}
 
     table_by_sale_type(di_summary, key="ord_pipeline", sum_cols=sum_cols,
                        show_cols=show_cols, rename=rename_map, col_config=col_cfg,

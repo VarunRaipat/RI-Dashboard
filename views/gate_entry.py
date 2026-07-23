@@ -5,7 +5,8 @@ from core.config import GATE_CATEGORIES, GATE_DIRECTIONS, GATE_UNITS, GATE_RM_IT
 from core.db import insert_gate_entry, get_gate_entries, delete_gate_entry, update_gate_entry
 from core.sequencing import is_duplicate
 from core.ui import (interactive_table, flash, show_flashes, date_range_filter,
-                     supplier_name_field, site_name_field, unit_field, item_name_field)
+                     supplier_name_field, site_name_field, unit_field, item_name_field,
+                     add_ist_timestamp, timestamp_col_config)
 
 # Widget key templates for one item line — used to shift values down when a
 # line is removed (Streamlit widgets keep state by key, so removing line i
@@ -164,18 +165,20 @@ def show(PLOT):
             if df.empty:
                 st.info("No gate entries in this date range.")
                 return
+            df = add_ist_timestamp(df)
             show_cols = ["date", "category", "direction", "item", "challan_no", "invoice_no",
-                         "truck_no", "qty", "unit", "supplier_name", "site", "remarks"]
+                         "truck_no", "qty", "unit", "supplier_name", "site", "remarks", "created_at"]
             show_cols = [c for c in show_cols if c in df.columns]
             rename = {
                 "date": "Date", "category": "Category", "direction": "In/Out", "item": "Item",
                 "challan_no": "Challan", "invoice_no": "Invoice", "truck_no": "Truck",
                 "qty": "Qty", "unit": "Unit", "supplier_name": "Supplier", "site": "Site",
-                "remarks": "Remarks",
+                "remarks": "Remarks", "created_at": "Entered At",
             }
             interactive_table(df, key="gate_log", show_cols=show_cols, rename=rename,
                               sum_cols=["qty"],
-                              col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")})
+                              col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                                          "created_at": timestamp_col_config()})
 
             df["label"] = (
                 df["date"].dt.strftime("%d-%b-%Y") + " | " + df["category"].fillna("") + " | " +

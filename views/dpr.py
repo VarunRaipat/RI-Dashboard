@@ -7,7 +7,7 @@ from core.db import (
     insert_production, insert_rm_usage, get_rm_prices, get_production, delete_row, update_production,
     get_product_config, get_pipe_diameter_config, create_edit_request, get_edit_requests,
 )
-from core.ui import flash, show_flashes
+from core.ui import flash, show_flashes, add_ist_timestamp, timestamp_col_config
 
 _RM_COST_FIELDS = [
     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
@@ -149,11 +149,14 @@ def show(PLOT):
             df_op["date"] = pd.to_datetime(df_op["date"], errors="coerce")
             df_op = df_op[(df_op["date"] >= pd.Timestamp(op_start)) & (df_op["date"] <= pd.Timestamp(op_end))]
             df_op = df_op.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+            df_op = add_ist_timestamp(df_op)
             interactive_table(
                 df_op, key="dpr_op_rec",
-                show_cols=["date", "product", "nos", "plant"],
-                rename={"date": "Date", "product": "Product", "nos": "Nos.", "plant": "Plant"},
-                col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+                show_cols=["date", "product", "nos", "plant", "created_at"],
+                rename={"date": "Date", "product": "Product", "nos": "Nos.", "plant": "Plant",
+                        "created_at": "Entered At"},
+                col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                            "created_at": timestamp_col_config()},
                 show_export=False,
             )
         else:
@@ -233,24 +236,26 @@ def show(PLOT):
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
         df = df[(df["date"] >= pd.Timestamp(dpr_start)) & (df["date"] <= pd.Timestamp(dpr_end))]
         df = df.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+        df = add_ist_timestamp(df)
 
         show_cols = ["date","product","nos","plant",
                      "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
                      "emi_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
-                     ] + [f"{m['key']}_qty" for m in RAW_MATERIALS]
+                     ] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + ["created_at"]
         show_cols = [c for c in show_cols if c in df.columns]
         rename = {
             "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
             "rm_cost":"RM Cost","production_cost":"Production","loading_unloading_cost":"Loading/Unloading",
             "power_cost":"Power","welding_cost":"Welding","jalli_cost":"Jalli","emi_cost":"EMI",
             "admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
-            "profit":"Profit","profit_pct":"Profit %",
+            "profit":"Profit","profit_pct":"Profit %","created_at":"Entered At",
             **{f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS},
         }
         sum_cols = [c for c in ["nos","revenue","rm_cost","production_cost","loading_unloading_cost",
                                  "power_cost","welding_cost","jalli_cost","emi_cost","admin_cost","misc_cost",
                                  "total_cost","profit"] if c in df.columns]
-        col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
+        col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                   "created_at": timestamp_col_config()}
         interactive_table(df, key="dpr_rec", sum_cols=sum_cols, show_cols=show_cols,
                           rename=rename, col_config=col_cfg)
     else:
@@ -264,12 +269,15 @@ def show(PLOT):
         df_rmu["date"] = pd.to_datetime(df_rmu["date"], errors="coerce")
         df_rmu = df_rmu[(df_rmu["date"] >= pd.Timestamp(dpr_start)) & (df_rmu["date"] <= pd.Timestamp(dpr_end))]
         df_rmu = df_rmu.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
-        show_cols_rmu = [c for c in ["date", "cement_bags", "ggbs_bags", "remarks"] if c in df_rmu.columns]
+        df_rmu = add_ist_timestamp(df_rmu)
+        show_cols_rmu = [c for c in ["date", "cement_bags", "ggbs_bags", "remarks", "created_at"] if c in df_rmu.columns]
         interactive_table(
             df_rmu, key="dpr_rmu", show_cols=show_cols_rmu,
             sum_cols=[c for c in ["cement_bags", "ggbs_bags"] if c in df_rmu.columns],
-            rename={"date": "Date", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)", "remarks": "Remarks"},
-            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+            rename={"date": "Date", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)", "remarks": "Remarks",
+                    "created_at": "Entered At"},
+            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                        "created_at": timestamp_col_config()},
         )
     else:
         st.info("No Cement/GGBS usage recorded yet.")

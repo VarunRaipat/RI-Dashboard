@@ -8,7 +8,8 @@ from core.db import (insert_quotation, get_quotations, update_quotation, delete_
                      get_orders, insert_order)
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_quotation, generate_dispatch_instruction
-from core.ui import client_name_field, flash, show_flashes, interactive_table, date_range_filter, transport_fields
+from core.ui import (client_name_field, flash, show_flashes, interactive_table, date_range_filter,
+                     transport_fields, add_ist_timestamp, timestamp_col_config)
 from core.sequencing import fy_start, next_sequence_number
 
 LAKH = 100_000
@@ -342,17 +343,20 @@ def show(PLOT):
         (df_quotes["quote_date"] <= pd.Timestamp(hist_end))
     ]
 
+    df_hist = add_ist_timestamp(df_hist.copy())
+
     show_cols = ["quote_no", "quote_date", "valid_until", "client_name", "client_type", "sale_type",
-                "product", "qty", "unit", "rate", "amount", "gst_amount", "status", "sales_person"]
+                "product", "qty", "unit", "rate", "amount", "gst_amount", "status", "sales_person", "created_at"]
     show_cols = [c for c in show_cols if c in df_hist.columns]
     rename = {
         "quote_no": "Quote No.", "quote_date": "Date", "valid_until": "Valid Until",
         "client_name": "Client", "client_type": "Client Type", "sale_type": "Sale Type", "product": "Product",
         "qty": "Qty", "unit": "Unit", "rate": "Rate (₹)", "amount": "Amount (₹)", "gst_amount": "GST (₹)",
-        "status": "Status", "sales_person": "Sales Person",
+        "status": "Status", "sales_person": "Sales Person", "created_at": "Entered At",
     }
     col_cfg = {
         "quote_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+        "created_at": timestamp_col_config(),
     }
     interactive_table(df_hist, key="quo_history", sum_cols=["amount", "gst_amount"],
                       show_cols=show_cols, rename=rename, col_config=col_cfg)

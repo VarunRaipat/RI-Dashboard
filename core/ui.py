@@ -73,6 +73,21 @@ def quick_date_range_filter(key_prefix, default_start=None, default_end=None):
     return start, end
 
 
+def add_ist_timestamp(df, col="created_at"):
+    """Convert a TIMESTAMPTZ (UTC) column to a tz-naive IST datetime in place,
+    so it can be shown with a DatetimeColumn. Safe no-op if the column is
+    missing (SQLite fallback already stores it as IST local time as text)."""
+    if col in df.columns:
+        converted = pd.to_datetime(df[col], errors="coerce", utc=True)
+        if converted.notna().any():
+            df[col] = converted.dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+    return df
+
+
+def timestamp_col_config(label="Entered At"):
+    return st.column_config.DatetimeColumn(label, format="DD-MMM-YYYY HH:mm")
+
+
 def flash(message):
     """Queue a toast to show after the next rerun.
 

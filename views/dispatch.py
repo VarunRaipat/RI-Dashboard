@@ -263,13 +263,16 @@ def _show_dispatch_operator():
     if not df_op_rec.empty:
         df_op_rec["date"] = pd.to_datetime(df_op_rec["date"], errors="coerce")
         df_op_rec = df_op_rec.sort_values(["date", "id"], ascending=[False, False]).head(200).reset_index(drop=True)
-        from core.ui import interactive_table
+        from core.ui import interactive_table, add_ist_timestamp, timestamp_col_config
+        df_op_rec = add_ist_timestamp(df_op_rec)
         interactive_table(
             df_op_rec, key="disp_op_rec",
-            show_cols=["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched", "rate", "dispatch_value"],
+            show_cols=["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched", "rate", "dispatch_value", "created_at"],
             rename={"date": "Date", "challan_no": "Challan", "di_no": "DI No.", "client_name": "Client",
-                    "product": "Product", "qty_dispatched": "Qty Dispatched", "rate": "Rate", "dispatch_value": "Value (₹)"},
-            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+                    "product": "Product", "qty_dispatched": "Qty Dispatched", "rate": "Rate", "dispatch_value": "Value (₹)",
+                    "created_at": "Entered At"},
+            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                        "created_at": timestamp_col_config()},
             show_export=False,
         )
     else:
@@ -645,11 +648,13 @@ def show(PLOT):
     # Display uses the filtered df (same date range as analytics)
     df = df.sort_values(["date","id"], ascending=[False,False]).reset_index(drop=True) if not df.empty else df_edit
 
-    from core.ui import table_by_sale_type
+    from core.ui import table_by_sale_type, add_ist_timestamp, timestamp_col_config
+
+    df = add_ist_timestamp(df)
 
     show_cols = ["date","challan_no","di_no","bill_no","sale_type","client_name","product",
                  "qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount",
-                 "truck_no","driver_name","trip_distance","remarks"]
+                 "truck_no","driver_name","trip_distance","remarks","created_at"]
     show_cols = [c for c in show_cols if c in df.columns]
     rename_map = {
         "date":"Date","challan_no":"Challan","di_no":"DI No.","bill_no":"Bill No.","sale_type":"Sale Type",
@@ -657,9 +662,11 @@ def show(PLOT):
         "qty_dispatched":"Qty","dispatch_value":"Material Value (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "truck_no":"Truck","driver_name":"Driver","trip_distance":"Dist km","remarks":"Remarks",
+        "created_at":"Entered At",
     }
     sum_cols = [c for c in ["qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount","trip_distance"] if c in df.columns]
-    col_cfg  = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")}
+    col_cfg  = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                "created_at": timestamp_col_config()}
 
     pending_mask = _pending_mask(df)
     df_pending = df[pending_mask.values].copy()

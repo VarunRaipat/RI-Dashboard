@@ -20,7 +20,7 @@ from core.db import (
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import sanitize_for_export
-from core.ui import interactive_table, date_range_filter
+from core.ui import interactive_table, date_range_filter, add_ist_timestamp, timestamp_col_config
 
 LAKH = 100_000
 
@@ -428,8 +428,10 @@ def show(PLOT):
                         f"Total Revenue: ₹{df['revenue'].sum()/LAKH:.2f}L | "
                         f"Total Profit: ₹{df['profit'].sum()/LAKH:.2f}L")
 
-            st.dataframe(df.drop(columns=["created_at"], errors="ignore"),
-                         use_container_width=True, hide_index=True)
+            df = add_ist_timestamp(df)
+            df = df.rename(columns={"created_at": "Entered At"})
+            st.dataframe(df, use_container_width=True, hide_index=True,
+                         column_config={"Entered At": timestamp_col_config()})
 
             # Export
             csv = sanitize_for_export(df).to_csv(index=False).encode("utf-8")
@@ -576,8 +578,10 @@ def show(PLOT):
                     st.success(f"✅ Fixed {fixed} entries. Refresh to see updated totals.")
                     st.rerun()
 
-            st.dataframe(df2.drop(columns=["created_at"], errors="ignore"),
-                         use_container_width=True, hide_index=True)
+            df2 = add_ist_timestamp(df2)
+            df2 = df2.rename(columns={"created_at": "Entered At"})
+            st.dataframe(df2, use_container_width=True, hide_index=True,
+                         column_config={"Entered At": timestamp_col_config()})
 
             csv2 = sanitize_for_export(df2).to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download CSV", csv2,
