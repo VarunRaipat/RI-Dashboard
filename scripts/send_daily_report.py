@@ -6,7 +6,7 @@ import os
 import requests
 import smtplib
 import sys
-from datetime import date
+from datetime import date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -16,7 +16,8 @@ GMAIL_USER   = os.environ["GMAIL_USER"]
 GMAIL_PASS   = os.environ["GMAIL_APP_PASSWORD"]
 TO_EMAIL     = os.environ.get("REPORT_TO_EMAIL", GMAIL_USER)
 
-TODAY = str(date.today())
+REPORT_DATE = date.today() - timedelta(days=1)
+TODAY = str(REPORT_DATE)
 LAKH  = 100_000
 
 HEADERS = {
@@ -75,7 +76,7 @@ def build_email():
         prod_rows_html = '<tr><td colspan="2" style="padding:12px;color:#5A4848;text-align:center;font-size:13px;">No production recorded today</td></tr>'
 
     # ── Full HTML email ───────────────────────────────────────────────────────
-    formatted_date = date.today().strftime("%A, %d %B %Y")
+    formatted_date = REPORT_DATE.strftime("%A, %d %B %Y")
 
     html = f"""
 <!DOCTYPE html>
@@ -172,7 +173,7 @@ def build_email():
 
 def send_email(html, no_prod):
     subject_flag = "⚠️ No Production" if no_prod else "✅"
-    subject = f"{subject_flag} RI Daily Report — {date.today().strftime('%d %b %Y')}"
+    subject = f"{subject_flag} RI Daily Report — {REPORT_DATE.strftime('%d %b %Y')}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
