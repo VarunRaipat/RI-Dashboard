@@ -21,13 +21,16 @@ from core.db import (
 from core.calculations import calculate_production, dispatch_value, gst_split
 from core.ui import sanitize_for_export
 from core.ui import interactive_table, date_range_filter, add_ist_timestamp, timestamp_col_config
+from core.permissions import has_permission, get_all_users, MODULES, MODULE_LABELS, ROLE_DEFAULTS
+from core.db import get_user_permissions, save_user_permission, delete_user_permission
 
 LAKH = 100_000
 
 
 def show(PLOT):
     role = st.session_state.get("role", "viewer")
-    can_edit = role == "admin"
+    username = st.session_state.get("username")
+    can_edit = has_permission(username, role, "admin", "edit")
 
     st.markdown("""
     <div class="page-title">⚙️ Admin Panel</div>
@@ -41,9 +44,10 @@ def show(PLOT):
         st.warning(f"📝 **{len(_pending_reqs)} edit request(s)** waiting for review — see the "
                    f"**Edit Requests** tab below.")
 
-    tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+    tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         ["💰 RM Prices", "📦 Product Config", "🏭 Inventory Opening", "📋 All Production", "🚚 All Dispatch",
-         "🧩 Merge Client Names", "🕵️ Activity Log", f"📝 Edit Requests ({len(_pending_reqs)})"]
+         "🧩 Merge Client Names", "🕵️ Activity Log", f"📝 Edit Requests ({len(_pending_reqs)})",
+         "👤 User Permissions"]
     )
 
     # ── Tab 1: RM Prices ──────────────────────────────────────────────────────
@@ -846,3 +850,106 @@ def show(PLOT):
                     "status": "Status", "reviewed_by": "Reviewed By", "review_note": "Note",
                 })
                 st.dataframe(dd, use_container_width=True, hide_index=True)
+
+    # ── Tab 8: User Permissions ──────────────────────────────────────────────
+    with tab8:
+        st.markdown("### Per-User Permission Overrides")
+        st.caption(
+            "Access is role-based by default. Pick a user to override their "
+            "View/Add/Edit/Delete rights for any module — rows left at their "
+            "role default (pre-filled below) aren't saved as overrides; only "
+            "cells you actually change are stored, so future role-default "
+            "changes still apply to everything you haven't touched."
+        )
+        if not can_edit:
+            st.info("👁️ View-only — only Admin can change permissions.")
+
+        all_users = get_all_users()
+        if not all_users:
+            st.warning("No users configured — add them under `[users]` in `.streamlit/secrets.toml`.")
+        else:
+            user_labels = {f"{u} ({info.get('role','?')})": u for u, info in sorted(all_users.items())}
+            sel_label = st.selectbox("Select user", list(user_labels.keys()), key="perm_user_sel")
+            sel_user  = user_labels[sel_label]
+            sel_role  = all_users[sel_user].get("role", "viewer")
+
+            df_overrides = get_user_permissions()
+            existing = {}
+            if not df_overrides.empty:
+                mine = df_overrides[df_overrides["username"] == sel_user]
+                for _, r in mine.iterrows():
+                    existing[r["module"]] = {
+                        "view": bool(r["can_view"]), "add": bool(r["can_add"]),
+                        "edit": bool(r["can_edit"]), "delete": bool(r["can_delete"]),
+                    }
+
+            _blank = {"view": False, "add": False, "edit": False, "delete": False}
+            rows = []
+            for m in MODULES:
+                default = ROLE_DEFAULTS.get(sel_role, {}).get(m, _blank)
+                eff = existing.get(m, default)
+                rows.append({
+                    "_module_key": m, "Module": MODULE_LABELS[m],
+                    "View": eff["view"], "Add": eff["add"], "Edit": eff["edit"], "Delete": eff["delete"],
+                    "Overridden": m in existing,
+                })
+            edit_df = pd.DataFrame(rows)
+
+            st.caption(f"Role: **{sel_role}** — the ✅ under \"Overridden\" marks modules that already "
+                       f"have a saved override for this user.")
+            edited = st.data_editor(
+                edit_df,
+                key=f"perm_editor_{sel_user}",
+                use_container_width=True, hide_index=True, disabled=not can_edit,
+                column_order=["Module", "View", "Add", "Edit", "Delete", "Overridden"],
+                column_config={
+                    "_module_key": None,
+                    "Module":     st.column_config.TextColumn("Module", disabled=True),
+                    "View":       st.column_config.CheckboxColumn("View"),
+                    "Add":        st.column_config.CheckboxColumn("Add"),
+                    "Edit":       st.column_config.CheckboxColumn("Edit"),
+                    "Delete":     st.column_config.CheckboxColumn("Delete"),
+                    "Overridden": st.column_config.CheckboxColumn("Overridden", disabled=True),
+                },
+            )
+
+            pc1, pc2 = st.columns(2)
+            if can_edit and pc1.button("💾 Save Permissions", type="primary", key="perm_save_btn",
+                                       use_container_width=True):
+                saved, cleared = 0, 0
+                for _, r in edited.iterrows():
+                    m = r["_module_key"]
+                    default = ROLE_DEFAULTS.get(sel_role, {}).get(m, _blank)
+                    vals = {"view": bool(r["View"]), "add": bool(r["Add"]),
+                            "edit": bool(r["Edit"]), "delete": bool(r["Delete"])}
+                    if vals == default:
+                        if m in existing:
+                            delete_user_permission(sel_user, m)
+                            cleared += 1
+                    else:
+                        save_user_permission(sel_user, m, vals["view"], vals["add"], vals["edit"], vals["delete"],
+                                             st.session_state.get("username") or "")
+                        saved += 1
+                st.success(f"✅ Saved for {sel_user}: {saved} override(s) set, {cleared} reverted to role default.")
+                st.rerun()
+
+            if can_edit and existing and pc2.button("↩️ Reset All to Role Default", key="perm_reset_btn",
+                                                     use_container_width=True):
+                for m in list(existing.keys()):
+                    delete_user_permission(sel_user, m)
+                st.success(f"✅ All overrides cleared for {sel_user} — back to {sel_role} defaults.")
+                st.rerun()
+
+            st.markdown("---")
+            st.markdown("**All active overrides (every user)**")
+            if df_overrides.empty:
+                st.caption("No per-user overrides set — everyone is on their role's default permissions.")
+            else:
+                disp = df_overrides.copy()
+                disp["module"] = disp["module"].map(MODULE_LABELS).fillna(disp["module"])
+                disp = disp.rename(columns={
+                    "username": "User", "module": "Module", "can_view": "View", "can_add": "Add",
+                    "can_edit": "Edit", "can_delete": "Delete", "updated_by": "Set By", "updated_at": "Updated At",
+                })
+                cols = [c for c in ["User","Module","View","Add","Edit","Delete","Set By","Updated At"] if c in disp.columns]
+                st.dataframe(disp[cols], use_container_width=True, hide_index=True)

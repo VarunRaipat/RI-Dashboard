@@ -11,6 +11,7 @@ from core.pdf import generate_quotation, generate_dispatch_instruction
 from core.ui import (client_name_field, flash, show_flashes, interactive_table, date_range_filter,
                      transport_fields, add_ist_timestamp, timestamp_col_config)
 from core.sequencing import fy_start, next_sequence_number
+from core.permissions import has_permission
 
 LAKH = 100_000
 REQUIRED_PLACEHOLDER = "— Select —"
@@ -66,6 +67,10 @@ def _auto_expire_quotes(df):
 
 def show(PLOT):
     role = st.session_state.get("role", "admin")
+    username = st.session_state.get("username")
+    can_add_quotation    = has_permission(username, role, "quotation", "add")
+    can_edit_quotation   = has_permission(username, role, "quotation", "edit")
+    can_delete_quotation = has_permission(username, role, "quotation", "delete")
     show_flashes()
 
     st.markdown("""
@@ -258,7 +263,10 @@ def show(PLOT):
 
     # ── Submit ────────────────────────────────────────────────────────────────
     st.markdown("")
-    if st.button("✅ Generate Quotation", type="primary", use_container_width=True, key="quo_submit"):
+    if not can_add_quotation:
+        st.info("You don't have permission to create quotations.")
+    if st.button("✅ Generate Quotation", type="primary", use_container_width=True, key="quo_submit",
+                 disabled=not can_add_quotation):
         missing = []
         if not client_name.strip():             missing.append("Client Name")
         if client_type == REQUIRED_PLACEHOLDER:  missing.append("Client Type")
@@ -392,7 +400,7 @@ def show(PLOT):
             key=f"dl_quo_{sel_qno}",
         )
 
-        if role == "admin":
+        if can_edit_quotation:
             st.markdown("**Update Status**")
             sc1, sc2 = st.columns([2, 1])
             _cur_status = qhdr.get("status", "Sent")
@@ -408,7 +416,7 @@ def show(PLOT):
                 st.rerun()
 
         # ── Convert to Sales Order ────────────────────────────────────────────
-        if role in ("admin", "headoffice"):
+        if can_add_quotation:
             st.markdown("**Convert to Sales Order**")
             if qhdr.get("status") == "Converted":
                 st.info(f"Already converted → DI {qhdr.get('converted_di_no', '—')}. "
@@ -470,8 +478,8 @@ def show(PLOT):
                     flash(f"✅ {sel_qno} converted → DI {new_di}")
                     st.rerun()
 
-    # ── Edit / Delete (admin only) ────────────────────────────────────────────
-    if role == "admin":
+    # ── Edit / Delete ─────────────────────────────────────────────────────────
+    if can_edit_quotation or can_delete_quotation:
         st.markdown("---")
         with st.expander("✏️ Edit / Delete Quotation Line"):
             df_quotes["label"] = (
@@ -502,7 +510,8 @@ def show(PLOT):
                 e_gst_applicable = bool(erow.get("gst_applicable", False))
 
                 sc1, sc2 = st.columns(2)
-                if sc1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                if sc1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True,
+                                           disabled=not can_edit_quotation):
                     e_base = round(e_qty * e_rate, 2)
                     e_gst_amt, _ = gst_split(e_base, e_gst_applicable)
                     update_quotation(int(erow["id"]), {
@@ -511,7 +520,8 @@ def show(PLOT):
                     })
                     flash("✅ Quotation line updated!")
                     st.rerun()
-                if sc2.form_submit_button("🗑️ Delete this line", use_container_width=True):
+                if sc2.form_submit_button("🗑️ Delete this line", use_container_width=True,
+                                           disabled=not can_delete_quotation):
                     delete_quotation(int(erow["id"]))
                     flash("🗑️ Quotation line deleted.")
                     st.rerun()

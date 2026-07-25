@@ -442,6 +442,28 @@ CREATE TABLE IF NOT EXISTS custom_diameters (
 );
 ALTER TABLE custom_diameters DISABLE ROW LEVEL SECURITY;
 
+-- ── Migration: Per-user permission overrides (Admin > User Permissions) ────
+-- Access is role-based by default (see core/permissions.py's ROLE_DEFAULTS,
+-- which mirrors the role checks already hardcoded across app.py/views/*.py).
+-- A row here fully overrides one user's view/add/edit/delete rights for one
+-- module; deleting the row (or never creating it) falls back to that user's
+-- role default, unchanged. "username" is free-text, same convention as
+-- activity_log/edit_requests — there's no users table to key against since
+-- users live in .streamlit/secrets.toml, not the DB.
+CREATE TABLE IF NOT EXISTS user_permissions (
+    id          BIGSERIAL PRIMARY KEY,
+    username    TEXT NOT NULL,
+    module      TEXT NOT NULL,
+    can_view    BOOLEAN DEFAULT false,
+    can_add     BOOLEAN DEFAULT false,
+    can_edit    BOOLEAN DEFAULT false,
+    can_delete  BOOLEAN DEFAULT false,
+    updated_by  TEXT,
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(username, module)
+);
+ALTER TABLE user_permissions DISABLE ROW LEVEL SECURITY;
+
 -- ── Row Level Security ───────────────────────────────────────────────────────
 -- Supabase enables RLS by default on new tables. This app authenticates via
 -- its own login screen (not Supabase Auth) and talks to Supabase with one

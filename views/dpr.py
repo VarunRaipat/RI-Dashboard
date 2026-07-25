@@ -8,6 +8,7 @@ from core.db import (
     get_product_config, get_pipe_diameter_config, create_edit_request, get_edit_requests,
 )
 from core.ui import flash, show_flashes, add_ist_timestamp, timestamp_col_config
+from core.permissions import has_permission
 
 _RM_COST_FIELDS = [
     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
@@ -22,6 +23,10 @@ def _init_lines():
 
 def show(PLOT):
     role = st.session_state.get("role", "production")
+    username = st.session_state.get("username")
+    can_add_dpr    = has_permission(username, role, "dpr", "add")
+    can_edit_dpr   = has_permission(username, role, "dpr", "edit")
+    can_delete_dpr = has_permission(username, role, "dpr", "delete")
     show_flashes()
 
     st.markdown("""
@@ -76,7 +81,10 @@ def show(PLOT):
     ggbs_bags   = rmc2.number_input("GGBS Used (Bags)",    min_value=0.0, step=0.5, key="dpr_ggbs_bags")
 
     st.markdown("")
-    if st.button("✅ Submit & Calculate", type="primary", use_container_width=True, key="dpr_submit"):
+    if not can_add_dpr:
+        st.info("You don't have permission to add DPR entries.")
+    if st.button("✅ Submit & Calculate", type="primary", use_container_width=True, key="dpr_submit",
+                 disabled=not can_add_dpr):
         saved_rows = []
         valid_lines = [i for i in range(st.session_state.dpr_lines)
                        if (st.session_state.get(f"dpr_nos_{i}", 0) or 0) > 0]
@@ -283,87 +291,87 @@ def show(PLOT):
         st.info("No Cement/GGBS usage recorded yet.")
 
     # ── Edit entry ────────────────────────────────────────────────────────────
-    with st.expander("✏️ Edit a DPR Entry"):
-        df_edit = get_production()
-        if df_edit.empty:
-            st.info("No entries to edit.")
-        else:
-            df_edit["date"] = pd.to_datetime(df_edit["date"], errors="coerce")
-            df_edit = df_edit.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
-            df_edit["label"] = (
-                df_edit["date"].dt.strftime("%d-%b-%Y") + " | " +
-                df_edit["product"].astype(str) + " | " +
-                df_edit["nos"].astype(int).astype(str) + " nos | ID:" +
-                df_edit["id"].astype(str)
-            )
-            sel = st.selectbox("Select entry to edit", df_edit["label"].tolist(), key="edit_dpr_sel")
-            row = df_edit.loc[df_edit["label"] == sel].iloc[0]
-            row_id = int(row["id"])
+    if can_edit_dpr:
+        with st.expander("✏️ Edit a DPR Entry"):
+            df_edit = get_production()
+            if df_edit.empty:
+                st.info("No entries to edit.")
+            else:
+                df_edit["date"] = pd.to_datetime(df_edit["date"], errors="coerce")
+                df_edit = df_edit.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+                df_edit["label"] = (
+                    df_edit["date"].dt.strftime("%d-%b-%Y") + " | " +
+                    df_edit["product"].astype(str) + " | " +
+                    df_edit["nos"].astype(int).astype(str) + " nos | ID:" +
+                    df_edit["id"].astype(str)
+                )
+                sel = st.selectbox("Select entry to edit", df_edit["label"].tolist(), key="edit_dpr_sel")
+                row = df_edit.loc[df_edit["label"] == sel].iloc[0]
+                row_id = int(row["id"])
 
-            # Dynamic form name per row_id forces a fresh widget state on every selection change
-            with st.form(f"edit_dpr_form_{row_id}"):
-                st.markdown(f"**Editing ID {row_id}**")
-                ec1, ec2, ec3 = st.columns(3)
-                e_date    = ec1.date_input("Date", pd.to_datetime(row["date"]))
-                e_product = ec2.selectbox("Product", PRODUCTION_PRODUCTS,
-                                          index=PRODUCTION_PRODUCTS.index(row["product"])
-                                          if row["product"] in PRODUCTION_PRODUCTS else 0)
-                e_nos     = ec3.number_input("Nos.", min_value=0, value=int(row["nos"]), step=100)
+                # Dynamic form name per row_id forces a fresh widget state on every selection change
+                with st.form(f"edit_dpr_form_{row_id}"):
+                    st.markdown(f"**Editing ID {row_id}**")
+                    ec1, ec2, ec3 = st.columns(3)
+                    e_date    = ec1.date_input("Date", pd.to_datetime(row["date"]))
+                    e_product = ec2.selectbox("Product", PRODUCTION_PRODUCTS,
+                                              index=PRODUCTION_PRODUCTS.index(row["product"])
+                                              if row["product"] in PRODUCTION_PRODUCTS else 0)
+                    e_nos     = ec3.number_input("Nos.", min_value=0, value=int(row["nos"]), step=100)
 
-                e_plant = st.radio("Plant", PLANTS,
-                                    index=PLANTS.index(row["plant"]) if row.get("plant") in PLANTS else 0,
-                                    horizontal=True)
+                    e_plant = st.radio("Plant", PLANTS,
+                                        index=PLANTS.index(row["plant"]) if row.get("plant") in PLANTS else 0,
+                                        horizontal=True)
 
-                save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                    save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
 
-            if save:
-                e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
-                result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg,
-                                                pipe_diameter_config=pipe_dia_cfg)
-                updated = {
-                    "date": str(e_date), "product": e_product, "nos": e_nos,
-                    "plant": e_plant,
-                    **{k: result[k] for k in _RM_COST_FIELDS},
-                }
-                update_production(row_id, updated)
-                flash(f"✅ Entry ID {row_id} updated!")
-                st.success(f"✅ Entry ID {row_id} updated successfully.")
-                st.rerun()
-
-    # ── Delete entries (admin only) ───────────────────────────────────────────
-    if role != "admin":
-        return
-    st.markdown("---")
-    with st.expander("🗑️ Delete DPR Entries"):
-        df_del = get_production()
-        if df_del.empty:
-            st.info("No entries to delete.")
-        else:
-            df_del["date"] = pd.to_datetime(df_del["date"], errors="coerce")
-            df_del = df_del.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
-            df_del["label"] = (
-                df_del["date"].dt.strftime("%d-%b-%Y") + " | " +
-                df_del["product"].astype(str) + " | " +
-                df_del["nos"].astype(int).astype(str) + " nos | ID:" +
-                df_del["id"].astype(str)
-            )
-            all_labels = df_del["label"].tolist()
-
-            def _dpr_select_all():
-                st.session_state.del_dpr_select = all_labels if st.session_state.del_dpr_all else []
-
-            st.checkbox("Select All", key="del_dpr_all", on_change=_dpr_select_all)
-            selected_labels = st.multiselect(
-                "Select entries to delete (can pick multiple)",
-                all_labels,
-                key="del_dpr_select"
-            )
-            if selected_labels:
-                ids_to_delete = df_del.loc[df_del["label"].isin(selected_labels), "id"].tolist()
-                st.warning(f"You are about to delete **{len(ids_to_delete)} record(s)**.")
-                if st.button(f"🗑️ Confirm Delete ({len(ids_to_delete)})", type="primary", key="del_dpr_btn"):
-                    for rid in ids_to_delete:
-                        delete_row("production", int(rid))
-                    flash(f"🗑️ {len(ids_to_delete)} record(s) deleted.")
-                    st.success(f"✅ {len(ids_to_delete)} record(s) deleted.")
+                if save:
+                    e_pricing_key = SKU_TO_PRICING_KEY.get(e_product, e_product)
+                    result = calculate_production(e_pricing_key, e_nos, rm, prod_cfg,
+                                                    pipe_diameter_config=pipe_dia_cfg)
+                    updated = {
+                        "date": str(e_date), "product": e_product, "nos": e_nos,
+                        "plant": e_plant,
+                        **{k: result[k] for k in _RM_COST_FIELDS},
+                    }
+                    update_production(row_id, updated)
+                    flash(f"✅ Entry ID {row_id} updated!")
+                    st.success(f"✅ Entry ID {row_id} updated successfully.")
                     st.rerun()
+
+    # ── Delete entries ────────────────────────────────────────────────────────
+    if can_delete_dpr:
+        st.markdown("---")
+        with st.expander("🗑️ Delete DPR Entries"):
+            df_del = get_production()
+            if df_del.empty:
+                st.info("No entries to delete.")
+            else:
+                df_del["date"] = pd.to_datetime(df_del["date"], errors="coerce")
+                df_del = df_del.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
+                df_del["label"] = (
+                    df_del["date"].dt.strftime("%d-%b-%Y") + " | " +
+                    df_del["product"].astype(str) + " | " +
+                    df_del["nos"].astype(int).astype(str) + " nos | ID:" +
+                    df_del["id"].astype(str)
+                )
+                all_labels = df_del["label"].tolist()
+
+                def _dpr_select_all():
+                    st.session_state.del_dpr_select = all_labels if st.session_state.del_dpr_all else []
+
+                st.checkbox("Select All", key="del_dpr_all", on_change=_dpr_select_all)
+                selected_labels = st.multiselect(
+                    "Select entries to delete (can pick multiple)",
+                    all_labels,
+                    key="del_dpr_select"
+                )
+                if selected_labels:
+                    ids_to_delete = df_del.loc[df_del["label"].isin(selected_labels), "id"].tolist()
+                    st.warning(f"You are about to delete **{len(ids_to_delete)} record(s)**.")
+                    if st.button(f"🗑️ Confirm Delete ({len(ids_to_delete)})", type="primary", key="del_dpr_btn"):
+                        for rid in ids_to_delete:
+                            delete_row("production", int(rid))
+                        flash(f"🗑️ {len(ids_to_delete)} record(s) deleted.")
+                        st.success(f"✅ {len(ids_to_delete)} record(s) deleted.")
+                        st.rerun()

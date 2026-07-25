@@ -291,6 +291,18 @@ def init_db():
         created_at        TEXT DEFAULT (datetime('now','localtime')),
         reviewed_at       TEXT
     );
+    CREATE TABLE IF NOT EXISTS user_permissions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        username   TEXT NOT NULL,
+        module     TEXT NOT NULL,
+        can_view   INTEGER DEFAULT 0,
+        can_add    INTEGER DEFAULT 0,
+        can_edit   INTEGER DEFAULT 0,
+        can_delete INTEGER DEFAULT 0,
+        updated_by TEXT,
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(username, module)
+    );
     """)
     # Lightweight migration for columns added after a table already existed —
     # CREATE TABLE IF NOT EXISTS above only helps fresh databases.
@@ -872,6 +884,76 @@ def delete_inventory_opening(item_key):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("update", "Inventory", f"Opening stock override cleared for {item_key}")
+
+
+# ── Per-user permission overrides (Admin > User Permissions) ─────────────────
+# Access is role-based by default (see core/permissions.py's ROLE_DEFAULTS).
+# A row here fully overrides one user's view/add/edit/delete rights for one
+# module; no row means that user just gets their role's default, unchanged.
+@st.cache_data(ttl=30)
+def get_user_permissions():
+    if _use_supabase():
+        r = requests.get(_sb_url("user_permissions"), headers=_headers(), params={"select": "*", "limit": 2000})
+        rows = r.json() if r.status_code == 200 else []
+    else:
+        con = _conn()
+        try:
+            rows = pd.read_sql("SELECT * FROM user_permissions", con).to_dict("records")
+        except Exception:
+            rows = []
+        con.close()
+    return pd.DataFrame(rows)
+
+
+def save_user_permission(username, module, can_view, can_add, can_edit, can_delete, updated_by):
+    from core.tz import now_ist
+    payload = {
+        "username": username, "module": module,
+        "can_view": bool(can_view), "can_add": bool(can_add),
+        "can_edit": bool(can_edit), "can_delete": bool(can_delete),
+        "updated_by": updated_by, "updated_at": now_ist().isoformat(),
+    }
+    if _use_supabase():
+        r = requests.post(
+            _sb_url("user_permissions"),
+            headers={**_headers(), "Prefer": "resolution=merge-duplicates"},
+            params={"on_conflict": "username,module"},
+            json=payload,
+        )
+        if r.status_code not in (200, 201):
+            raise Exception(f"Save failed: {r.text}")
+    else:
+        con = _conn()
+        cols = ", ".join(payload.keys())
+        ph   = ", ".join("?" for _ in payload)
+        con.execute(
+            f"INSERT INTO user_permissions ({cols}) VALUES ({ph}) "
+            f"ON CONFLICT(username, module) DO UPDATE SET "
+            + ", ".join(f"{k} = excluded.{k}" for k in payload if k not in ("username", "module")),
+            list(payload.values()),
+        )
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Admin", f"Permissions override set for {username} / {module}")
+
+
+def delete_user_permission(username, module):
+    """Remove an override so the user falls back to their role's default
+    permissions for this module."""
+    if _use_supabase():
+        r = requests.delete(
+            _sb_url("user_permissions"),
+            headers={**_headers(), "Prefer": ""},
+            params={"username": f"eq.{username}", "module": f"eq.{module}"},
+        )
+        if r.status_code not in (200, 204):
+            raise Exception(f"Delete failed: {r.text}")
+    else:
+        con = _conn()
+        con.execute("DELETE FROM user_permissions WHERE username = ? AND module = ?", (username, module))
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Admin", f"Permissions override cleared for {username} / {module}")
 
 
 def update_production(row_id, data):

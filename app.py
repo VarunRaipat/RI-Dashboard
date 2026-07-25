@@ -4,18 +4,9 @@ from core.db import (
     log_failed_login, recent_failed_login_count,
     LOGIN_LOCKOUT_THRESHOLD, LOGIN_LOCKOUT_WINDOW_MIN,
 )
-from core.config import USERS as _USERS_DEFAULT
+from core.permissions import get_all_users
 
-def _load_users():
-    try:
-        sec = st.secrets.get("users", {})
-        if sec:
-            return {k: {"password": v["password"], "role": v["role"], "name": v["name"]} for k, v in sec.items()}
-    except Exception:
-        pass
-    return _USERS_DEFAULT
-
-USERS = _load_users()
+USERS = get_all_users()
 
 @st.cache_data(ttl=300)
 def _get_today_stats(d):
@@ -590,26 +581,29 @@ with st.sidebar:
     except Exception:
         pass
 
+    from core.permissions import has_permission
+    username = st.session_state.username
+
     pages = []
     if role in ("admin", "viewer"):
         pages.append("📊  Dashboard")
-    if role in ("admin", "production", "factory", "viewer"):
+    if has_permission(username, role, "dpr", "view"):
         pages.append("📋  DPR Entry")
-    if role in ("admin", "headoffice", "viewer"):
+    if has_permission(username, role, "quotation", "view"):
         pages.append("🧾  Quotation")
-    if role in ("admin", "headoffice", "viewer"):
+    if has_permission(username, role, "orders", "view"):
         pages.append("📦  Sales Orders")
-    if role in ("admin", "dispatch", "factory", "headoffice", "viewer"):
+    if has_permission(username, role, "dispatch", "view"):
         pages.append("🚚  Dispatch Entry")
     if role in ("admin", "viewer"):
         pages.append("🤖  Assistant")
-    if role in ("admin", "dispatch", "factory", "viewer"):
+    if has_permission(username, role, "inventory", "view"):
         pages.append("🏭  Inventory")
-    if role in ("admin", "dispatch", "factory", "viewer"):
+    if has_permission(username, role, "gate_entry", "view"):
         pages.append("🚧  Gate Entry")
-    if role == "admin":
+    if has_permission(username, role, "liability", "view"):
         pages.append("💰  Liability")
-    if role in ("admin", "viewer"):
+    if has_permission(username, role, "admin", "view"):
         pages.append("⚙️  Admin")
 
     page = st.radio("Navigate", pages, label_visibility="collapsed")

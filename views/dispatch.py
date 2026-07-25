@@ -8,6 +8,7 @@ from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, updat
 from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 from core.visibility import di_dispatch_warnings
+from core.permissions import has_permission
 
 LAKH = 100_000
 
@@ -358,9 +359,11 @@ def _show_dispatch_operator():
 
 def show(PLOT):
     role = st.session_state.get("role", "dispatch")
+    username = st.session_state.get("username")
     show_flashes()
-    can_bill    = role in ("admin", "dispatch", "headoffice", "viewer")
-    can_challan = role in ("admin", "dispatch", "viewer")
+    can_bill    = has_permission(username, role, "dispatch", "edit")
+    can_challan = has_permission(username, role, "dispatch", "add")
+    can_delete_dispatch = has_permission(username, role, "dispatch", "delete")
 
     if role == "headoffice":
         _show_headoffice()
@@ -683,97 +686,92 @@ def show(PLOT):
                            show_cols=show_cols, rename=rename_map, col_config=col_cfg)
 
     # ── Edit Entry (uses all data, not date-filtered) ─────────────────────────
-    st.markdown("---")
-    with st.expander("✏️ Edit Dispatch Entry"):
-        df_edit["label"] = (
-            df_edit["date"].dt.strftime("%d-%b-%Y") + " | Challan " +
-            df_edit["challan_no"].fillna("").astype(str) + " | " +
-            df_edit["client_name"].fillna("").astype(str) + " | " +
-            df_edit["product"].fillna("").astype(str) +
-            " | ID:" + df_edit["id"].astype(str)
-        )
-        edit_label = st.selectbox("Select entry to edit", df_edit["label"].tolist(), key="edit_disp_sel")
-        erow = df_edit.loc[df_edit["label"] == edit_label].iloc[0]
-
-        with st.form("edit_disp_form"):
-            ea, eb, ec = st.columns(3)
-            e_date   = ea.date_input("Date", pd.to_datetime(erow["date"]).date())
-            e_challan= eb.text_input("Challan No.", value=str(erow.get("challan_no","") or ""))
-            e_di     = ec.text_input("DI No.",      value=str(erow.get("di_no","") or ""))
-
-            edit_known_clients = set(df_edit["client_name"].dropna().astype(str)) if "client_name" in df_edit.columns else set()
-            ed, ee, ef, est = st.columns(4)
-            e_client = client_name_field(ed, edit_known_clients, "disp_edit_client",
-                                         default=str(erow.get("client_name", "") or ""))
-            e_prod   = ee.selectbox("Product", DISPATCH_PRODUCTS,
-                                    index=DISPATCH_PRODUCTS.index(erow["product"])
-                                    if erow.get("product") in DISPATCH_PRODUCTS else 0)
-            e_addr   = ef.text_input("Delivery Address", value=str(erow.get("delivery_address","") or ""))
-            _est     = str(erow.get("sale_type","") or "")
-            e_stype  = est.selectbox("Sale Type", SALE_TYPES,
-                                     index=SALE_TYPES.index(_est) if _est in SALE_TYPES else 0)
-
-            eg, eh, ei = st.columns(3)
-            e_qty_o  = eg.number_input("Qty Ordered",    value=float(erow.get("qty_ordered",0) or 0), min_value=0.0, step=100.0)
-            e_qty_d  = eh.number_input("Qty Dispatched", value=float(erow.get("qty_dispatched",0) or 0), min_value=0.0, step=100.0)
-            e_rate   = ei.number_input("Rate (₹/nos.)",  value=float(erow.get("rate",0) or 0), min_value=0.0, step=0.5)
-
-            _e_gst_default = str(erow.get("gst_applicable", False)).lower() in ("true", "1")
-            e_gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", value=_e_gst_default)
-
-            st.markdown("**Transport**")
-            etm, etr, etg = st.columns(3)
-            _e_tmode_default = str(erow.get("transport_mode", "per_unit") or "per_unit")
-            _tmode_opts = ["Per Unit (₹/nos.)", "Flat (₹ total for whole challan/DI)"]
-            e_tmode_label = etm.radio("Mode", _tmode_opts,
-                                      index=1 if _e_tmode_default == "flat" else 0, key="disp_edit_tmode")
-            e_tmode = "per_unit" if e_tmode_label.startswith("Per Unit") else "flat"
-            e_trate = etr.number_input(
-                "Transport Rate (₹/nos.)" if e_tmode == "per_unit" else "Transport Amount (₹)",
-                value=float(erow.get("transport_rate", 0) or 0), min_value=0.0,
-                step=0.5 if e_tmode == "per_unit" else 100.0,
+    if can_bill:
+        st.markdown("---")
+        with st.expander("✏️ Edit Dispatch Entry"):
+            df_edit["label"] = (
+                df_edit["date"].dt.strftime("%d-%b-%Y") + " | Challan " +
+                df_edit["challan_no"].fillna("").astype(str) + " | " +
+                df_edit["client_name"].fillna("").astype(str) + " | " +
+                df_edit["product"].fillna("").astype(str) +
+                " | ID:" + df_edit["id"].astype(str)
             )
-            _e_tgst_default = str(erow.get("transport_gst_applicable", False)).lower() in ("true", "1")
-            e_tgst_applicable = etg.checkbox("Apply GST to Transport too", value=_e_tgst_default)
+            edit_label = st.selectbox("Select entry to edit", df_edit["label"].tolist(), key="edit_disp_sel")
+            erow = df_edit.loc[df_edit["label"] == edit_label].iloc[0]
 
-            ej, ek, el = st.columns(3)
-            e_truck  = ej.text_input("Truck No.",    value=str(erow.get("truck_no","") or ""))
-            e_driver = ek.text_input("Driver Name",  value=str(erow.get("driver_name","") or ""))
-            e_dist   = el.number_input("Distance km",value=float(erow.get("trip_distance",0) or 0), min_value=0.0, step=5.0)
+            with st.form("edit_disp_form"):
+                ea, eb, ec = st.columns(3)
+                e_date   = ea.date_input("Date", pd.to_datetime(erow["date"]).date())
+                e_challan= eb.text_input("Challan No.", value=str(erow.get("challan_no","") or ""))
+                e_di     = ec.text_input("DI No.",      value=str(erow.get("di_no","") or ""))
 
-            e_rem    = st.text_input("Remarks", value=str(erow.get("remarks","") or ""))
+                edit_known_clients = set(df_edit["client_name"].dropna().astype(str)) if "client_name" in df_edit.columns else set()
+                ed, ee, ef, est = st.columns(4)
+                e_client = client_name_field(ed, edit_known_clients, "disp_edit_client",
+                                             default=str(erow.get("client_name", "") or ""))
+                e_prod   = ee.selectbox("Product", DISPATCH_PRODUCTS,
+                                        index=DISPATCH_PRODUCTS.index(erow["product"])
+                                        if erow.get("product") in DISPATCH_PRODUCTS else 0)
+                e_addr   = ef.text_input("Delivery Address", value=str(erow.get("delivery_address","") or ""))
+                _est     = str(erow.get("sale_type","") or "")
+                e_stype  = est.selectbox("Sale Type", SALE_TYPES,
+                                         index=SALE_TYPES.index(_est) if _est in SALE_TYPES else 0)
 
-            if can_bill:
-                e_bill = st.text_input("Bill No.", value=str(erow.get("bill_no","") or ""),
-                                       help="Only accounts/admin can update this")
-            else:
-                e_bill = None
-                st.caption(f"Bill No.: **{erow.get('bill_no','—') or '—'}** (only accounts team can edit)")
+                eg, eh, ei = st.columns(3)
+                e_qty_o  = eg.number_input("Qty Ordered",    value=float(erow.get("qty_ordered",0) or 0), min_value=0.0, step=100.0)
+                e_qty_d  = eh.number_input("Qty Dispatched", value=float(erow.get("qty_dispatched",0) or 0), min_value=0.0, step=100.0)
+                e_rate   = ei.number_input("Rate (₹/nos.)",  value=float(erow.get("rate",0) or 0), min_value=0.0, step=0.5)
 
-            if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
-                new_base = round(float(e_qty_d) * float(e_rate), 2)
-                new_gst, new_dv = gst_split(new_base, e_gst_applicable)
-                new_t_value, new_t_gst = transport_charge(e_tmode, e_trate, e_qty_d, e_tgst_applicable)
-                payload = {
-                    "date": str(e_date), "challan_no": e_challan, "di_no": e_di,
-                    "client_name": e_client, "delivery_address": e_addr, "product": e_prod,
-                    "sale_type": e_stype,
-                    "qty_ordered": e_qty_o, "qty_dispatched": e_qty_d, "rate": e_rate,
-                    "dispatch_value": new_dv, "gst_applicable": e_gst_applicable, "gst_amount": new_gst,
-                    "transport_mode": e_tmode, "transport_rate": e_trate,
-                    "transport_value": new_t_value, "transport_gst_applicable": e_tgst_applicable,
-                    "transport_gst_amount": new_t_gst,
-                    "trip_distance": e_dist,
-                    "truck_no": e_truck, "driver_name": e_driver, "remarks": e_rem,
-                }
-                if can_bill and e_bill is not None:
-                    payload["bill_no"] = e_bill.strip() if e_bill.strip() else None
-                update_dispatch(int(erow["id"]), payload)
-                for w in di_dispatch_warnings(e_di, [e_prod], df_orders, df_edit):
-                    st.warning(f"⚠️ {w}")
-                flash("✅ Dispatch entry updated!")
-                st.success(f"✅ Entry updated. Dispatch Value = ₹{new_dv:,.0f}")
-                st.rerun()
+                _e_gst_default = str(erow.get("gst_applicable", False)).lower() in ("true", "1")
+                e_gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", value=_e_gst_default)
+
+                st.markdown("**Transport**")
+                etm, etr, etg = st.columns(3)
+                _e_tmode_default = str(erow.get("transport_mode", "per_unit") or "per_unit")
+                _tmode_opts = ["Per Unit (₹/nos.)", "Flat (₹ total for whole challan/DI)"]
+                e_tmode_label = etm.radio("Mode", _tmode_opts,
+                                          index=1 if _e_tmode_default == "flat" else 0, key="disp_edit_tmode")
+                e_tmode = "per_unit" if e_tmode_label.startswith("Per Unit") else "flat"
+                e_trate = etr.number_input(
+                    "Transport Rate (₹/nos.)" if e_tmode == "per_unit" else "Transport Amount (₹)",
+                    value=float(erow.get("transport_rate", 0) or 0), min_value=0.0,
+                    step=0.5 if e_tmode == "per_unit" else 100.0,
+                )
+                _e_tgst_default = str(erow.get("transport_gst_applicable", False)).lower() in ("true", "1")
+                e_tgst_applicable = etg.checkbox("Apply GST to Transport too", value=_e_tgst_default)
+
+                ej, ek, el = st.columns(3)
+                e_truck  = ej.text_input("Truck No.",    value=str(erow.get("truck_no","") or ""))
+                e_driver = ek.text_input("Driver Name",  value=str(erow.get("driver_name","") or ""))
+                e_dist   = el.number_input("Distance km",value=float(erow.get("trip_distance",0) or 0), min_value=0.0, step=5.0)
+
+                e_rem    = st.text_input("Remarks", value=str(erow.get("remarks","") or ""))
+
+                e_bill = st.text_input("Bill No.", value=str(erow.get("bill_no","") or ""))
+
+                if st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                    new_base = round(float(e_qty_d) * float(e_rate), 2)
+                    new_gst, new_dv = gst_split(new_base, e_gst_applicable)
+                    new_t_value, new_t_gst = transport_charge(e_tmode, e_trate, e_qty_d, e_tgst_applicable)
+                    payload = {
+                        "date": str(e_date), "challan_no": e_challan, "di_no": e_di,
+                        "client_name": e_client, "delivery_address": e_addr, "product": e_prod,
+                        "sale_type": e_stype,
+                        "qty_ordered": e_qty_o, "qty_dispatched": e_qty_d, "rate": e_rate,
+                        "dispatch_value": new_dv, "gst_applicable": e_gst_applicable, "gst_amount": new_gst,
+                        "transport_mode": e_tmode, "transport_rate": e_trate,
+                        "transport_value": new_t_value, "transport_gst_applicable": e_tgst_applicable,
+                        "transport_gst_amount": new_t_gst,
+                        "trip_distance": e_dist,
+                        "truck_no": e_truck, "driver_name": e_driver, "remarks": e_rem,
+                        "bill_no": e_bill.strip() if e_bill.strip() else None,
+                    }
+                    update_dispatch(int(erow["id"]), payload)
+                    for w in di_dispatch_warnings(e_di, [e_prod], df_orders, df_edit):
+                        st.warning(f"⚠️ {w}")
+                    flash("✅ Dispatch entry updated!")
+                    st.success(f"✅ Entry updated. Dispatch Value = ₹{new_dv:,.0f}")
+                    st.rerun()
 
     # ── Add Bill No. (Accounts / Admin only) — uses all data ─────────────────
     if can_bill:
@@ -824,8 +822,8 @@ def show(PLOT):
         st.dataframe(trk[["Truck","Trips","Total_km","Billed Value (L)"]].sort_values("Billed Value (L)", ascending=False),
                      use_container_width=True, hide_index=True)
 
-    # ── Delete (admin only) ───────────────────────────────────────────────────
-    if role == "admin":
+    # ── Delete ─────────────────────────────────────────────────────────────────
+    if can_delete_dispatch:
         st.markdown("---")
         with st.expander("🗑️ Bulk Delete Dispatch Entries"):
             from core.db import delete_dispatch_ids

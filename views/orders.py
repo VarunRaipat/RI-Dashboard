@@ -8,6 +8,7 @@ from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
 from core.ui import client_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
+from core.permissions import has_permission
 
 LAKH = 100_000
 
@@ -30,6 +31,10 @@ def _init_lines():
 
 def show(PLOT):
     role = st.session_state.get("role", "admin")
+    username = st.session_state.get("username")
+    can_add_orders    = has_permission(username, role, "orders", "add")
+    can_edit_orders   = has_permission(username, role, "orders", "edit")
+    can_delete_orders = has_permission(username, role, "orders", "delete")
     show_flashes()
 
     st.markdown("""
@@ -299,7 +304,10 @@ def show(PLOT):
 
     # ── Submit ────────────────────────────────────────────────────────────────
     st.markdown("")
-    if st.button("✅ Save Order", type="primary", use_container_width=True, key="ord_submit"):
+    if not can_add_orders:
+        st.info("You don't have permission to add Sales Orders.")
+    if st.button("✅ Save Order", type="primary", use_container_width=True, key="ord_submit",
+                 disabled=not can_add_orders):
         di_no_final  = di_no_input.strip()
         _payment_val = st.session_state.get("ord_payment", REQUIRED_PLACEHOLDER)
         _sale_val    = st.session_state.get("ord_sale_type", REQUIRED_PLACEHOLDER)
@@ -562,7 +570,7 @@ def show(PLOT):
         )
 
     # ── Edit / Delete ─────────────────────────────────────────────────────────
-    if role == "admin":
+    if can_edit_orders or can_delete_orders:
         st.markdown("---")
         with st.expander("✏️ Edit / Delete Order Line"):
             df_orders["label"] = (
@@ -634,7 +642,8 @@ def show(PLOT):
                 e_rem    = st.text_input("Remarks", value=str(erow.get("remarks","") or ""))
 
                 sc1, sc2 = st.columns(2)
-                if sc1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                if sc1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True,
+                                           disabled=not can_edit_orders):
                     update_order(int(erow["id"]), {
                         "di_no": e_di, "order_date": str(e_odate),
                         "client_name": e_client, "contact_person": e_contact, "phone": e_phone,
@@ -652,13 +661,14 @@ def show(PLOT):
                     flash("✅ Order line updated!")
                     st.success("✅ Updated.")
                     st.rerun()
-                if sc2.form_submit_button("🗑️ Delete this line", use_container_width=True):
+                if sc2.form_submit_button("🗑️ Delete this line", use_container_width=True,
+                                           disabled=not can_delete_orders):
                     delete_order(int(erow["id"]))
                     flash("🗑️ Order line deleted.")
                     st.success("✅ Deleted.")
                     st.rerun()
 
-    elif role == "headoffice":
+    elif role == "headoffice" and not can_edit_orders:
         st.markdown("---")
         with st.expander("🔧 Spotted a mistake? Request an edit"):
             st.caption("Pick the order line, enter the corrected values, and submit — an admin reviews "

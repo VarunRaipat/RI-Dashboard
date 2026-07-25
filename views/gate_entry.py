@@ -7,6 +7,7 @@ from core.sequencing import is_duplicate
 from core.ui import (interactive_table, flash, show_flashes, date_range_filter,
                      supplier_name_field, site_name_field, unit_field, item_name_field,
                      add_ist_timestamp, timestamp_col_config)
+from core.permissions import has_permission
 
 # Widget key templates for one item line — used to shift values down when a
 # line is removed (Streamlit widgets keep state by key, so removing line i
@@ -78,6 +79,10 @@ def _item_lines(prefix, n_lines, known_items, known_units):
 
 def show(PLOT):
     role = st.session_state.get("role", "dispatch")
+    username = st.session_state.get("username")
+    can_add_gate    = has_permission(username, role, "gate_entry", "add")
+    can_review_gate = has_permission(username, role, "gate_entry", "edit")
+    can_delete_gate = has_permission(username, role, "gate_entry", "delete")
     show_flashes()
 
     st.markdown("""
@@ -120,7 +125,10 @@ def show(PLOT):
     st.markdown("**Items in this Entry**")
     lines = _item_lines("gate", st.session_state["gate_lines"], known_items, known_units)
 
-    if st.button("✅ Submit Entry", type="primary", use_container_width=True, key="gate_submit"):
+    if not can_add_gate:
+        st.info("You don't have permission to add Gate Entries.")
+    if st.button("✅ Submit Entry", type="primary", use_container_width=True, key="gate_submit",
+                 disabled=not can_add_gate):
         valid_lines = [l for l in lines if l[2] > 0]
         dup_no = challan_no.strip() or invoice_no.strip()
         is_dup = (
@@ -149,8 +157,8 @@ def show(PLOT):
                 st.session_state.pop(k, None)
             st.rerun()
 
-    # Only admins get to review the log — the operator's screen just clears.
-    if role == "admin":
+    # Log review is admin-only by default — the operator's screen just clears.
+    if can_review_gate:
         st.markdown("---")
         st.markdown('<div class="section-header">Gate Entry Log</div>', unsafe_allow_html=True)
         df = get_gate_entries()
@@ -228,7 +236,8 @@ def show(PLOT):
                         })
                         flash(f"✅ Gate entry ID {eid} updated!")
                         st.rerun()
-                    if esub2.form_submit_button("🗑️ Delete this entry", use_container_width=True):
+                    if esub2.form_submit_button("🗑️ Delete this entry", use_container_width=True,
+                                                 disabled=not can_delete_gate):
                         delete_gate_entry(eid)
                         flash("🗑️ Gate entry deleted.")
                         st.rerun()
