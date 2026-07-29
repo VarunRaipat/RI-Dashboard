@@ -227,12 +227,11 @@ def interactive_table(df, key, sum_cols=None, show_cols=None,
                 cols = st.columns(len(chunk))
                 for i, col in enumerate(chunk):
                     label = rn.get(col, col.replace("_", " ").title())
-                    query = cols[i].text_input(label, key=f"{key}_flt_{col}", placeholder="Type to filter…")
-                    query = query.strip()
-                    if query:
-                        filtered = filtered[
-                            filtered[col].astype(str).str.contains(query, case=False, na=False, regex=False)
-                        ]
+                    options = sorted({str(v) for v in df[col].dropna().unique()})
+                    picked = cols[i].multiselect(label, options, key=f"{key}_flt_{col}",
+                                                 placeholder="Type to search…")
+                    if picked:
+                        filtered = filtered[filtered[col].astype(str).isin(picked)]
 
     n_shown = len(filtered)
     n_total = len(df)
