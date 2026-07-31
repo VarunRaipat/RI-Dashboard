@@ -2,7 +2,11 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta
 from core.tz import today_ist
-from core.db import get_production, get_dispatch, get_orders
+from core.db import (
+    get_production, get_dispatch, get_orders,
+    get_vendor_transactions, get_loan_payments, get_gate_entries,
+    get_quotations, get_rm_usage, get_rm_prices,
+)
 
 LAKH = 100_000
 
@@ -92,6 +96,77 @@ def _build_context() -> str:
         lines.append(f"Repeat clients: {len(repeat_clients)} ({', '.join(repeat_clients.index.tolist()[:5])})")
         lines.append("")
 
+    # ── Quotations summary ──────────────────────────────────────────────────
+    df_quot = get_quotations()
+    if not df_quot.empty:
+        df_quot["quote_date"] = pd.to_datetime(df_quot["quote_date"], errors="coerce")
+        df_qm = df_quot[df_quot["quote_date"] >= pd.Timestamp(month_start)]
+
+        lines.append("=== QUOTATIONS ===")
+        lines.append(f"Total quotes: {df_quot['quote_no'].nunique()} | This month: {len(df_qm)}")
+        lines.append(f"Total quoted value (all time): ₹{df_quot['amount'].sum()/LAKH:.2f}L")
+        if "status" in df_quot.columns:
+            by_status = df_quot.groupby("status")["amount"].agg(["count", "sum"])
+            lines.append("By status: " + ", ".join(
+                f"{s}: {int(r['count'])} (₹{r['sum']/LAKH:.2f}L)" for s, r in by_status.iterrows()
+            ))
+        if "converted_di_no" in df_quot.columns:
+            converted = df_quot["converted_di_no"].notna() & (df_quot["converted_di_no"].astype(str).str.strip() != "")
+            lines.append(f"Converted to orders: {converted.sum()} of {len(df_quot)}")
+        lines.append("")
+
+    # ── Vendor transactions (payables/purchases) ──────────────────────────────
+    df_vt = get_vendor_transactions()
+    if not df_vt.empty:
+        df_vt["date"] = pd.to_datetime(df_vt["date"], errors="coerce")
+        df_vm = df_vt[df_vt["date"] >= pd.Timestamp(month_start)]
+
+        lines.append("=== VENDOR TRANSACTIONS ===")
+        if "txn_type" in df_vt.columns:
+            by_type_m = df_vm.groupby("txn_type")["amount"].sum()
+            lines.append("This month by type: " + ", ".join(f"{t}: ₹{v/LAKH:.2f}L" for t, v in by_type_m.items()))
+            by_type_all = df_vt.groupby("txn_type")["amount"].sum()
+            lines.append("All time by type: " + ", ".join(f"{t}: ₹{v/LAKH:.2f}L" for t, v in by_type_all.items()))
+        top_vendors = df_vt.groupby("vendor_name")["amount"].sum().sort_values(ascending=False).head(5)
+        lines.append("Top vendors (all time): " + ", ".join(f"{v}: ₹{a/LAKH:.2f}L" for v, a in top_vendors.items()))
+        lines.append("")
+
+    # ── Loan / EMI payments ────────────────────────────────────────────────────
+    df_loan = get_loan_payments()
+    if not df_loan.empty:
+        lines.append("=== LOAN PAYMENTS ===")
+        by_loan = df_loan.groupby("loan_name").agg(emi=("emi_amount", "sum"), paid=("paid_amount", "sum"))
+        for name, row in by_loan.iterrows():
+            pending = row["emi"] - row["paid"]
+            lines.append(f"  {name}: EMI total ₹{row['emi']/LAKH:.2f}L, Paid ₹{row['paid']/LAKH:.2f}L, Pending ₹{pending/LAKH:.2f}L")
+        lines.append("")
+
+    # ── Gate entries (material/equipment movement) ─────────────────────────────
+    df_gate = get_gate_entries()
+    if not df_gate.empty:
+        df_gate["date"] = pd.to_datetime(df_gate["date"], errors="coerce")
+        df_gm = df_gate[df_gate["date"] >= pd.Timestamp(month_start)]
+        lines.append("=== GATE ENTRIES (This Month) ===")
+        if not df_gm.empty and "direction" in df_gm.columns:
+            by_dir = df_gm.groupby("direction").size()
+            lines.append("By direction: " + ", ".join(f"{d}: {n}" for d, n in by_dir.items()))
+        if not df_gm.empty and "category" in df_gm.columns:
+            by_cat = df_gm.groupby("category").size().sort_values(ascending=False).head(5)
+            lines.append("Top categories: " + ", ".join(f"{c}: {n}" for c, n in by_cat.items()))
+        lines.append("")
+
+    # ── Raw material usage & pricing ────────────────────────────────────────────
+    df_rm = get_rm_usage()
+    if not df_rm.empty:
+        df_rm["date"] = pd.to_datetime(df_rm["date"], errors="coerce")
+        df_rmm = df_rm[df_rm["date"] >= pd.Timestamp(month_start)]
+        lines.append("=== RAW MATERIAL USAGE (This Month) ===")
+        if not df_rmm.empty:
+            lines.append(f"Cement bags: {df_rmm['cement_bags'].sum():,.0f} | GGBS bags: {df_rmm['ggbs_bags'].sum():,.0f}")
+        prices = get_rm_prices()
+        lines.append("Current RM prices: " + ", ".join(f"{k}: ₹{v:,.0f}" for k, v in prices.items()))
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -163,6 +238,8 @@ def show(PLOT):
             "How many challans are unbilled?",
             "Which operator produces the most?",
             "Compare old plant vs new plant performance",
+            "What's my pending EMI on loans?",
+            "Which vendors have I paid the most this month?",
         ]
         cols = st.columns(3)
         for i, s in enumerate(suggestions):
