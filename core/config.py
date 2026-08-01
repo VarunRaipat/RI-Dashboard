@@ -403,7 +403,7 @@ GATE_UNITS      = ["Ton", "CFT", "Nos", "Kg", "Litre", "Bags", "Other"]
 
 # Steel is still loggable at the gate (for record-keeping) but no longer
 # gets a running inventory balance — moved out of RM_INVENTORY_OPENING.
-GATE_UNTRACKED_ITEMS = ["steel"]
+GATE_UNTRACKED_ITEMS = ["steel", "20mm Chips"]
 
 GATE_RM_TRACKED_ITEMS = list(RM_INVENTORY_OPENING.keys())
 
