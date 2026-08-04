@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from core.tz import today_ist
-from core.config import ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START, PRODUCT_TYPES, selling_price_unit
+from core.config import (
+    ORDER_PRODUCTS, PAYMENT_MODES, CLIENT_TYPES, SALE_TYPES, FACTORIES, GST_PCT, DI_NO_START,
+    PRODUCT_TYPES, selling_price_unit, plant_for_product,
+)
 from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch, create_edit_request, get_edit_requests
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
@@ -123,6 +126,14 @@ def show(PLOT):
             kp1, kp2 = st.columns(2)
             kp1.metric("Sale A Order Value", f"₹{a_val/LAKH:.2f}L")
             kp2.metric("Sale B Order Value", f"₹{b_val/LAKH:.2f}L")
+
+        _order_plant = df_orders_kpi["product"].map(plant_for_product)
+        pipe_val = df_orders_kpi.loc[_order_plant == "Pipe Factory", "total_amount"].sum()
+        pole_val = df_orders_kpi.loc[_order_plant == "Pole Factory", "total_amount"].sum()
+        pf1, pf2 = st.columns(2)
+        pf1.metric("🔵 Pipe Factory Order Value", f"₹{pipe_val/LAKH:.2f}L")
+        pf2.metric("⚙️ Pole Factory Order Value", f"₹{pole_val/LAKH:.2f}L")
+        st.caption(f"Combined = Total Order Value above (₹{total_ordered_val/LAKH:.2f}L).")
 
         st.markdown("---")
 
@@ -422,11 +433,16 @@ def show(PLOT):
         st.info("No orders in this date range.")
         return
 
+    def _di_plant(products):
+        plants = set(products.dropna().map(plant_for_product))
+        return plants.pop() if len(plants) == 1 else "Mixed"
+
     _agg = dict(
         order_date  =("order_date","first"),
         client_name =("client_name","first"),
         payment_mode=("mode_of_payment","first"),
         products    =("product", lambda x: ", ".join(x.dropna().unique())),
+        Plant       =("product", _di_plant),
         total_ordered=("total_amount","sum"),
         qty_ordered  =("qty_ordered","sum"),
     )
@@ -470,7 +486,7 @@ def show(PLOT):
 
     di_summary["Status"] = di_summary.apply(_status, axis=1)
 
-    from core.ui import table_by_sale_type, add_ist_timestamp, timestamp_col_config
+    from core.ui import table_by_plant, add_ist_timestamp, timestamp_col_config
 
     di_summary = add_ist_timestamp(di_summary)
 
@@ -479,7 +495,7 @@ def show(PLOT):
         if col in di_summary.columns:
             di_summary[col] = di_summary[col].round(0).astype(int)
 
-    show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","products","Status",
+    show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","Plant","products","Status",
                  "qty_ordered","dispatched_qty","pending_qty",
                  "total_ordered","gst_amount","transport_value","transport_gst_amount",
                  "dispatched_value","pending_value","challans","created_at"]
@@ -500,9 +516,9 @@ def show(PLOT):
     col_cfg = {"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
                "created_at": timestamp_col_config()}
 
-    table_by_sale_type(di_summary, key="ord_pipeline", sum_cols=sum_cols,
-                       show_cols=show_cols, rename=rename_map, col_config=col_cfg,
-                       date_col="order_date", show_export=(role != "headoffice"))
+    table_by_plant(di_summary, key="ord_pipeline", sum_cols=sum_cols,
+                   show_cols=show_cols, rename=rename_map, col_config=col_cfg,
+                   date_col="order_date", show_export=(role != "headoffice"))
 
     # ── Per-DI detail ─────────────────────────────────────────────────────────
     st.markdown("---")

@@ -2,6 +2,7 @@
 Reusable interactive table component: column filters + totals row + Excel export.
 """
 import io
+import re
 from datetime import timedelta
 from core.tz import today_ist, now_ist
 import streamlit as st
@@ -293,5 +294,33 @@ def table_by_sale_type(df, key, sum_cols=None, show_cols=None,
     for sale_type in ("Sale A", "Sale B"):
         st.markdown(f"**{sale_type}**")
         interactive_table(df[df["sale_type"] == sale_type], key=f"{key}_{sale_type[-1].lower()}",
+                          sum_cols=sum_cols, show_cols=show_cols, rename=rename,
+                          col_config=col_config, date_col=date_col, show_export=show_export)
+
+
+def table_by_plant(df, key, sum_cols=None, show_cols=None,
+                   rename=None, col_config=None, date_col="date", show_export=True,
+                   plant_col="Plant"):
+    """
+    Same as interactive_table, but rendered as one separate table per plant
+    (Pipe Factory / Pole Factory / any "Mixed" rows for a DI that spans
+    both), so each plant's rows — and their totals — are never pooled
+    together. Falls back to a single table if there's no plant_col column
+    to split on. Each sub-table shows its own totals row via
+    interactive_table; the combined grand total is expected to already be
+    shown separately (e.g. a KPI metric above), same convention as
+    table_by_sale_type.
+    """
+    if df is None or plant_col not in df.columns:
+        return interactive_table(df, key=key, sum_cols=sum_cols, show_cols=show_cols,
+                                 rename=rename, col_config=col_config, date_col=date_col,
+                                 show_export=show_export)
+
+    from core.config import PLANTS
+    groups = [p for p in PLANTS if p in set(df[plant_col])] + \
+             sorted(set(df[plant_col]) - set(PLANTS))
+    for group in groups:
+        st.markdown(f"**{group}**")
+        interactive_table(df[df[plant_col] == group], key=f"{key}_{re.sub(r'[^a-z0-9]+', '_', group.lower())}",
                           sum_cols=sum_cols, show_cols=show_cols, rename=rename,
                           col_config=col_config, date_col=date_col, show_export=show_export)
