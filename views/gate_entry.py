@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from core.tz import today_ist
-from core.config import GATE_CATEGORIES, GATE_DIRECTIONS, GATE_UNITS, GATE_RM_ITEMS
+from core.config import GATE_CATEGORIES, GATE_DIRECTIONS, GATE_UNITS, GATE_RM_ITEMS, PLANTS
 from core.db import insert_gate_entry, get_gate_entries, delete_gate_entry, update_gate_entry
 from core.sequencing import is_duplicate
 from core.ui import (interactive_table, flash, show_flashes, date_range_filter,
@@ -107,7 +107,9 @@ def show(PLOT):
 
     _init_lines("gate_lines")
 
-    c1, c2, c3 = st.columns(3)
+    c0, c1, c2, c3 = st.columns(4)
+    plant      = c0.selectbox("Plant", PLANTS, key="gate_plant",
+                              help="Which plant this material/equipment is for — RM stock is tracked separately per plant.")
     entry_date = c1.date_input("Date", today_ist(), key="gate_date")
     direction  = c2.selectbox("In / Out", GATE_DIRECTIONS, key="gate_direction")
     truck_no   = c3.text_input("Truck No.", key="gate_truck")
@@ -144,7 +146,7 @@ def show(PLOT):
             n_lines = st.session_state["gate_lines"]
             for category, item, qty, unit in valid_lines:
                 insert_gate_entry({
-                    "date": str(entry_date), "category": category, "direction": direction,
+                    "date": str(entry_date), "plant": plant, "category": category, "direction": direction,
                     "item": item, "challan_no": challan_no, "invoice_no": invoice_no,
                     "truck_no": truck_no, "qty": qty, "unit": unit,
                     "supplier_name": supplier_name, "site": site, "remarks": remarks,
@@ -174,11 +176,11 @@ def show(PLOT):
                 st.info("No gate entries in this date range.")
                 return
             df = add_ist_timestamp(df)
-            show_cols = ["date", "category", "direction", "item", "challan_no", "invoice_no",
+            show_cols = ["date", "plant", "category", "direction", "item", "challan_no", "invoice_no",
                          "truck_no", "qty", "unit", "supplier_name", "site", "remarks", "created_at"]
             show_cols = [c for c in show_cols if c in df.columns]
             rename = {
-                "date": "Date", "category": "Category", "direction": "In/Out", "item": "Item",
+                "date": "Date", "plant": "Plant", "category": "Category", "direction": "In/Out", "item": "Item",
                 "challan_no": "Challan", "invoice_no": "Invoice", "truck_no": "Truck",
                 "qty": "Qty", "unit": "Unit", "supplier_name": "Supplier", "site": "Site",
                 "remarks": "Remarks", "created_at": "Entered At",
@@ -199,7 +201,10 @@ def show(PLOT):
                 eid  = int(erow["id"])
 
                 with st.form(f"gate_edit_form_{eid}"):
-                    ec1, ec2, ec3 = st.columns(3)
+                    ec0, ec1, ec2, ec3 = st.columns(4)
+                    e_plant = ec0.selectbox("Plant", PLANTS,
+                                            index=PLANTS.index(erow["plant"])
+                                            if erow.get("plant") in PLANTS else 0)
                     e_date = ec1.date_input("Date", pd.to_datetime(erow["date"]))
                     e_cat  = ec2.selectbox("Category", GATE_CATEGORIES,
                                           index=GATE_CATEGORIES.index(erow["category"])
@@ -229,7 +234,7 @@ def show(PLOT):
                     esub1, esub2 = st.columns(2)
                     if esub1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
                         update_gate_entry(eid, {
-                            "date": str(e_date), "category": e_cat, "direction": e_dir,
+                            "date": str(e_date), "plant": e_plant, "category": e_cat, "direction": e_dir,
                             "item": e_item, "qty": e_qty, "unit": e_unit, "truck_no": e_truck,
                             "challan_no": e_challan, "invoice_no": e_invoice,
                             "supplier_name": e_supplier, "site": e_site, "remarks": e_remarks,

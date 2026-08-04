@@ -5,7 +5,10 @@ import plotly.graph_objects as go
 from datetime import timedelta
 from core.tz import today_ist
 from core.db import get_production, get_dispatch, get_orders
-from core.config import RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG, parse_pipe_sku
+from core.config import (
+    RAW_MATERIALS, HUME_PIPE_PRODUCTS, SKU_TO_PRICING_KEY, PRODUCT_CONFIG, parse_pipe_sku,
+    PLANTS, plant_for_product,
+)
 from core.calculations import daily_fixed_costs
 
 LAKH = 100_000
@@ -591,8 +594,10 @@ def _render_dispatch_sales_tab(df_disp, PLOT):
                      use_container_width=True, hide_index=True)
 
 
-def _render_sales_orders_tab(df_disp, start, end, PLOT):
+def _render_sales_orders_tab(df_disp, start, end, PLOT, plant=None):
     df_ord = get_orders()
+    if plant is not None and not df_ord.empty and "product" in df_ord.columns:
+        df_ord = df_ord[df_ord["product"].map(plant_for_product) == plant]
     if df_ord.empty:
         st.info("No sales orders yet.")
         return
@@ -941,9 +946,12 @@ def show(PLOT):
 
     # ── Inventory Snapshot (point-in-time — not affected by the date filter) ──
     from core.inventory import finished_goods_summary, rm_summary
+    from core.config import PLANTS
 
     fg_inv = finished_goods_summary()
-    rm_inv = rm_summary()
+    # Cement/GGBS stock is tracked separately per plant — combine both for
+    # this factory-wide snapshot.
+    rm_inv = pd.concat([rm_summary(p) for p in PLANTS], ignore_index=True)
     fg_value = fg_inv["Value (₹)"].sum() if not fg_inv.empty else 0
     rm_value = rm_inv["Value (₹)"].sum() if not rm_inv.empty else 0
     low_stock_ct = int((fg_inv["Current Stock"] < 0).sum()) if not fg_inv.empty else 0
@@ -967,12 +975,23 @@ def show(PLOT):
         st.warning("No data for selected period. Enter some DPR or Dispatch records first.")
         return
 
+    # -- Production financials, split by plant (Hume Pipes = Pipe Factory,
+    # everything else = Pole Factory) so their economics never blend --------
+    is_pipe = df_prod["product"].isin(HUME_PIPE_PRODUCTS) if not df_prod.empty else pd.Series(dtype=bool)
+    df_prod_pipe  = df_prod[is_pipe]  if not df_prod.empty else df_prod
+    df_prod_other = df_prod[~is_pipe] if not df_prod.empty else df_prod
+
+    is_disp_pipe = df_disp["product"].isin(HUME_PIPE_PRODUCTS) if not df_disp.empty else pd.Series(dtype=bool)
+    df_disp_pipe  = df_disp[is_disp_pipe]  if not df_disp.empty else df_disp
+    df_disp_other = df_disp[~is_disp_pipe] if not df_disp.empty else df_disp
+
     # ── Factory-Wide Financial Summary ────────────────────────────────────────
-    # EMI/Power/Admin are whole-factory overheads, not attributable to any one
-    # product or DPR line, so they're charged exactly once per calendar day
-    # that had production in this period — computed here, at the combined
-    # (Pipe + Other) level, so they're never double-counted across the two
-    # category tabs.
+    # Each plant's own Gross Margin (Production Value − variable per-product
+    # costs) is computed independently, then the two are combined and EMI/
+    # Power/Admin — one shared whole-company overhead, not attributable to
+    # either plant individually — is subtracted exactly once (per calendar
+    # day with production, company-wide) to get Net Profit. Per-plant numbers
+    # below are gross margin only; Net Profit only ever appears once, here.
     production_days = int(df_prod["date"].nunique()) if not df_prod.empty else 0
     fixed = daily_fixed_costs(production_days)
     gross_revenue = df_prod["revenue"].sum() if not df_prod.empty else 0
@@ -981,8 +1000,19 @@ def show(PLOT):
     net_profit = gross_margin - fixed["total"]
     net_profit_pct = (net_profit / gross_revenue * 100) if gross_revenue else 0
 
+    pipe_gross_margin  = (df_prod_pipe["revenue"].sum() - df_prod_pipe["total_cost"].sum()) if not df_prod_pipe.empty else 0
+    other_gross_margin = (df_prod_other["revenue"].sum() - df_prod_other["total_cost"].sum()) if not df_prod_other.empty else 0
+
     st.markdown("---")
     st.markdown('<div class="section-header">🏭 Factory-Wide Financial Summary</div>', unsafe_allow_html=True)
+    p1, p2, p3 = st.columns(3)
+    p1.metric("🔵 Pipe Factory — Gross Margin",  f"₹{pipe_gross_margin/LAKH:.2f}L")
+    p2.metric("⚙️ Pole Factory — Gross Margin", f"₹{other_gross_margin/LAKH:.2f}L")
+    p3.metric("= Combined Gross Margin", f"₹{gross_margin/LAKH:.2f}L",
+              help="Pipe Factory Gross Margin + Pole Factory Gross Margin")
+    st.caption("Fixed costs (EMI/Power/Admin) are one shared company-wide overhead — not split "
+               "between the two plants — so they're subtracted once, below, from the combined "
+               "gross margin, not from either plant's number above.")
     n1, n2, n3, n4 = st.columns(4)
     n1.metric("Production Value", f"₹{gross_revenue/LAKH:.2f}L")
     n2.metric("Gross Margin", f"₹{gross_margin/LAKH:.2f}L",
@@ -990,16 +1020,6 @@ def show(PLOT):
     n3.metric(f"Fixed Costs ({production_days}d × EMI+Power+Admin)", f"₹{fixed['total']/LAKH:.2f}L",
               help=f"EMI ₹{fixed['emi_cost']/LAKH:.2f}L · Power ₹{fixed['power_cost']/LAKH:.2f}L · Admin ₹{fixed['admin_cost']/LAKH:.2f}L — charged once per production day, not per product")
     n4.metric("Net Profit", f"₹{net_profit/LAKH:.2f}L", delta=f"{net_profit_pct:.1f}%")
-
-    # -- Production financials, split by category so Pipe economics never
-    # blend with Slab/Pillar/Fencing Pillar/PSC Pole economics --------------
-    is_pipe = df_prod["product"].isin(HUME_PIPE_PRODUCTS) if not df_prod.empty else pd.Series(dtype=bool)
-    df_prod_pipe  = df_prod[is_pipe]  if not df_prod.empty else df_prod
-    df_prod_other = df_prod[~is_pipe] if not df_prod.empty else df_prod
-
-    is_disp_pipe = df_disp["product"].isin(HUME_PIPE_PRODUCTS) if not df_disp.empty else pd.Series(dtype=bool)
-    df_disp_pipe  = df_disp[is_disp_pipe]  if not df_disp.empty else df_disp
-    df_disp_other = df_disp[~is_disp_pipe] if not df_disp.empty else df_disp
 
     df_ord_demand = get_orders()
     if not df_ord_demand.empty:
@@ -1013,7 +1033,7 @@ def show(PLOT):
     st.markdown("---")
 
     tabs = st.tabs([
-        "🏠 Overview", "🔵 Pipe Products", "📐 Pipe Demand", "⚙️ Other Products",
+        "🏠 Overview", "🔵 Pipe Factory", "📐 Pipe Factory Demand", "⚙️ Pole Factory",
         "🚚 Dispatch & Sales", "📦 Sales Orders", "🔍 Advanced Analytics",
     ])
 
@@ -1157,7 +1177,7 @@ def show(PLOT):
         st.markdown("---")
         oc1, oc2 = st.columns(2)
         with oc1:
-            st.markdown('<div class="section-header">🔵 Pipe Products</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">🔵 Pipe Factory</div>', unsafe_allow_html=True)
             if not df_prod_pipe.empty:
                 pm1, pm2, pm3 = st.columns(3)
                 pm1.metric("Production Value", f"₹{df_prod_pipe['revenue'].sum()/LAKH:.2f}L")
@@ -1166,7 +1186,7 @@ def show(PLOT):
             else:
                 st.caption("No pipe production this period.")
         with oc2:
-            st.markdown('<div class="section-header">⚙️ Other Precast Products</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">⚙️ Pole Factory</div>', unsafe_allow_html=True)
             if not df_prod_other.empty:
                 om1, om2, om3 = st.columns(3)
                 om1.metric("Production Value", f"₹{df_prod_other['revenue'].sum()/LAKH:.2f}L")
@@ -1206,19 +1226,31 @@ def show(PLOT):
                 st.plotly_chart(fig_inv, use_container_width=True)
 
     with tabs[1]:
-        _render_production_section(df_prod_pipe, df_disp_pipe, "Pipe Products", ACCENT, PLOT)
+        _render_production_section(df_prod_pipe, df_disp_pipe, "Pipe Factory", ACCENT, PLOT)
 
     with tabs[2]:
         _render_pipe_demand_section(df_prod_pipe, df_disp_pipe, df_ord_demand, PLOT)
 
     with tabs[3]:
-        _render_production_section(df_prod_other, df_disp_other, "Other Precast Products", ACCENT_OTHER, PLOT)
+        _render_production_section(df_prod_other, df_disp_other, "Pole Factory", ACCENT_OTHER, PLOT)
 
     with tabs[4]:
-        _render_dispatch_sales_tab(df_disp, PLOT)
+        disp_plant_filter = st.radio("Plant", ["All"] + PLANTS, horizontal=True, key="dash_disp_plant")
+        if disp_plant_filter == "All" or df_disp.empty:
+            _render_dispatch_sales_tab(df_disp, PLOT)
+        else:
+            _render_dispatch_sales_tab(
+                df_disp[df_disp["product"].map(plant_for_product) == disp_plant_filter], PLOT
+            )
 
     with tabs[5]:
-        _render_sales_orders_tab(df_disp, start, end, PLOT)
+        ord_plant_filter = st.radio("Plant", ["All"] + PLANTS, horizontal=True, key="dash_ord_plant")
+        sel_ord_plant = None if ord_plant_filter == "All" else ord_plant_filter
+        disp_for_ord = (
+            df_disp if sel_ord_plant is None or df_disp.empty
+            else df_disp[df_disp["product"].map(plant_for_product) == sel_ord_plant]
+        )
+        _render_sales_orders_tab(disp_for_ord, start, end, PLOT, plant=sel_ord_plant)
 
     with tabs[6]:
         _render_advanced_analytics_tab(df_prod, df_disp, start, end, PLOT)

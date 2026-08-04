@@ -151,6 +151,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS rm_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
+        plant TEXT,
         cement_bags REAL DEFAULT 0,
         ggbs_bags REAL DEFAULT 0,
         remarks TEXT,
@@ -232,6 +233,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS gate_entries (
         id                 INTEGER PRIMARY KEY AUTOINCREMENT,
         date               TEXT NOT NULL,
+        plant              TEXT,
         category           TEXT NOT NULL,
         direction          TEXT NOT NULL,
         item               TEXT,
@@ -321,6 +323,8 @@ def init_db():
         ("dispatch", "transport_value", "REAL DEFAULT 0"),
         ("dispatch", "transport_gst_applicable", "INTEGER DEFAULT 0"),
         ("dispatch", "transport_gst_amount", "REAL DEFAULT 0"),
+        ("rm_usage", "plant", "TEXT"),
+        ("gate_entries", "plant", "TEXT"),
     ]:
         existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
         if col not in existing:

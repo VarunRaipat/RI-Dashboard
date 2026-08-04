@@ -1,29 +1,14 @@
 import streamlit as st
 import pandas as pd
-from core.config import INVENTORY_ANCHOR_DATE
+from core.config import INVENTORY_ANCHOR_DATE, PLANTS
 from core.inventory import finished_goods_summary, rm_summary, gate_tracked_balance
 from core.ui import interactive_table, show_flashes
 
 LAKH = 100_000
 
 
-def show(PLOT):
-    show_flashes()
-    role = st.session_state.get("role", "dispatch")
-    can_export = role not in ("dispatch", "factory")
-    show_value = role not in ("dispatch", "factory")  # dispatch/factory see quantities only, no ₹ value
-
-    st.markdown("""
-    <div class="page-title">🏭 Inventory</div>
-    <div class="page-subtitle">Finished goods &amp; raw material stock — live balance</div>
-    """, unsafe_allow_html=True)
-    st.caption(f"Opening stock counted on {pd.Timestamp(INVENTORY_ANCHOR_DATE).strftime('%d-%b-%Y')}. "
-               f"Current stock = opening + production − dispatch since that date.")
-
-    # ── Finished Goods ─────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">Finished Goods</div>', unsafe_allow_html=True)
-
-    fg = finished_goods_summary()
+def _render_plant_section(plant, can_export, show_value):
+    fg = finished_goods_summary(plant=plant)
     fg_disp = fg.copy()
     for col in ["Opening", "Produced", "Dispatched", "Current Stock", "Value (₹)"]:
         fg_disp[col] = fg_disp[col].round(2)
@@ -40,20 +25,19 @@ def show(PLOT):
     fg_sum_cols = ["Opening", "Produced", "Dispatched", "Current Stock"]
     if show_value:
         total_value = fg_disp["Value (₹)"].sum()
-        st.metric("Total Finished Goods Value", f"₹{total_value/LAKH:.2f}L")
+        st.metric(f"{plant} — Finished Goods Value", f"₹{total_value/LAKH:.2f}L")
         fg_cols = fg_cols + ["Value (₹)"]
         fg_sum_cols = fg_sum_cols + ["Value (₹)"]
 
-    interactive_table(fg_disp, key="inv_fg", sum_cols=fg_sum_cols, show_cols=fg_cols,
+    interactive_table(fg_disp, key=f"inv_fg_{plant}", sum_cols=fg_sum_cols, show_cols=fg_cols,
                       show_export=can_export)
 
-    # ── Raw Materials ────────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown('<div class="section-header">Raw Materials</div>', unsafe_allow_html=True)
-    st.caption("Received quantities come from Gate Entry (\"In\" log rows for each material); "
-               "consumed comes from Production Entry.")
+    st.markdown('<div class="section-header">Raw Materials — Cement / GGBS</div>', unsafe_allow_html=True)
+    st.caption(f"{plant}'s own Cement/GGBS balance — received via Gate Entry (tagged {plant}), "
+               "consumed via this plant's Production Entries.")
 
-    rm = rm_summary()
+    rm = rm_summary(plant)
     rm_disp = rm.copy()
     for col in ["Opening", "Received", "Consumed", "Current Stock", "Value (₹)"]:
         rm_disp[col] = rm_disp[col].round(2)
@@ -64,14 +48,35 @@ def show(PLOT):
         rm_cols = rm_cols + ["Value (₹)"]
         rm_sum_cols = rm_sum_cols + ["Value (₹)"]
 
-    interactive_table(rm_disp, key="inv_rm", sum_cols=rm_sum_cols, show_cols=rm_cols,
+    interactive_table(rm_disp, key=f"inv_rm_{plant}", sum_cols=rm_sum_cols, show_cols=rm_cols,
                       show_export=can_export)
+
+
+def show(PLOT):
+    show_flashes()
+    role = st.session_state.get("role", "dispatch")
+    can_export = role not in ("dispatch", "factory")
+    show_value = role not in ("dispatch", "factory")  # dispatch/factory see quantities only, no ₹ value
+
+    st.markdown("""
+    <div class="page-title">🏭 Inventory</div>
+    <div class="page-subtitle">Finished goods &amp; raw material stock — live balance, per plant</div>
+    """, unsafe_allow_html=True)
+    st.caption(f"Opening stock counted on {pd.Timestamp(INVENTORY_ANCHOR_DATE).strftime('%d-%b-%Y')}. "
+               f"Current stock = opening + production − dispatch since that date. "
+               f"Pipe Factory and Pole Factory each carry their own separate finished-goods and "
+               f"Cement/GGBS stock.")
+
+    tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
+    for tab, plant in zip(tabs, PLANTS):
+        with tab:
+            _render_plant_section(plant, can_export, show_value)
 
     # ── Plant Equipment & Misc Parts (from Gate Entry log) ─────────────────────
     st.markdown("---")
     st.markdown('<div class="section-header">Plant Equipment &amp; Misc Parts</div>', unsafe_allow_html=True)
     st.caption("Running In/Out balance from Gate Entry, for everything besides the "
-               "raw materials tracked above.")
+               "raw materials tracked above — both plants shown together, with a Plant column.")
 
     eq = gate_tracked_balance()
     if eq.empty:
@@ -82,5 +87,5 @@ def show(PLOT):
             eq_disp[col] = eq_disp[col].round(2)
         interactive_table(eq_disp, key="inv_gate_eq",
                           sum_cols=["In", "Out", "Balance"],
-                          show_cols=["Category", "Item", "Unit", "In", "Out", "Balance"],
+                          show_cols=["Plant", "Category", "Item", "Unit", "In", "Out", "Balance"],
                           show_export=can_export)

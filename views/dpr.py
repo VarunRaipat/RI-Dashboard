@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
 from core.tz import today_ist
-from core.config import PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY
+from core.config import (
+    PRODUCTION_PRODUCTS, PRODUCT_CONFIG, RAW_MATERIALS, PLANTS, SKU_TO_PRICING_KEY,
+    plant_for_product, products_for_plant,
+)
 from core.calculations import calculate_production
 from core.db import (
     insert_production, insert_rm_usage, get_rm_prices, get_production, delete_row, update_production,
@@ -44,9 +47,15 @@ def show(PLOT):
     entry_date = c1.date_input("Date", today_ist(), key="dpr_date")
     plant      = c2.radio("Plant", PLANTS, horizontal=True, key="dpr_plant")
 
+    # Every product belongs to exactly one plant (Hume Pipes -> Pipe Factory,
+    # everything else -> Pole Factory) — filtering here instead of a free
+    # product pick makes a plant/product mismatch impossible, rather than
+    # relying on the operator to keep the two in sync.
+    plant_products = products_for_plant(PRODUCTION_PRODUCTS, plant)
+
     st.markdown('<div class="section-header">Products Made Today</div>', unsafe_allow_html=True)
-    st.caption("Add one line per pipe/product made today. Concrete, Steel, Jalli, Welding, and "
-               "Production costs are computed automatically from each product's fixed per-unit "
+    st.caption(f"Showing {plant}'s products only. Add one line per pipe/product made today. Concrete, Steel, Jalli, "
+               "Welding, and Production costs are computed automatically from each product's fixed per-unit "
                "figures (Admin > Product Cost Configuration / Pipe Diameter Rates). EMI/Power/Admin "
                "are whole-factory overheads charged once per production day, not per line — see "
                "the Dashboard for Net Profit including those.")
@@ -58,12 +67,17 @@ def show(PLOT):
 
     for i in range(n_lines):
         cols = st.columns([3, 2, 1])
-        cols[0].selectbox("Product", PRODUCTION_PRODUCTS, key=f"dpr_prod_{i}", label_visibility="collapsed")
+        # A product picked while a different Plant was selected won't be in
+        # this plant's filtered list — reset it rather than letting the
+        # selectbox raise on a stale session_state value.
+        if st.session_state.get(f"dpr_prod_{i}") not in plant_products:
+            st.session_state.pop(f"dpr_prod_{i}", None)
+        cols[0].selectbox("Product", plant_products, key=f"dpr_prod_{i}", label_visibility="collapsed")
         cols[1].number_input("Nos.", min_value=0, step=100, key=f"dpr_nos_{i}", label_visibility="collapsed")
         if n_lines > 1:
             if cols[2].button("✕", key=f"dpr_rem_{i}"):
                 for j in range(i, n_lines - 1):
-                    st.session_state[f"dpr_prod_{j}"] = st.session_state.get(f"dpr_prod_{j+1}", PRODUCTION_PRODUCTS[0])
+                    st.session_state[f"dpr_prod_{j}"] = st.session_state.get(f"dpr_prod_{j+1}", plant_products[0])
                     st.session_state[f"dpr_nos_{j}"]  = st.session_state.get(f"dpr_nos_{j+1}", 0)
                 st.session_state.dpr_lines = n_lines - 1
                 st.rerun()
@@ -111,7 +125,8 @@ def show(PLOT):
             if cement_bags > 0 or ggbs_bags > 0:
                 try:
                     insert_rm_usage({
-                        "date": str(entry_date), "cement_bags": cement_bags, "ggbs_bags": ggbs_bags,
+                        "date": str(entry_date), "plant": plant,
+                        "cement_bags": cement_bags, "ggbs_bags": ggbs_bags,
                     })
                 except Exception:
                     st.warning("⚠️ Product lines saved, but Cement/GGBS usage could not be recorded "
@@ -197,9 +212,7 @@ def show(PLOT):
                                               index=PRODUCTION_PRODUCTS.index(rrow["product"])
                                               if rrow["product"] in PRODUCTION_PRODUCTS else 0)
                     r_nos     = rc3.number_input("Nos.", min_value=0, value=int(rrow["nos"]), step=100)
-                    r_plant   = st.radio("Plant", PLANTS,
-                                        index=PLANTS.index(rrow["plant"]) if rrow.get("plant") in PLANTS else 0,
-                                        horizontal=True)
+                    st.caption(f"Plant: **{plant_for_product(r_product)}** — set automatically from the Product.")
                     submit_req = st.form_submit_button("📨 Submit Edit Request", type="primary", use_container_width=True)
 
                 if submit_req:
@@ -208,7 +221,7 @@ def show(PLOT):
                                                      pipe_diameter_config=pipe_dia_cfg)
                     new_data = {
                         "date": str(r_date), "product": r_product, "nos": r_nos,
-                        "plant": r_plant,
+                        "plant": plant_for_product(r_product),
                         **{k: r_result[k] for k in _RM_COST_FIELDS},
                     }
                     old_data = {k: rrow.get(k) for k in new_data}
@@ -278,11 +291,11 @@ def show(PLOT):
         df_rmu = df_rmu[(df_rmu["date"] >= pd.Timestamp(dpr_start)) & (df_rmu["date"] <= pd.Timestamp(dpr_end))]
         df_rmu = df_rmu.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
         df_rmu = add_ist_timestamp(df_rmu)
-        show_cols_rmu = [c for c in ["date", "cement_bags", "ggbs_bags", "remarks", "created_at"] if c in df_rmu.columns]
+        show_cols_rmu = [c for c in ["date", "plant", "cement_bags", "ggbs_bags", "remarks", "created_at"] if c in df_rmu.columns]
         interactive_table(
             df_rmu, key="dpr_rmu", show_cols=show_cols_rmu,
             sum_cols=[c for c in ["cement_bags", "ggbs_bags"] if c in df_rmu.columns],
-            rename={"date": "Date", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)", "remarks": "Remarks",
+            rename={"date": "Date", "plant": "Plant", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)", "remarks": "Remarks",
                     "created_at": "Entered At"},
             col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
                         "created_at": timestamp_col_config()},
@@ -319,9 +332,7 @@ def show(PLOT):
                                               if row["product"] in PRODUCTION_PRODUCTS else 0)
                     e_nos     = ec3.number_input("Nos.", min_value=0, value=int(row["nos"]), step=100)
 
-                    e_plant = st.radio("Plant", PLANTS,
-                                        index=PLANTS.index(row["plant"]) if row.get("plant") in PLANTS else 0,
-                                        horizontal=True)
+                    st.caption(f"Plant: **{plant_for_product(e_product)}** — set automatically from the Product.")
 
                     save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
 
@@ -331,7 +342,7 @@ def show(PLOT):
                                                     pipe_diameter_config=pipe_dia_cfg)
                     updated = {
                         "date": str(e_date), "product": e_product, "nos": e_nos,
-                        "plant": e_plant,
+                        "plant": plant_for_product(e_product),
                         **{k: result[k] for k in _RM_COST_FIELDS},
                     }
                     update_production(row_id, updated)

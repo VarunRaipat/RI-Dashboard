@@ -48,12 +48,14 @@ CREATE TABLE IF NOT EXISTS production (
 CREATE TABLE IF NOT EXISTS rm_usage (
     id              BIGSERIAL PRIMARY KEY,
     date            TEXT    NOT NULL,
+    plant           TEXT,
     cement_bags     REAL DEFAULT 0,
     ggbs_bags       REAL DEFAULT 0,
     remarks         TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rm_usage ADD COLUMN IF NOT EXISTS plant TEXT;
 
 CREATE TABLE IF NOT EXISTS dispatch (
     id              BIGSERIAL PRIMARY KEY,
@@ -254,6 +256,7 @@ CREATE TABLE IF NOT EXISTS rm_purchases (
 CREATE TABLE IF NOT EXISTS gate_entries (
     id                  BIGSERIAL PRIMARY KEY,
     date                TEXT    NOT NULL,
+    plant               TEXT,
     category            TEXT    NOT NULL,
     direction           TEXT    NOT NULL,
     item                TEXT,
@@ -336,12 +339,14 @@ ALTER TABLE pipe_diameter_config DISABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS rm_usage (
     id              BIGSERIAL PRIMARY KEY,
     date            TEXT    NOT NULL,
+    plant           TEXT,
     cement_bags     REAL DEFAULT 0,
     ggbs_bags       REAL DEFAULT 0,
     remarks         TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rm_usage ADD COLUMN IF NOT EXISTS plant TEXT;
 
 -- ── Migration: Power becomes a flat Rs.1,000/entry cost ─────────────────────
 -- Power_per_block columns (if they exist from an earlier version) are left
@@ -380,6 +385,14 @@ ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
+
+-- ── Migration: Two plants (Pipe Factory / Pole Factory) ─────────────────────
+-- Finished-good products already map 1:1 to a plant by name (see
+-- core/config.py's plant_for_product()), so production/dispatch/orders/
+-- quotations need no new column. Gate Entry (raw material receiving) and the
+-- resulting rm_usage batch record aren't tied to any one product, so they
+-- need an explicit Plant field instead.
+ALTER TABLE gate_entries ADD COLUMN IF NOT EXISTS plant TEXT;
 
 -- ── Migration: Edit Requests (non-admin "propose a fix, admin approves") ────
 -- Roles that can't directly edit a record (production/factory on DPR,

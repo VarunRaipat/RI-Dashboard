@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from core.config import (
     DEFAULT_RM_PRICES, RM_LABELS, PRODUCT_CONFIG, RAW_MATERIALS, HUME_PIPE_DIAMETERS_MM, GST_PCT,
-    PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES,
+    PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES, plant_for_product,
     EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, selling_price_unit,
     INVENTORY_PRODUCTS, RM_INVENTORY_OPENING, INVENTORY_MATERIAL_LABELS, INVENTORY_ANCHOR_DATE,
 )
@@ -370,49 +370,59 @@ def show(PLOT):
 
         with rm_sub:
             rm_options = list(RM_INVENTORY_OPENING.keys())
+            st.caption(
+                "Cement/GGBS stock is tracked separately per plant (Pipe Factory / Pole Factory) — "
+                "each plant's opening qty defaults to 0 until physically counted and entered here; "
+                "there's no meaningful way to auto-split the old single combined figure between them."
+            )
 
             if can_edit:
-                sel_rm = st.selectbox(
+                rmc1, rmc2 = st.columns(2)
+                sel_rm = rmc1.selectbox(
                     "Select Material", rm_options, key="inv_open_rm_sel",
                     format_func=lambda k: INVENTORY_MATERIAL_LABELS.get(k, k),
                 )
-                override_rm = db_opening.get(sel_rm)
-                current_rm_val = override_rm["qty"] if override_rm else RM_INVENTORY_OPENING[sel_rm]
+                sel_rm_plant = rmc2.selectbox("Plant", PLANTS, key="inv_open_rm_plant_sel")
+                rm_item_key = f"{sel_rm}::{sel_rm_plant}"
+                override_rm = db_opening.get(rm_item_key)
+                current_rm_val = override_rm["qty"] if override_rm else 0.0
 
                 with st.form("inv_open_rm_form"):
                     new_rm_val = st.number_input(
                         "Opening Qty (Bags)", value=float(current_rm_val), min_value=0.0, step=1.0,
                     )
                     if override_rm:
-                        st.caption(f"Currently a manual override — last set to {override_rm['qty']:.0f} "
+                        st.caption(f"Currently set to {override_rm['qty']:.0f} "
                                    f"by {override_rm['updated_by'] or 'unknown'} on {override_rm['updated_at']}.")
                     else:
-                        st.caption(f"Currently using the hardcoded default ({RM_INVENTORY_OPENING[sel_rm]:.0f}).")
+                        st.caption("No physical count entered yet for this plant — defaults to 0.")
                     rc1, rc2 = st.columns(2)
                     save_rm_open = rc1.form_submit_button("💾 Save Opening Qty", type="primary", use_container_width=True)
-                    reset_rm = rc2.form_submit_button("↩️ Reset to Default", use_container_width=True,
+                    reset_rm = rc2.form_submit_button("↩️ Reset to 0", use_container_width=True,
                                                        disabled=not override_rm)
                     if save_rm_open:
-                        save_inventory_opening(sel_rm, "raw_material", new_rm_val,
+                        save_inventory_opening(rm_item_key, "raw_material", new_rm_val,
                                                 st.session_state.get("username") or "")
-                        st.success(f"✅ Opening qty for {INVENTORY_MATERIAL_LABELS.get(sel_rm, sel_rm)} set to {new_rm_val:.0f}.")
+                        st.success(f"✅ Opening qty for {INVENTORY_MATERIAL_LABELS.get(sel_rm, sel_rm)} "
+                                   f"({sel_rm_plant}) set to {new_rm_val:.0f}.")
                         st.rerun()
                     if reset_rm:
-                        delete_inventory_opening(sel_rm)
-                        st.success(f"✅ {INVENTORY_MATERIAL_LABELS.get(sel_rm, sel_rm)} reset to hardcoded "
-                                   f"default ({RM_INVENTORY_OPENING[sel_rm]:.0f}).")
+                        delete_inventory_opening(rm_item_key)
+                        st.success(f"✅ {INVENTORY_MATERIAL_LABELS.get(sel_rm, sel_rm)} ({sel_rm_plant}) reset to 0.")
                         st.rerun()
 
             st.markdown("---")
             st.markdown("**All raw material opening balances**")
             rm_rows = []
             for key in rm_options:
-                override_rm = db_opening.get(key)
-                rm_rows.append({
-                    "Material": INVENTORY_MATERIAL_LABELS.get(key, key),
-                    "Opening Qty": override_rm["qty"] if override_rm else RM_INVENTORY_OPENING[key],
-                    "Source": "Manual override" if override_rm else "Default",
-                })
+                for p in PLANTS:
+                    override_rm = db_opening.get(f"{key}::{p}")
+                    rm_rows.append({
+                        "Material": INVENTORY_MATERIAL_LABELS.get(key, key),
+                        "Plant": p,
+                        "Opening Qty": override_rm["qty"] if override_rm else 0.0,
+                        "Source": "Manual entry" if override_rm else "Not yet counted (0)",
+                    })
             st.dataframe(pd.DataFrame(rm_rows), use_container_width=True, hide_index=True)
 
     # ── Tab 3: All Production ─────────────────────────────────────────────────
@@ -456,9 +466,10 @@ def show(PLOT):
             st.markdown("---")
             with st.expander("⬆️ Import Production (DPR) from CSV"):
                 st.caption(
-                    "Required columns: **date, product, nos**. Optional: **plant** "
-                    f"(defaults to \"{PLANTS[0]}\"). `product` must exactly match a product name "
-                    "from DPR Entry (e.g. \"Hume Pipe 300mm NP3 (Socket & Spigot)\"). Costs are "
+                    "Required columns: **date, product, nos**. `product` must exactly match a product name "
+                    "from DPR Entry (e.g. \"Hume Pipe 300mm NP3 (Socket & Spigot)\"). Plant is set "
+                    "automatically from the product (Hume Pipes -> Pipe Factory, everything else -> "
+                    "Pole Factory) — any **plant** column in the file is ignored. Costs are "
                     "auto-calculated the same way as a manual DPR entry."
                 )
                 prod_file = st.file_uploader("CSV file", type=["csv"], key="prod_import_file")
@@ -492,7 +503,7 @@ def show(PLOT):
                                         if nos <= 0:
                                             continue
                                         product = str(r["product"])
-                                        plant = str(r["plant"]).strip() if "plant" in imp_df.columns and pd.notna(r.get("plant")) and str(r.get("plant")).strip() else PLANTS[0]
+                                        plant = plant_for_product(product)
                                         pricing_key = SKU_TO_PRICING_KEY.get(product, product)
                                         r_date = str(pd.to_datetime(r["date"]).date())
                                         result = calculate_production(pricing_key, nos, rm, prod_cfg_i,

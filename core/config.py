@@ -291,8 +291,24 @@ QUOTATION_UNITS         = ["Nos", "Rft", "Cft", "Sqft"]
 QUOTATION_STATUS        = ["Draft", "Sent", "Accepted", "Rejected", "Expired", "Converted"]
 QUOTATION_VALIDITY_DAYS = 30
 
-# TODO: replace with real plant/unit names if production runs across more than one.
-PLANTS = ["Main Plant"]
+PLANTS = ["Pipe Factory", "Pole Factory"]
+
+# Two physically separate plants (confirmed): every Hume Pipe SKU is cast at
+# Pipe Factory; every other product (Slab, Pillar, Fencing Pillar, PSC Pole,
+# Boundary Wall, and any admin-added custom product — those are always
+# non-pipe, see sync_custom_products()) is cast at Pole Factory. Fixed 1:1
+# mapping, not a per-entry choice, so plant is derived from the product
+# instead of being a second independent field wherever a product/SKU already
+# appears (Dispatch, Sales Orders, Quotations). Works for both a full SKU
+# ("Hume Pipe 300mm NP2 (M/F)") and a bare pricing key ("Hume Pipe 300mm
+# NP2") since SKU_TO_PRICING_KEY.get() falls back to the input unchanged.
+def plant_for_product(product_or_sku: str) -> str:
+    pricing_key = SKU_TO_PRICING_KEY.get(product_or_sku, product_or_sku)
+    return "Pipe Factory" if str(pricing_key).startswith("Hume Pipe") else "Pole Factory"
+
+
+def products_for_plant(products, plant: str):
+    return [p for p in products if plant_for_product(p) == plant]
 
 # ── Payables ──────────────────────────────────────────────────────────────────
 VENDOR_CATEGORIES = {
