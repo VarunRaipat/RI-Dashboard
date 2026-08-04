@@ -181,11 +181,18 @@ def _show_dispatch_operator():
 
     c1, c2, c3 = st.columns(3)
     entry_date = c1.date_input("Date", today_ist(), key="disp_op_date")
-    # Keyed to the value itself so a fixed key doesn't "stick" to a
-    # stale number from an earlier Sale Type selection.
-    challan_no = c2.text_input("Challan No.", value=str(next_challan),
-                               key=f"disp_op_challan_{next_challan}",
-                               help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
+    # Assigned, not typed: always the last challan of this Sale Type + 1, so
+    # the sequence can't skip a number. The widget is display-only and its
+    # value is never read back — challan_no comes straight from the computed
+    # number, so a stale session_state entry can't override it. Keyed to the
+    # value itself so a fixed key doesn't "stick" to a stale number from an
+    # earlier Sale Type selection.
+    challan_no = str(next_challan)
+    c2.text_input("Challan No.", value=challan_no, disabled=True,
+                  key=f"disp_op_challan_locked_{next_challan}",
+                  help="Assigned automatically as the last challan for this Sale Type + 1, "
+                       "so no number gets skipped. Ask an admin if the paper challan book "
+                       "has a different number.")
     di_no      = c3.text_input("DI No.", key="disp_op_di")
 
     ca, cb = st.columns(2)
@@ -569,13 +576,31 @@ def show(PLOT):
 
         c1, c2, c3, c4 = st.columns(4)
         entry_date = c1.date_input("Date", today_ist(), key="disp_main_date")
-        # Keyed to the value itself so a fixed key doesn't "stick" to a
-        # stale number from an earlier Sale Type selection.
-        challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
-                                   key=f"disp_main_challan_{next_challan_main}",
-                                   help="Pre-filled with the next number for the selected Sale Type — edit if your paper challan differs.")
+        # Same auto-assignment as the operator form, but an admin keeps an
+        # explicit way out for the one case a locked field can't handle: the
+        # paper challan book having drifted from the app. Locked is the
+        # default, and the override has to be ticked per challan.
+        # Read before the checkbox widget exists — absent means locked, and
+        # ticking it reruns, so the branch below sees the new value.
+        challan_override = st.session_state.get("disp_main_challan_override", False)
+        if challan_override:
+            # Keyed to the value itself so a fixed key doesn't "stick" to a
+            # stale number from an earlier Sale Type selection.
+            challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
+                                       key=f"disp_main_challan_{next_challan_main}",
+                                       help="Manual entry — a number out of sequence leaves a gap.")
+        else:
+            # Display-only; the value is never read back, so a stale
+            # session_state entry from a previous override can't leak in.
+            challan_no = str(next_challan_main)
+            c2.text_input("Challan No.", value=challan_no, disabled=True,
+                          key=f"disp_main_challan_locked_{next_challan_main}",
+                          help="Assigned automatically as the last challan for this Sale Type + 1.")
         di_no      = c3.text_input("DI No.", key="disp_main_di")
         bill_no    = c4.text_input("Bill No.", key="disp_main_bill") if can_bill else None
+        st.checkbox("✏️ Override Challan No.", key="disp_main_challan_override",
+                    help="Only for matching a paper challan the app's sequence has drifted from — "
+                         "a manual number can leave a gap that never gets used.")
 
         known_clients = set(df_all["client_name"].dropna().astype(str)) if not df_all.empty and "client_name" in df_all.columns else set()
         known_trucks  = set(t for t in TRUCKS if t != "Other") | (
@@ -657,7 +682,8 @@ def show(PLOT):
                                    + f" — **Grand Total: ₹{(d_value + t_value + t_gst_amt):,.0f}**")
 
                 _reset_lines("disp_main", n_lines)
-                _reset_challan_fields("disp_main", extra_keys=["disp_main_bill"])
+                _reset_challan_fields("disp_main", extra_keys=["disp_main_bill",
+                                                               "disp_main_challan_override"])
                 st.rerun()
 
     # ── All Dispatch Entries (filtered by date range above) ───────────────────
