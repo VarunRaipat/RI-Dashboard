@@ -207,6 +207,26 @@ def selling_price_unit(product: str) -> str:
 
 del _blank_rates, _d, _c, _name, _slab, _pillar, _thickness_class, _thickness
 
+# ── Boundary Wall — sold per sqft (rft x height) as one Sales Order line,
+# but never itself cast or dispatched: production casts Slab + Pillar
+# separately (priced above via Admin > Product Cost Configuration), and
+# Dispatch draws down those two SKUs directly, not "Boundary Wall". These
+# mappings only feed the Boundary Wall Calculator (Sales Orders page), which
+# works out how many Slabs/Pillars a given rft+height needs, and their cost,
+# to help set/sanity-check the quoted Rs./sqft rate — confirmed by client.
+# Pillar sits 2ft below ground, so wall height = pillar length - 2ft.
+BOUNDARY_WALL_PILLAR_FOR_HEIGHT = {
+    6:  "Pillar 8'",
+    8:  "Pillar 10'",
+    10: "Pillar 12'",
+    12: "Pillar 14'",   # not yet priced (Admin > Product Cost Configuration)
+}
+# Installation labour, Rs./rft — confirmed for 6'/8'/10'; 12' not given yet.
+BOUNDARY_WALL_INSTALL_RATE_PER_RFT = {6: 95.0, 8: 90.0, 10: 95.0}
+# Slab panel length (ft) -> pillar spacing along the wall (one slab course
+# spans exactly one gap between two adjacent pillars).
+BOUNDARY_WALL_SLAB_LENGTH_FT = {"Slab 7'": 7, "Slab 8'": 8}
+
 # ── SKUs vs. pricing keys ──────────────────────────────────────────────────────
 # Joint Type doesn't change price, but a Collar pipe and an M/F pipe of the
 # same diameter+class ARE physically different stock — so each Joint Type

@@ -1,8 +1,10 @@
+import math
 import pandas as pd
 from core.config import (
     PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
     SKU_TO_PRICING_KEY, EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, GST_PCT,
-    REPAIRING_PCT_OF_PRODUCTION,
+    REPAIRING_PCT_OF_PRODUCTION, BOUNDARY_WALL_PILLAR_FOR_HEIGHT, BOUNDARY_WALL_INSTALL_RATE_PER_RFT,
+    BOUNDARY_WALL_SLAB_LENGTH_FT,
 )
 
 
@@ -79,6 +81,58 @@ def calculate_production(
         costs[f"{m['key']}_qty"]  = round(usage[m["key"]], 3)
         costs[f"{m['key']}_cost"] = round(usage[m["key"]] * rm_prices.get(m["key"], 0), 2)
     return costs
+
+
+def boundary_wall_estimate(rft: float, wall_height_ft: int, slab_product: str,
+                            rm_prices: dict, product_config: dict = None,
+                            install_rate: float = None) -> dict:
+    """Boundary Wall is sold as one Rs./sqft Sales Order line but is never
+    itself cast or dispatched — production casts Slab + Pillar separately,
+    and Dispatch draws down those two SKUs directly (see core.config's
+    BOUNDARY_WALL_* mappings, confirmed by client). Given a wall's length
+    (rft), height (ft — must be a BOUNDARY_WALL_PILLAR_FOR_HEIGHT key), and
+    which Slab panel spans the gap between pillars, works out how many
+    Pillars + Slabs the job needs and their cost, to help set/sanity-check
+    the quoted Rs./sqft rate and know what to eventually dispatch.
+
+    pillars_needed = rft / slab length (one pillar per gap)
+    slabs_needed   = (rft x height) / (slab length + 0.25 joint allowance)
+
+    `install_rate` overrides the confirmed default Rs./rft for this height
+    (e.g. for 12', which has no confirmed rate yet). Returns None if the
+    height or slab product isn't recognised.
+    """
+    slab_len = BOUNDARY_WALL_SLAB_LENGTH_FT.get(slab_product)
+    pillar_product = BOUNDARY_WALL_PILLAR_FOR_HEIGHT.get(wall_height_ft)
+    if not slab_len or not pillar_product or rft <= 0:
+        return None
+
+    pillars_exact = rft / slab_len
+    slabs_exact   = (rft * wall_height_ft) / (slab_len + 0.25)
+    pillars_needed = math.ceil(pillars_exact)
+    slabs_needed   = math.ceil(slabs_exact)
+
+    pillar_unit_cost = calculate_production(pillar_product, 1, rm_prices, product_config)["total_cost"]
+    slab_unit_cost   = calculate_production(slab_product, 1, rm_prices, product_config)["total_cost"]
+
+    rate = install_rate if install_rate is not None else BOUNDARY_WALL_INSTALL_RATE_PER_RFT.get(wall_height_ft)
+    installation_cost = round((rate or 0) * rft, 2)
+
+    pillar_total_cost = round(pillar_unit_cost * pillars_needed, 2)
+    slab_total_cost   = round(slab_unit_cost * slabs_needed, 2)
+    total_cost        = round(pillar_total_cost + slab_total_cost + installation_cost, 2)
+    area_sqft         = rft * wall_height_ft
+
+    return {
+        "pillar_product": pillar_product, "slab_product": slab_product,
+        "pillars_exact": round(pillars_exact, 2), "pillars_needed": pillars_needed,
+        "slabs_exact": round(slabs_exact, 2), "slabs_needed": slabs_needed,
+        "pillar_unit_cost": round(pillar_unit_cost, 2), "slab_unit_cost": round(slab_unit_cost, 2),
+        "pillar_total_cost": pillar_total_cost, "slab_total_cost": slab_total_cost,
+        "installation_rate": rate, "installation_cost": installation_cost,
+        "total_cost": total_cost, "area_sqft": area_sqft,
+        "cost_per_sqft": round(total_cost / area_sqft, 2) if area_sqft else 0,
+    }
 
 
 def daily_fixed_costs(production_days: int) -> dict:
