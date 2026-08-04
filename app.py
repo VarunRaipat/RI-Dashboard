@@ -559,14 +559,24 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # ── Today's snapshot ──────────────────────────────────────────────────────
+    # Respects the same two limits the rest of the app already applies:
+    #   • a plant-locked login (user_plant) sees only its own plant's products,
+    #     derived from the product name like everywhere else (dispatch.py,
+    #     inventory.py) rather than the production.plant column, which is NULL
+    #     on rows predating the two-plant migration;
+    #   • ₹ profit is shown only to the roles that get money figures at all —
+    #     the same admin/viewer pair the Dashboard nav below is gated on.
+    #     Operators still see the day's product/quantity lines, which is data
+    #     they enter themselves.
     from core.tz import today_ist
+    from core.config import plant_for_product
     _today_str = str(today_ist())
+    _show_profit = role in ("admin", "viewer")
     try:
         _df_t = _get_today_stats(_today_str)
+        if not _df_t.empty and user_plant and "product" in _df_t.columns:
+            _df_t = _df_t[_df_t["product"].map(plant_for_product) == user_plant]
         if not _df_t.empty:
-            _pft_t    = _df_t["profit"].sum()
-            _pft_cls  = "sb-today-profit" if _pft_t >= 0 else "sb-today-loss"
-            _pft_word = "profit" if _pft_t >= 0 else "loss"
             _by_prod  = _df_t.groupby("product")["nos"].sum().reset_index().sort_values("nos", ascending=False)
             _rows_html = "".join(
                 f"<div style='display:flex;justify-content:space-between;font-size:0.72rem;"
@@ -575,12 +585,21 @@ with st.sidebar:
                 f"<span style='font-weight:600'>{int(r['nos']):,}</span></div>"
                 for _, r in _by_prod.iterrows()
             )
+            if _show_profit:
+                _pft_t    = _df_t["profit"].sum()
+                _pft_cls  = "sb-today-profit" if _pft_t >= 0 else "sb-today-loss"
+                _pft_word = "profit" if _pft_t >= 0 else "loss"
+                _profit_html = (
+                    "<div style='border-top:1px solid rgba(36,106,139,0.15);margin:6px 0 4px'></div>"
+                    f"<div class='{_pft_cls}'>₹{abs(_pft_t):,.0f} {_pft_word}</div>"
+                )
+            else:
+                _profit_html = ""
             st.markdown(f"""
             <div class="sb-today">
-                <div class="sb-today-label">TODAY</div>
+                <div class="sb-today-label">TODAY{f' · {user_plant}' if user_plant else ''}</div>
                 {_rows_html}
-                <div style='border-top:1px solid rgba(36,106,139,0.15);margin:6px 0 4px'></div>
-                <div class="{_pft_cls}">₹{abs(_pft_t):,.0f} {_pft_word}</div>
+                {_profit_html}
             </div>
             """, unsafe_allow_html=True)
     except Exception:
