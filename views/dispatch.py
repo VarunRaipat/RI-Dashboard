@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from core.tz import today_ist
-from core.config import DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START, CHALLAN_NO_IGNORE, selling_price_unit
+from core.config import (
+    DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START,
+    CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant,
+)
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch, create_edit_request, get_edit_requests
 from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
@@ -76,11 +79,14 @@ def _init_lines(key):
         st.session_state[key] = 1
 
 
-def _product_lines(prefix, n_lines):
+def _product_lines(prefix, n_lines, products=None):
     """Renders `n_lines` Product/Qty Ordered/Qty Dispatched/Rate rows (plain
     widgets, not inside a form, so Add/Remove can rerun immediately — same
     pattern as DPR's multi-product lines). Returns nothing; read back via
-    st.session_state[f"{prefix}_prod_{i}"] etc. at submit time."""
+    st.session_state[f"{prefix}_prod_{i}"] etc. at submit time. `products`
+    lets a plant-locked operator only pick from their plant's products;
+    defaults to every dispatchable product."""
+    products = products or DISPATCH_PRODUCTS
     header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
     header[0].markdown("**Product**")
     header[1].markdown("**Qty Ordered**")
@@ -89,7 +95,9 @@ def _product_lines(prefix, n_lines):
 
     for i in range(n_lines):
         cols = st.columns([3, 1.7, 1.7, 1.5, 0.5])
-        cols[0].selectbox("Product", DISPATCH_PRODUCTS, key=f"{prefix}_prod_{i}", label_visibility="collapsed")
+        if st.session_state.get(f"{prefix}_prod_{i}") not in products:
+            st.session_state.pop(f"{prefix}_prod_{i}", None)
+        cols[0].selectbox("Product", products, key=f"{prefix}_prod_{i}", label_visibility="collapsed")
         cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
         cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
         cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
@@ -149,13 +157,16 @@ def _reset_challan_fields(prefix, extra_keys=()):
 
 def _show_dispatch_operator():
     """Minimal view for dispatch role: challan entry form only."""
-    st.markdown("""
-    <div class="page-title">🚚 Dispatch Entry</div>
+    locked_plant = st.session_state.get("plant")
+
+    st.markdown(f"""
+    <div class="page-title">🚚 Dispatch Entry{f' — {locked_plant}' if locked_plant else ''}</div>
     <div class="page-subtitle">Enter challan details below — add multiple products if one challan covers more than one.</div>
     """, unsafe_allow_html=True)
 
     df_known  = get_dispatch()
     df_orders = get_orders()
+    op_products = products_for_plant(DISPATCH_PRODUCTS, locked_plant) if locked_plant else DISPATCH_PRODUCTS
     known_clients = set(df_known["client_name"].dropna().astype(str)) if not df_known.empty and "client_name" in df_known.columns else set()
     known_trucks  = set(t for t in TRUCKS if t != "Other") | (
         set(df_known["truck_no"].dropna().astype(str)) if not df_known.empty and "truck_no" in df_known.columns else set())
@@ -182,7 +193,7 @@ def _show_dispatch_operator():
     delivery_addr = cb.text_input("Delivery Address", key="disp_op_addr")
 
     st.markdown("**Products in this Challan**")
-    _product_lines("disp_op", st.session_state["disp_op_lines"])
+    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products)
     _show_di_warnings(di_no, _line_products("disp_op", st.session_state["disp_op_lines"]), df_orders, df_known)
 
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")
@@ -198,7 +209,7 @@ def _show_dispatch_operator():
     if st.button("✅ Submit Challan", type="primary", use_container_width=True, key="disp_op_submit"):
         n_lines = st.session_state["disp_op_lines"]
         lines = [
-            (st.session_state.get(f"disp_op_prod_{i}", DISPATCH_PRODUCTS[0]),
+            (st.session_state.get(f"disp_op_prod_{i}", op_products[0]),
              st.session_state.get(f"disp_op_qo_{i}", 0) or 0,
              st.session_state.get(f"disp_op_qd_{i}", 0) or 0,
              st.session_state.get(f"disp_op_rate_{i}", 0.0) or 0.0)
@@ -261,6 +272,8 @@ def _show_dispatch_operator():
     st.markdown("---")
     st.markdown('<div class="section-header">Recent Challans</div>', unsafe_allow_html=True)
     df_op_rec = get_dispatch()
+    if locked_plant and not df_op_rec.empty:
+        df_op_rec = df_op_rec[df_op_rec["product"].map(plant_for_product) == locked_plant]
     if not df_op_rec.empty:
         df_op_rec["date"] = pd.to_datetime(df_op_rec["date"], errors="coerce")
         df_op_rec = df_op_rec.sort_values(["date", "id"], ascending=[False, False]).head(200).reset_index(drop=True)
@@ -284,6 +297,8 @@ def _show_dispatch_operator():
         st.caption("Pick the challan, enter the corrected values, and submit — an admin reviews "
                    "and approves before it changes the live record.")
         df_req = get_dispatch()
+        if locked_plant and not df_req.empty:
+            df_req = df_req[df_req["product"].map(plant_for_product) == locked_plant]
         if df_req.empty:
             st.info("No challans to request an edit for.")
         else:
@@ -307,9 +322,9 @@ def _show_dispatch_operator():
 
                 rd, re_, rf = st.columns(3)
                 r_client = rd.text_input("Client Name", value=str(rrow.get("client_name", "") or ""))
-                r_prod   = re_.selectbox("Product", DISPATCH_PRODUCTS,
-                                         index=DISPATCH_PRODUCTS.index(rrow["product"])
-                                         if rrow.get("product") in DISPATCH_PRODUCTS else 0)
+                r_prod   = re_.selectbox("Product", op_products,
+                                         index=op_products.index(rrow["product"])
+                                         if rrow.get("product") in op_products else 0)
                 r_addr   = rf.text_input("Delivery Address", value=str(rrow.get("delivery_address", "") or ""))
 
                 rg, rh, ri_ = st.columns(3)
@@ -382,6 +397,7 @@ def show(PLOT):
     df_orders = get_orders()
     if not df_all.empty:
         df_all["date"] = pd.to_datetime(df_all["date"], errors="coerce")
+        df_all["Plant"] = df_all["product"].map(plant_for_product)
 
     # ── Date range filter ─────────────────────────────────────────────────────
     _today = today_ist()
@@ -421,6 +437,13 @@ def show(PLOT):
             kp1, kp2 = st.columns(2)
             kp1.metric("Sale A Dispatch Value", f"₹{a_val/LAKH:.2f}L")
             kp2.metric("Sale B Dispatch Value", f"₹{b_val/LAKH:.2f}L")
+
+        pipe_val = df.loc[df["Plant"] == "Pipe Factory", "dispatch_value"].sum()
+        pole_val = df.loc[df["Plant"] == "Pole Factory", "dispatch_value"].sum()
+        pf1, pf2 = st.columns(2)
+        pf1.metric("🔵 Pipe Factory Dispatch Value", f"₹{pipe_val/LAKH:.2f}L")
+        pf2.metric("⚙️ Pole Factory Dispatch Value", f"₹{pole_val/LAKH:.2f}L")
+        st.caption(f"Combined = Total Dispatch Value above (₹{total_val/LAKH:.2f}L).")
 
         st.markdown("---")
 
@@ -651,11 +674,11 @@ def show(PLOT):
     # Display uses the filtered df (same date range as analytics)
     df = df.sort_values(["date","id"], ascending=[False,False]).reset_index(drop=True) if not df.empty else df_edit
 
-    from core.ui import table_by_sale_type, add_ist_timestamp, timestamp_col_config
+    from core.ui import table_by_plant, add_ist_timestamp, timestamp_col_config
 
     df = add_ist_timestamp(df)
 
-    show_cols = ["date","challan_no","di_no","bill_no","sale_type","client_name","product",
+    show_cols = ["date","challan_no","di_no","bill_no","sale_type","Plant","client_name","product",
                  "qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount",
                  "truck_no","driver_name","trip_distance","remarks","created_at"]
     show_cols = [c for c in show_cols if c in df.columns]
@@ -677,13 +700,13 @@ def show(PLOT):
 
     if not df_pending.empty:
         st.markdown(f'<div class="warn-box">⏳ <b>{len(df_pending)} challans pending invoice</b> — Bill No. not yet assigned</div>', unsafe_allow_html=True)
-        table_by_sale_type(df_pending, key="disp_pend", sum_cols=sum_cols,
-                           show_cols=show_cols, rename=rename_map, col_config=col_cfg)
+        table_by_plant(df_pending, key="disp_pend", sum_cols=sum_cols,
+                       show_cols=show_cols, rename=rename_map, col_config=col_cfg)
 
     if not df_billed.empty:
         st.markdown('<div class="section-header">Invoiced Challans</div>', unsafe_allow_html=True)
-        table_by_sale_type(df_billed, key="disp_billed", sum_cols=sum_cols,
-                           show_cols=show_cols, rename=rename_map, col_config=col_cfg)
+        table_by_plant(df_billed, key="disp_billed", sum_cols=sum_cols,
+                       show_cols=show_cols, rename=rename_map, col_config=col_cfg)
 
     # ── Edit Entry (uses all data, not date-filtered) ─────────────────────────
     if can_bill:

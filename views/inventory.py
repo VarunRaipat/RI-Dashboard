@@ -57,9 +57,10 @@ def show(PLOT):
     role = st.session_state.get("role", "dispatch")
     can_export = role not in ("dispatch", "factory")
     show_value = role not in ("dispatch", "factory")  # dispatch/factory see quantities only, no ₹ value
+    locked_plant = st.session_state.get("plant")
 
-    st.markdown("""
-    <div class="page-title">🏭 Inventory</div>
+    st.markdown(f"""
+    <div class="page-title">🏭 Inventory{f' — {locked_plant}' if locked_plant else ''}</div>
     <div class="page-subtitle">Finished goods &amp; raw material stock — live balance, per plant</div>
     """, unsafe_allow_html=True)
     st.caption(f"Opening stock counted on {pd.Timestamp(INVENTORY_ANCHOR_DATE).strftime('%d-%b-%Y')}. "
@@ -67,25 +68,30 @@ def show(PLOT):
                f"Pipe Factory and Pole Factory each carry their own separate finished-goods and "
                f"Cement/GGBS stock.")
 
-    tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
-    for tab, plant in zip(tabs, PLANTS):
-        with tab:
-            _render_plant_section(plant, can_export, show_value)
+    if locked_plant:
+        _render_plant_section(locked_plant, can_export, show_value)
+    else:
+        tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
+        for tab, plant in zip(tabs, PLANTS):
+            with tab:
+                _render_plant_section(plant, can_export, show_value)
 
     # ── Plant Equipment & Misc Parts (from Gate Entry log) ─────────────────────
     st.markdown("---")
     st.markdown('<div class="section-header">Plant Equipment &amp; Misc Parts</div>', unsafe_allow_html=True)
     st.caption("Running In/Out balance from Gate Entry, for everything besides the "
-               "raw materials tracked above — both plants shown together, with a Plant column.")
+               "raw materials tracked above" + ("." if locked_plant else " — both plants shown together, with a Plant column."))
 
-    eq = gate_tracked_balance()
+    eq = gate_tracked_balance(plant=locked_plant)
     if eq.empty:
         st.info("No equipment/parts movement logged yet.")
     else:
         eq_disp = eq.copy()
         for col in ["In", "Out", "Balance"]:
             eq_disp[col] = eq_disp[col].round(2)
+        eq_cols = ["Category", "Item", "Unit", "In", "Out", "Balance"] if locked_plant else \
+            ["Plant", "Category", "Item", "Unit", "In", "Out", "Balance"]
         interactive_table(eq_disp, key="inv_gate_eq",
                           sum_cols=["In", "Out", "Balance"],
-                          show_cols=["Plant", "Category", "Item", "Unit", "In", "Out", "Balance"],
+                          show_cols=eq_cols,
                           show_export=can_export)

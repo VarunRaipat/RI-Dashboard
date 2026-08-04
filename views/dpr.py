@@ -42,10 +42,16 @@ def show(PLOT):
     pipe_dia_cfg = get_pipe_diameter_config()
     _init_lines()
 
+    locked_plant = st.session_state.get("plant")
+
     st.markdown('<div class="section-header">Basic Info</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     entry_date = c1.date_input("Date", today_ist(), key="dpr_date")
-    plant      = c2.radio("Plant", PLANTS, horizontal=True, key="dpr_plant")
+    if locked_plant:
+        plant = locked_plant
+        c2.text_input("Plant", value=plant, disabled=True)
+    else:
+        plant = c2.radio("Plant", PLANTS, horizontal=True, key="dpr_plant")
 
     # Every product belongs to exactly one plant (Hume Pipes -> Pipe Factory,
     # everything else -> Pole Factory) — filtering here instead of a free
@@ -171,6 +177,8 @@ def show(PLOT):
         if not df_op.empty:
             df_op["date"] = pd.to_datetime(df_op["date"], errors="coerce")
             df_op = df_op[(df_op["date"] >= pd.Timestamp(op_start)) & (df_op["date"] <= pd.Timestamp(op_end))]
+            if locked_plant:
+                df_op = df_op[df_op["plant"] == locked_plant]
             df_op = df_op.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
             df_op = add_ist_timestamp(df_op)
             interactive_table(
@@ -190,6 +198,8 @@ def show(PLOT):
             st.caption("Pick the entry, enter the corrected values, and submit — an admin reviews "
                        "and approves before it changes the live record.")
             df_req = get_production()
+            if locked_plant and not df_req.empty:
+                df_req = df_req[df_req["plant"] == locked_plant]
             if df_req.empty:
                 st.info("No entries to request an edit for.")
             else:
@@ -205,12 +215,13 @@ def show(PLOT):
                 rrow    = df_req.loc[df_req["label"] == sel_req].iloc[0]
                 rrow_id = int(rrow["id"])
 
+                _req_products = products_for_plant(PRODUCTION_PRODUCTS, locked_plant) if locked_plant else PRODUCTION_PRODUCTS
                 with st.form(f"dpr_req_form_{rrow_id}"):
                     rc1, rc2, rc3 = st.columns(3)
                     r_date    = rc1.date_input("Date", pd.to_datetime(rrow["date"]))
-                    r_product = rc2.selectbox("Product", PRODUCTION_PRODUCTS,
-                                              index=PRODUCTION_PRODUCTS.index(rrow["product"])
-                                              if rrow["product"] in PRODUCTION_PRODUCTS else 0)
+                    r_product = rc2.selectbox("Product", _req_products,
+                                              index=_req_products.index(rrow["product"])
+                                              if rrow["product"] in _req_products else 0)
                     r_nos     = rc3.number_input("Nos.", min_value=0, value=int(rrow["nos"]), step=100)
                     st.caption(f"Plant: **{plant_for_product(r_product)}** — set automatically from the Product.")
                     submit_req = st.form_submit_button("📨 Submit Edit Request", type="primary", use_container_width=True)

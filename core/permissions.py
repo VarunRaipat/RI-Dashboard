@@ -14,15 +14,23 @@ from core.db import get_user_permissions as _get_user_permissions_rows
 
 
 def get_all_users():
-    """{username: {"password":..., "role":..., "name":...}} — same source
-    app.py's login screen reads (Streamlit secrets' [users] section,
-    falling back to the empty core.config.USERS if secrets aren't set)."""
+    """{username: {"password":..., "role":..., "name":..., "plant":...}} —
+    same source app.py's login screen reads (Streamlit secrets' [users]
+    section, falling back to the empty core.config.USERS if secrets aren't
+    set). "plant" is optional — set it (Pipe Factory / Pole Factory) on a
+    production/factory/dispatch user's secrets.toml entry to lock their
+    login to that one plant only (no picker, no other plant's data visible);
+    leave it unset — as admin/viewer/headoffice always are — to see both
+    plants, same as before."""
     import streamlit as st
     from core.config import USERS as _users_default
     try:
         sec = st.secrets.get("users", {})
         if sec:
-            return {k: {"password": v["password"], "role": v["role"], "name": v["name"]} for k, v in sec.items()}
+            return {
+                k: {"password": v["password"], "role": v["role"], "name": v["name"], "plant": v.get("plant")}
+                for k, v in sec.items()
+            }
     except Exception:
         pass
     return _users_default

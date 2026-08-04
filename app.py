@@ -34,6 +34,7 @@ if "role" not in st.session_state:
     st.session_state.role     = None
     st.session_state.username = None
     st.session_state.name     = None
+    st.session_state.plant    = None
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -512,8 +513,10 @@ if st.session_state.role is None:
                     st.session_state.role     = user["role"]
                     st.session_state.username = username
                     st.session_state.name     = user["name"]
+                    st.session_state.plant    = user.get("plant")
                     from core.db import log_activity
-                    log_activity("login", "Auth", f"{username} ({user['role']}) logged in")
+                    log_activity("login", "Auth", f"{username} ({user['role']}) logged in"
+                                 + (f" · {user['plant']}" if user.get("plant") else ""))
                     st.rerun()
                 else:
                     log_failed_login(username)
@@ -544,12 +547,14 @@ with st.sidebar:
     st.image("assets/Logo.png", use_container_width=True)
     st.markdown('<div class="sb-sub">RI · Manufacturing Portal</div></div>', unsafe_allow_html=True)
 
+    user_plant = st.session_state.get("plant")
     st.markdown(f"""
     <div class="sb-user">
         <div class="sb-user-name">👤 &nbsp;{name}</div>
         <span class="sb-badge {ROLE_BADGE.get(role, '')}">
             {role.upper()}
         </span>
+        {f'<span class="sb-badge sb-badge-viewer" style="margin-left:4px">{user_plant.upper()}</span>' if user_plant else ''}
     </div>
     """, unsafe_allow_html=True)
 
@@ -616,7 +621,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     if st.button("Sign Out", use_container_width=True):
-        for k in ["role", "username", "name"]:
+        for k in ["role", "username", "name", "plant"]:
             st.session_state[k] = None
         st.rerun()
 

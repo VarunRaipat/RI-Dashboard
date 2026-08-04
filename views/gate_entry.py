@@ -107,9 +107,15 @@ def show(PLOT):
 
     _init_lines("gate_lines")
 
+    locked_plant = st.session_state.get("plant")
+
     c0, c1, c2, c3 = st.columns(4)
-    plant      = c0.selectbox("Plant", PLANTS, key="gate_plant",
-                              help="Which plant this material/equipment is for — RM stock is tracked separately per plant.")
+    if locked_plant:
+        plant = locked_plant
+        c0.text_input("Plant", value=plant, disabled=True)
+    else:
+        plant = c0.selectbox("Plant", PLANTS, key="gate_plant",
+                             help="Which plant this material/equipment is for — RM stock is tracked separately per plant.")
     entry_date = c1.date_input("Date", today_ist(), key="gate_date")
     direction  = c2.selectbox("In / Out", GATE_DIRECTIONS, key="gate_direction")
     truck_no   = c3.text_input("Truck No.", key="gate_truck")
@@ -164,6 +170,8 @@ def show(PLOT):
         st.markdown("---")
         st.markdown('<div class="section-header">Gate Entry Log</div>', unsafe_allow_html=True)
         df = get_gate_entries()
+        if locked_plant and not df.empty:
+            df = df[df["plant"] == locked_plant]
         if df.empty:
             st.info("No gate entries yet.")
         else:
