@@ -191,7 +191,7 @@ for _d in HUME_PIPE_DIAMETERS_MM:
 for _slab in ["Slab 7'", "Slab 8'", "Slab Design 7'"]:
     PRODUCT_CONFIG[_slab] = {"display": _slab, **_blank_rates()}
 
-for _pillar in ["Pillar 8'", "Pillar 10'", "Pillar 12'", "Pillar 14'"]:
+for _pillar in ["Pillar 8'", "Pillar 10'", "Pillar 12'"]:
     PRODUCT_CONFIG[_pillar] = {"display": _pillar, **_blank_rates()}
 
 PRODUCT_CONFIG["Fencing Pillar"] = {"display": "Fencing Pillar", **_blank_rates()}
@@ -215,13 +215,14 @@ del _blank_rates, _d, _c, _name, _slab, _pillar, _thickness_class, _thickness
 # works out how many Slabs/Pillars a given rft+height needs, and their cost,
 # to help set/sanity-check the quoted Rs./sqft rate — confirmed by client.
 # Pillar sits 2ft below ground, so wall height = pillar length - 2ft.
+# 12' wall (would need Pillar 14') isn't offered — Pillar 14' isn't a
+# stocked product.
 BOUNDARY_WALL_PILLAR_FOR_HEIGHT = {
     6:  "Pillar 8'",
     8:  "Pillar 10'",
     10: "Pillar 12'",
-    12: "Pillar 14'",   # not yet priced (Admin > Product Cost Configuration)
 }
-# Installation labour, Rs./rft — confirmed for 6'/8'/10'; 12' not given yet.
+# Installation labour, Rs./rft — confirmed for 6'/8'/10'.
 BOUNDARY_WALL_INSTALL_RATE_PER_RFT = {6: 95.0, 8: 90.0, 10: 95.0}
 # Slab panel length (ft) -> pillar spacing along the wall (one slab course
 # spans exactly one gap between two adjacent pillars).
@@ -255,16 +256,24 @@ _PIPE_SKUS_PRODUCTION = [
     for joint in _production_joint_types_for(d, c)
 ]
 _NON_PIPE_PRODUCTS = [p for p in PRODUCT_CONFIG if not p.startswith("Hume Pipe")]
+# Boundary Wall is quoted per sqft on Sales Orders, but is never itself cast
+# or dispatched — production casts Slab + Pillar separately, and Dispatch
+# draws down those two SKUs directly (confirmed by client; see the
+# BOUNDARY_WALL_* mappings above). So it's excluded from the production,
+# dispatch, and finished-goods-inventory product lists (there's no stock
+# for something never produced or dispatched) — it only stays in
+# ORDER_PRODUCTS, since that's the only place it's actually sold as a line.
+_NON_PIPE_PRODUCTION_DISPATCH = [p for p in _NON_PIPE_PRODUCTS if p != "Boundary Wall"]
 
 SKU_TO_PRICING_KEY = {sku: sku.rsplit(" (", 1)[0] for sku in _PIPE_SKUS}
 SKU_TO_PRICING_KEY.update({p: p for p in _NON_PIPE_PRODUCTS})
 
 # NP4 is not a DPR option — production is always logged as NP3 (or NP2).
-PRODUCTION_PRODUCTS = _PIPE_SKUS_PRODUCTION + _NON_PIPE_PRODUCTS
+PRODUCTION_PRODUCTS = _PIPE_SKUS_PRODUCTION + _NON_PIPE_PRODUCTION_DISPATCH
 # NP4 IS sellable — Sales Orders / Dispatch can select it, and it draws down
 # the matching NP3 SKU's stock (see INVENTORY_PRODUCTS below).
 ORDER_PRODUCTS    = _PIPE_SKUS + _NON_PIPE_PRODUCTS
-DISPATCH_PRODUCTS = _PIPE_SKUS + _NON_PIPE_PRODUCTS
+DISPATCH_PRODUCTS = _PIPE_SKUS + _NON_PIPE_PRODUCTION_DISPATCH
 
 HUME_PIPE_PRODUCTS = list(_PIPE_SKUS)
 
@@ -406,7 +415,7 @@ for _d in HUME_PIPE_DIAMETERS_MM:
                 tuple(_disp_names) if len(_disp_names) > 1 else _sku,
                 0,
             ))
-INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTS]
+INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTION_DISPATCH]
 
 del _d, _c, _joint, _sku, _prod_names, _disp_names, _collar_sku, _np4_sku
 
