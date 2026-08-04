@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from core.tz import today_ist
 from core.config import (
-    DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, CHALLAN_NO_START,
+    DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, challan_no_start,
     CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant,
 )
 from core.calculations import dispatch_value, gst_split, transport_charge
@@ -127,6 +127,37 @@ def _line_products(prefix, n_lines):
     ]
 
 
+def _challan_plant(prefix, n_lines, locked_plant=None):
+    """Which plant's challan book this entry belongs to, since Challan No. is
+    a separate sequence per plant (see CHALLAN_NO_START).
+
+    A plant-locked login settles it outright. Otherwise it comes from the
+    products on the lines — read regardless of Qty Dispatched, unlike
+    _line_products(), so the number is known as soon as the form renders
+    rather than only once quantities are typed. Returns None if the lines
+    span both plants: that challan would have to come out of two different
+    books at once, so there's no single number to assign it.
+    """
+    if locked_plant:
+        return locked_plant
+    plants = {
+        plant_for_product(p)
+        for p in (st.session_state.get(f"{prefix}_prod_{i}") for i in range(n_lines))
+        if p
+    }
+    return plants.pop() if len(plants) == 1 else None
+
+
+def _plant_rows(df, plant):
+    """Rows belonging to one plant's challan book. Plant is derived from the
+    product name rather than a column, because dispatch has no plant column —
+    products map 1:1 to a plant, so the two-plant migration didn't add one
+    (see supabase_schema.sql)."""
+    if df is None or df.empty or not plant or "product" not in df.columns:
+        return df
+    return df[df["product"].map(plant_for_product) == plant]
+
+
 def _show_di_warnings(di_no, products, df_orders, df_disp):
     """Surface di_dispatch_warnings() as inline warnings under the DI No.
     field — non-blocking, since a legitimate dispatch can predate its Sales
@@ -174,25 +205,31 @@ def _show_dispatch_operator():
         set(df_known["driver_name"].dropna().astype(str)) if not df_known.empty and "driver_name" in df_known.columns else set())
 
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
-    next_challan = next_sequence_number(df_known, "challan_no", sale_type, date_col="date",
-                                        start=CHALLAN_NO_START.get(sale_type, 1),
-                                        ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
     _init_lines("disp_op_lines")
+
+    # Challan No. runs as its own sequence per plant, so both the max it
+    # counts up from and the duplicate check are scoped to this plant's rows
+    # only — the other plant's challans are a different book entirely.
+    challan_plant = _challan_plant("disp_op", st.session_state["disp_op_lines"], locked_plant)
+    df_seq        = _plant_rows(df_known, challan_plant)
+    next_challan  = next_sequence_number(df_seq, "challan_no", sale_type, date_col="date",
+                                         start=challan_no_start(challan_plant, sale_type),
+                                         ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
 
     c1, c2, c3 = st.columns(3)
     entry_date = c1.date_input("Date", today_ist(), key="disp_op_date")
-    # Assigned, not typed: always the last challan of this Sale Type + 1, so
-    # the sequence can't skip a number. The widget is display-only and its
-    # value is never read back — challan_no comes straight from the computed
-    # number, so a stale session_state entry can't override it. Keyed to the
-    # value itself so a fixed key doesn't "stick" to a stale number from an
-    # earlier Sale Type selection.
+    # Assigned, not typed: always this plant's last challan for this Sale
+    # Type + 1, so the sequence can't skip a number. The widget is
+    # display-only and its value is never read back — challan_no comes
+    # straight from the computed number, so a stale session_state entry
+    # can't override it. Keyed to the value itself so a fixed key doesn't
+    # "stick" to a stale number from an earlier Sale Type selection.
     challan_no = str(next_challan)
     c2.text_input("Challan No.", value=challan_no, disabled=True,
-                  key=f"disp_op_challan_locked_{next_challan}",
-                  help="Assigned automatically as the last challan for this Sale Type + 1, "
-                       "so no number gets skipped. Ask an admin if the paper challan book "
-                       "has a different number.")
+                  key=f"disp_op_challan_locked_{challan_plant}_{next_challan}",
+                  help=f"Assigned automatically — {challan_plant or 'this plant'}'s last "
+                       f"{sale_type} challan + 1, so no number gets skipped. Ask an admin "
+                       f"if the paper challan book has a different number.")
     di_no      = c3.text_input("DI No.", key="disp_op_di")
 
     ca, cb = st.columns(2)
@@ -224,8 +261,12 @@ def _show_dispatch_operator():
         ]
         lines = [l for l in lines if l[2] > 0]
 
-        if is_duplicate(df_known, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
-            st.error(f"Challan No. {challan_no} already exists. Refresh the page and try again.")
+        if challan_plant is None:
+            st.error("This challan mixes Pipe Factory and Pole Factory products. Each plant has "
+                     "its own challan book, so split it into one challan per plant.")
+        elif is_duplicate(df_seq, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
+            st.error(f"Challan No. {challan_no} already exists for {challan_plant}. "
+                     f"Refresh the page and try again.")
         elif not lines:
             st.error("Add at least one product line with Qty Dispatched > 0.")
         elif any(rate <= 0 for _, _, _, rate in lines):
@@ -569,10 +610,16 @@ def show(PLOT):
         st.caption("Add multiple products if one challan covers more than one.")
 
         sale_type          = st.selectbox("Sale Type", SALE_TYPES, key="disp_main_sale_type")
-        next_challan_main  = next_sequence_number(df_all, "challan_no", sale_type, date_col="date",
-                                                  start=CHALLAN_NO_START.get(sale_type, 1),
-                                                  ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
         _init_lines("disp_main_lines")
+
+        # Per-plant challan book — see the operator form above. No locked
+        # plant here, so the book is whichever plant the product lines
+        # belong to; None means they span both and no number can be assigned.
+        challan_plant_main = _challan_plant("disp_main", st.session_state["disp_main_lines"])
+        df_seq_main        = _plant_rows(df_all, challan_plant_main)
+        next_challan_main  = next_sequence_number(df_seq_main, "challan_no", sale_type, date_col="date",
+                                                  start=challan_no_start(challan_plant_main, sale_type),
+                                                  ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
 
         c1, c2, c3, c4 = st.columns(4)
         entry_date = c1.date_input("Date", today_ist(), key="disp_main_date")
@@ -583,19 +630,27 @@ def show(PLOT):
         # Read before the checkbox widget exists — absent means locked, and
         # ticking it reruns, so the branch below sees the new value.
         challan_override = st.session_state.get("disp_main_challan_override", False)
-        if challan_override:
+        if challan_plant_main is None and not challan_override:
+            # Nothing sensible to assign until the lines settle on one plant.
+            challan_no = ""
+            c2.text_input("Challan No.", value="—", disabled=True,
+                          key="disp_main_challan_mixed",
+                          help="Products span both plants — pick one plant's products, "
+                               "or tick Override to enter the number yourself.")
+        elif challan_override:
             # Keyed to the value itself so a fixed key doesn't "stick" to a
             # stale number from an earlier Sale Type selection.
             challan_no = c2.text_input("Challan No.", value=str(next_challan_main),
-                                       key=f"disp_main_challan_{next_challan_main}",
+                                       key=f"disp_main_challan_{challan_plant_main}_{next_challan_main}",
                                        help="Manual entry — a number out of sequence leaves a gap.")
         else:
             # Display-only; the value is never read back, so a stale
             # session_state entry from a previous override can't leak in.
             challan_no = str(next_challan_main)
             c2.text_input("Challan No.", value=challan_no, disabled=True,
-                          key=f"disp_main_challan_locked_{next_challan_main}",
-                          help="Assigned automatically as the last challan for this Sale Type + 1.")
+                          key=f"disp_main_challan_locked_{challan_plant_main}_{next_challan_main}",
+                          help=f"Assigned automatically — {challan_plant_main}'s last "
+                               f"{sale_type} challan + 1.")
         di_no      = c3.text_input("DI No.", key="disp_main_di")
         bill_no    = c4.text_input("Bill No.", key="disp_main_bill") if can_bill else None
         st.checkbox("✏️ Override Challan No.", key="disp_main_challan_override",
@@ -636,8 +691,14 @@ def show(PLOT):
             ]
             lines = [l for l in lines if l[2] > 0]
 
-            if is_duplicate(df_all, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
-                st.error(f"Challan No. {challan_no} already exists. Refresh the page and try again.")
+            if not str(challan_no).strip():
+                st.error("This challan mixes Pipe Factory and Pole Factory products, so there's no "
+                         "single challan book to number it from. Split it into one challan per "
+                         "plant, or tick Override Challan No. and enter the number yourself.")
+            elif is_duplicate(df_seq_main, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
+                st.error(f"Challan No. {challan_no} already exists"
+                         + (f" for {challan_plant_main}" if challan_plant_main else "")
+                         + ". Refresh the page and try again.")
             elif not lines:
                 st.error("Add at least one product line with Qty Dispatched > 0.")
             elif any(rate <= 0 for _, _, _, rate in lines):

@@ -295,12 +295,34 @@ PAYMENT_MODES = ["Cash", "Bank Transfer", "Credit", "GPAY", "PhonePe", "Other"]
 
 SALE_TYPES = ["Sale A", "Sale B"]
 
-# Floors for auto-suggested Challan No. / DI No. (core/sequencing.py's
-# next_sequence_number) — Sale A continues normally (last used + 1, no
-# floor needed) since it already has history. Sale B is a fresh sale type
-# with no dispatch history yet, so its Challan No. and DI No. sequences
-# need an explicit starting point instead of defaulting to 1 (confirmed).
-CHALLAN_NO_START = {"Sale B": 356}
+# Floors for the auto-assigned Challan No. (core/sequencing.py's
+# next_sequence_number). Each plant keeps its own physical challan book, so
+# Challan No. runs as a separate sequence per (plant, Sale Type) — Pipe
+# Factory challan 406 and Pole Factory challan 406 are two different
+# challans in two different books, and neither plant's numbering is affected
+# by how many challans the other one writes.
+#
+# A floor is only needed where the book was already in use before the app
+# started recording it — the app then picks up from that number instead of
+# from 1. Pipe Factory's Sale A book is the one sequence the app has full
+# history for, so it has no floor and simply continues from its own max.
+# Pipe Factory Sale B (356) was confirmed earlier; Pole Factory's Sale A
+# (406) and Sale B (176) are the client's current paper positions, so the
+# next challan the app assigns is 406/176 and it counts up from there.
+# A (plant, sale_type) pair with no entry here just starts at 1.
+CHALLAN_NO_START = {
+    ("Pipe Factory", "Sale B"): 356,
+    ("Pole Factory", "Sale A"): 406,
+    ("Pole Factory", "Sale B"): 176,
+}
+
+
+def challan_no_start(plant, sale_type):
+    return CHALLAN_NO_START.get((plant, sale_type), 1)
+
+
+# DI No. is not split per plant — a DI is raised against a Sales Order, which
+# can legitimately span both plants, so it stays one sequence per Sale Type.
 DI_NO_START      = {"Sale B": 1560}
 
 # One-time correction: a Sale A dispatch entry (URC Construction, 1-Apr-2026)
