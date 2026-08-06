@@ -27,13 +27,31 @@ HEADERS = {
 }
 
 
+# Seconds before a stalled Supabase read or Gmail handshake is given up on.
+# Neither call had a timeout, so a connection that opened and then went quiet
+# would hang the job until GitHub's 6-hour default killed it — a whole day
+# with no report and nothing in the log to say why.
+HTTP_TIMEOUT = 30
+SMTP_TIMEOUT = 60
+
+
 def _fetch(table, date_filter=True):
     params = {"select": "*", "limit": "1000"}
     if date_filter:
         params["date"] = f"eq.{TODAY}"
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, params=params)
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, params=params,
+                     timeout=HTTP_TIMEOUT)
+    # Fail the run rather than returning no rows. An empty list here is
+    # indistinguishable from a genuinely quiet day, so a failed read used to
+    # send a perfectly normal-looking report claiming zero production, ₹0
+    # profit and "No production recorded today" — worse than no report at
+    # all, because nobody can tell it's wrong. A non-zero exit makes GitHub
+    # send its workflow-failure notification instead.
     if r.status_code != 200:
-        return []
+        raise RuntimeError(
+            f"Supabase read of '{table}' failed with HTTP {r.status_code}: "
+            f"{r.text[:300]}"
+        )
     return r.json()
 
 
@@ -181,7 +199,7 @@ def send_email(html, no_prod):
     msg["To"]      = TO_EMAIL
     msg.attach(MIMEText(html, "html"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=SMTP_TIMEOUT) as server:
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
 
