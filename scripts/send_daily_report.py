@@ -3,6 +3,7 @@ Daily RI report — runs via GitHub Actions every evening at 8pm IST.
 Fetches today's production + dispatch from Supabase and emails the owner.
 """
 import os
+import re
 import requests
 import smtplib
 import sys
@@ -14,7 +15,20 @@ SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 GMAIL_USER   = os.environ["GMAIL_USER"]
 GMAIL_PASS   = os.environ["GMAIL_APP_PASSWORD"]
-TO_EMAIL     = os.environ.get("REPORT_TO_EMAIL", GMAIL_USER)
+
+
+def _recipients(raw):
+    """The report can go to more than one person: set REPORT_TO_EMAIL to a
+    comma- or semicolon-separated list ("owner@x.com, manager@y.com").
+    A single address still works exactly as before, and an unset or blank
+    value falls back to the sending account. Blanks left by a trailing
+    separator are dropped and repeats removed, so nobody gets two copies
+    of the same report."""
+    parts = [p.strip() for p in re.split(r"[,;]", raw or "")]
+    return list(dict.fromkeys(p for p in parts if p)) or [GMAIL_USER]
+
+
+TO_EMAILS = _recipients(os.environ.get("REPORT_TO_EMAIL"))
 
 REPORT_DATE = date.today() - timedelta(days=1)
 TODAY = str(REPORT_DATE)
@@ -196,14 +210,17 @@ def send_email(html, no_prod):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"RI Reports <{GMAIL_USER}>"
-    msg["To"]      = TO_EMAIL
+    # Everyone on the list is a visible To: recipient — this is an internal
+    # report going to colleagues who know each other, so there's no reason
+    # to hide the list behind Bcc.
+    msg["To"]      = ", ".join(TO_EMAILS)
     msg.attach(MIMEText(html, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=SMTP_TIMEOUT) as server:
         server.login(GMAIL_USER, GMAIL_PASS)
-        server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
+        server.sendmail(GMAIL_USER, TO_EMAILS, msg.as_string())
 
-    print(f"Report sent to {TO_EMAIL}")
+    print(f"Report sent to {len(TO_EMAILS)} recipient(s): {', '.join(TO_EMAILS)}")
 
 
 if __name__ == "__main__":
