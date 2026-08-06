@@ -32,6 +32,14 @@ def next_sequence_number(df, column, sale_type, date_col=None, start=1, ignore=(
     typo'd challan_no) from the max calculation, without touching the
     stored record that still shows the typo — so a one-off out-of-sequence
     number doesn't drag every future suggestion up with it.
+
+    The returned number is always one no record in this same scope already
+    uses. Normally max+1 is free anyway, but an `ignore`d value still sits
+    on a real record, and a `start` floor can land on top of one too — in
+    both cases the number is skipped rather than handed out, since callers
+    reject a duplicate on submit (see is_duplicate) and the Challan No.
+    field is auto-assigned, so a colliding suggestion would be a dead end
+    rather than something the operator could type past.
     """
     if df is None or df.empty or "sale_type" not in df.columns or column not in df.columns:
         return start
@@ -41,10 +49,13 @@ def next_sequence_number(df, column, sale_type, date_col=None, start=1, ignore=(
         if df.empty:
             return start
     subset = df.loc[df["sale_type"] == sale_type, column].dropna().astype(str).str.strip()
-    nums = pd.to_numeric(subset, errors="coerce").dropna()
-    if ignore:
-        nums = nums[~nums.isin(ignore)]
-    return max(int(nums.max()) + 1, start) if not nums.empty else start
+    all_nums = pd.to_numeric(subset, errors="coerce").dropna()
+    nums = all_nums[~all_nums.isin(ignore)] if ignore else all_nums
+    candidate = max(int(nums.max()) + 1, start) if not nums.empty else start
+    taken = set(all_nums.astype(int))
+    while candidate in taken:
+        candidate += 1
+    return candidate
 
 
 def is_duplicate(df, column, value, sale_type=None, date_col=None):

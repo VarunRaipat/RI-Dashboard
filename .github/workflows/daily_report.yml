@@ -9,6 +9,11 @@ on:
 jobs:
   send-report:
     runs-on: ubuntu-latest
+    # The whole job takes ~20 seconds. Without this it would inherit GitHub's
+    # 6-hour default, so anything that stalls burns most of a day before it
+    # fails — and the failure notification arrives long after the report was
+    # due. Ten minutes is generous for a job this size.
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repo
