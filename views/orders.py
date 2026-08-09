@@ -234,12 +234,16 @@ def show(PLOT):
     else:
         di_no_display = ""
 
+    # Assigned, not typed — always this Sale Type's last DI No. + 1, so the
+    # sequence can't skip a number or get overwritten with an arbitrary
+    # value (same convention as Dispatch's auto-assigned Challan No.).
     # Keyed to the value itself (not a fixed key) so Streamlit always shows
     # the freshly computed number — a fixed key would "stick" to whatever
     # was in session_state from the first render and ignore later `value=`.
     di_no_input  = h1.text_input("DI No.", value=di_no_display, key=f"ord_di_no_{di_no_display}",
-                                 disabled=(di_mode == "Add product to existing DI" and existing_dis),
-                                 help="Pre-filled with the next number for the selected Sale Type — edit if your paper DI differs."
+                                 disabled=True,
+                                 help="Assigned automatically — this Sale Type's last DI No. + 1, so no "
+                                      "number gets skipped or duplicated. Ask an admin if it needs to differ."
                                  if not (di_mode == "Add product to existing DI" and existing_dis)
                                  else "Adding to an existing DI — number is fixed.")
     order_date   = h2.date_input("Order Date", value=today_ist(), key="ord_date")
