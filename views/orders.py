@@ -46,56 +46,59 @@ def show(PLOT):
     <div class="page-subtitle">Order entry · Dispatch tracking · DI pipeline</div>
     """, unsafe_allow_html=True)
 
-    with st.expander("🧮 Boundary Wall Calculator — Slabs/Pillars needed + cost"):
-        st.caption(
-            "Boundary Wall is quoted as one Rs./sqft line on the DI, but it's never itself cast or "
-            "dispatched — production casts Slab + Pillar separately, and Dispatch draws down those "
-            "two SKUs directly. Use this to work out how many of each a job needs, and sanity-check "
-            "the Rs./sqft you quote."
-        )
-        bwc1, bwc2, bwc3 = st.columns(3)
-        bw_rft = bwc1.number_input("Wall Length (rft)", min_value=0.0, step=10.0, key="bw_calc_rft")
-        bw_height_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
-        bw_height = bwc2.selectbox(
-            "Wall Height (ft)", bw_height_opts, key="bw_calc_height",
-            format_func=lambda h: f"{h}' (uses {BOUNDARY_WALL_PILLAR_FOR_HEIGHT[h]})",
-        )
-        bw_slab = bwc3.selectbox("Slab Type", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key="bw_calc_slab")
+    # Cost/margin data (Pillar/Slab/Installation cost, cost-per-sqft) isn't
+    # for headoffice's eyes — they only handle billing/DI paperwork.
+    if role != "headoffice":
+        with st.expander("🧮 Boundary Wall Calculator — Slabs/Pillars needed + cost"):
+            st.caption(
+                "Boundary Wall is quoted as one Rs./sqft line on the DI, but it's never itself cast or "
+                "dispatched — production casts Slab + Pillar separately, and Dispatch draws down those "
+                "two SKUs directly. Use this to work out how many of each a job needs, and sanity-check "
+                "the Rs./sqft you quote."
+            )
+            bwc1, bwc2, bwc3 = st.columns(3)
+            bw_rft = bwc1.number_input("Wall Length (rft)", min_value=0.0, step=10.0, key="bw_calc_rft")
+            bw_height_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
+            bw_height = bwc2.selectbox(
+                "Wall Height (ft)", bw_height_opts, key="bw_calc_height",
+                format_func=lambda h: f"{h}' (uses {BOUNDARY_WALL_PILLAR_FOR_HEIGHT[h]})",
+            )
+            bw_slab = bwc3.selectbox("Slab Type", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key="bw_calc_slab")
 
-        _default_rate = BOUNDARY_WALL_INSTALL_RATE_PER_RFT.get(bw_height)
-        bw_rate = st.number_input(
-            "Installation Rate (Rs./rft)",
-            value=float(_default_rate) if _default_rate is not None else 0.0,
-            min_value=0.0, step=1.0, key=f"bw_calc_rate_{bw_height}",
-            help=("Pre-filled with the confirmed rate for this height — edit if it's changed."
-                  if _default_rate is not None else
-                  "No confirmed installation rate yet for this height — enter one."),
-        )
+            _default_rate = BOUNDARY_WALL_INSTALL_RATE_PER_RFT.get(bw_height)
+            bw_rate = st.number_input(
+                "Installation Rate (Rs./rft)",
+                value=float(_default_rate) if _default_rate is not None else 0.0,
+                min_value=0.0, step=1.0, key=f"bw_calc_rate_{bw_height}",
+                help=("Pre-filled with the confirmed rate for this height — edit if it's changed."
+                      if _default_rate is not None else
+                      "No confirmed installation rate yet for this height — enter one."),
+            )
 
-        if bw_rft > 0:
-            from core.calculations import boundary_wall_estimate
-            from core.db import get_rm_prices, get_product_config
-            est = boundary_wall_estimate(bw_rft, bw_height, bw_slab, get_rm_prices(),
-                                         get_product_config(), install_rate=bw_rate)
-            if est:
-                e1, e2, e3, e4 = st.columns(4)
-                e1.metric("Pillars Needed", f"{est['pillars_needed']} ({est['pillar_product']})",
-                         help=f"Exact: {est['pillars_exact']} — rounded up to a whole pillar")
-                e2.metric("Slabs Needed", f"{est['slabs_needed']} ({est['slab_product']})",
-                         help=f"Exact: {est['slabs_exact']} — rounded up to a whole slab")
-                e3.metric("Area", f"{est['area_sqft']:,.0f} sqft")
-                e4.metric("Cost / sqft", f"₹{est['cost_per_sqft']:.2f}",
-                         help="Production cost only (Slab + Pillar + Installation) — add your margin "
-                              "on top to get the quoted Rs./sqft rate.")
+            if bw_rft > 0:
+                from core.calculations import boundary_wall_estimate
+                from core.db import get_rm_prices, get_product_config
+                est = boundary_wall_estimate(bw_rft, bw_height, bw_slab, get_rm_prices(),
+                                             get_product_config(), install_rate=bw_rate)
+                if est:
+                    e1, e2, e3, e4 = st.columns(4)
+                    e1.metric("Pillars Needed", f"{est['pillars_needed']} ({est['pillar_product']})",
+                             help=f"Exact: {est['pillars_exact']} — rounded up to a whole pillar")
+                    e2.metric("Slabs Needed", f"{est['slabs_needed']} ({est['slab_product']})",
+                             help=f"Exact: {est['slabs_exact']} — rounded up to a whole slab")
+                    e3.metric("Area", f"{est['area_sqft']:,.0f} sqft")
+                    e4.metric("Cost / sqft", f"₹{est['cost_per_sqft']:.2f}",
+                             help="Production cost only (Slab + Pillar + Installation) — add your margin "
+                                  "on top to get the quoted Rs./sqft rate.")
 
-                b1, b2, b3, b4 = st.columns(4)
-                b1.metric("Pillar Cost", f"₹{est['pillar_total_cost']:,.0f}",
-                         help=f"₹{est['pillar_unit_cost']:.2f}/pc × {est['pillars_needed']}")
-                b2.metric("Slab Cost", f"₹{est['slab_total_cost']:,.0f}",
-                         help=f"₹{est['slab_unit_cost']:.2f}/pc × {est['slabs_needed']}")
-                b3.metric("Installation Cost", f"₹{est['installation_cost']:,.0f}",
-                         help=f"₹{est['installation_rate']:.0f}/rft × {bw_rft:.0f} rft")
-                b4.metric("Total Cost", f"₹{est['total_cost']:,.0f}")
+                    b1, b2, b3, b4 = st.columns(4)
+                    b1.metric("Pillar Cost", f"₹{est['pillar_total_cost']:,.0f}",
+                             help=f"₹{est['pillar_unit_cost']:.2f}/pc × {est['pillars_needed']}")
+                    b2.metric("Slab Cost", f"₹{est['slab_total_cost']:,.0f}",
+                             help=f"₹{est['slab_unit_cost']:.2f}/pc × {est['slabs_needed']}")
+                    b3.metric("Installation Cost", f"₹{est['installation_cost']:,.0f}",
+                             help=f"₹{est['installation_rate']:.0f}/rft × {bw_rft:.0f} rft")
+                    b4.metric("Total Cost", f"₹{est['total_cost']:,.0f}")
 
     if st.session_state.get("last_di_pdf"):
         st.markdown(
