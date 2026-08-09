@@ -116,7 +116,17 @@ def show(PLOT):
         if pcol2.button("✕ Dismiss", key="dismiss_last_di_pdf", use_container_width=True):
             del st.session_state["last_di_pdf"]
             del st.session_state["last_di_no"]
+            st.session_state.pop("last_di_bw_summaries", None)
             st.rerun()
+
+        # Slab/Pillar quantities needed for any Boundary Wall line(s) just
+        # saved — quantities only, no cost (visible to headoffice too).
+        for est in st.session_state.get("last_di_bw_summaries", []):
+            bw1, bw2, bw3 = st.columns(3)
+            bw1.metric("Pillars Needed", f"{est['pillars_needed']} ({est['pillar_product']})")
+            bw2.metric("Slabs Needed", f"{est['slabs_needed']} ({est['slab_product']})")
+            bw3.metric("Area", f"{est['area_sqft']:,.0f} sqft")
+
         st.markdown("---")
 
     df_orders = get_orders()
@@ -362,6 +372,19 @@ def show(PLOT):
                 st.session_state.order_lines = n_lines - 1
                 st.rerun()
 
+        # Boundary Wall: optional dimensions so a Slab/Pillar quantity
+        # summary (no cost — this is visible to headoffice too) can be shown
+        # right after the DI is saved. Doesn't touch Qty (sqft)/Rate above —
+        # those are still entered as normal.
+        if st.session_state.get(f"ord_prod_{i}") == "Boundary Wall":
+            bwc = st.columns([2, 2, 2, 4])
+            bwc[0].number_input("Wall Length (rft)", min_value=0.0, step=10.0, key=f"ord_bw_rft_{i}")
+            _bw_h_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
+            bwc[1].selectbox("Wall Height (ft)", _bw_h_opts, key=f"ord_bw_height_{i}",
+                             format_func=lambda h: f"{h}'")
+            bwc[2].selectbox("Slab Type", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key=f"ord_bw_slab_{i}")
+            bwc[3].caption("Optional — fill this in to get a Slabs/Pillars needed summary after saving.")
+
     ca, cb = st.columns([1, 5])
     if ca.button("➕ Add Product", key="ord_add_line"):
         st.session_state.order_lines += 1
@@ -416,12 +439,25 @@ def show(PLOT):
             }
             saved = 0
             pdf_lines = []
+            bw_summaries = []
             for i in range(st.session_state.order_lines):
                 qty_v  = float(st.session_state.get(f"ord_qty_{i}", 0) or 0)
                 rate_v = float(st.session_state.get(f"ord_rate_{i}", 0.0) or 0.0)
                 if qty_v <= 0:
                     continue
                 prod = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
+                if prod == "Boundary Wall":
+                    bw_rft = float(st.session_state.get(f"ord_bw_rft_{i}", 0) or 0)
+                    if bw_rft > 0:
+                        from core.calculations import boundary_wall_estimate
+                        from core.db import get_rm_prices, get_product_config
+                        est = boundary_wall_estimate(
+                            bw_rft, st.session_state.get(f"ord_bw_height_{i}"),
+                            st.session_state.get(f"ord_bw_slab_{i}"),
+                            get_rm_prices(), get_product_config(),
+                        )
+                        if est:
+                            bw_summaries.append(est)
                 gst_amt, total_final = gst_split(qty_v * rate_v, gst_applicable)
                 # Per-unit transport applies to every line; a Flat amount is
                 # billed once per DI, so it only goes on the first line of a
@@ -456,6 +492,7 @@ def show(PLOT):
                 pdf_header = dict(common_fields)
                 st.session_state["last_di_pdf"] = generate_dispatch_instruction(di_no_final, pdf_header, pdf_lines)
                 st.session_state["last_di_no"]  = di_no_final
+                st.session_state["last_di_bw_summaries"] = bw_summaries
                 flash(f"✅ Order saved — DI {di_no_final}")
                 # Reset lines plus every header/client field so the next order
                 # starts from a clean form instead of silently reusing this
@@ -465,7 +502,7 @@ def show(PLOT):
                 # them each time.
                 st.session_state.order_lines = 1
                 for k in list(st.session_state.keys()):
-                    if k.startswith(("ord_prod_", "ord_qty_", "ord_rate_", "ord_total_",
+                    if k.startswith(("ord_prod_", "ord_qty_", "ord_rate_", "ord_total_", "ord_bw_",
                                       "ord_contact_person_", "ord_phone_", "ord_office_",
                                       "ord_client_type_", "ord_addr_", "ord_site_person_",
                                       "ord_site_phone_")):
