@@ -7,7 +7,10 @@ from core.config import (
     CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant,
 )
 from core.calculations import dispatch_value, gst_split, transport_charge
-from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch, create_edit_request, get_edit_requests
+from core.db import (
+    insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch,
+    create_edit_request, get_edit_requests, get_product_config,
+)
 from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 from core.visibility import di_dispatch_warnings
@@ -79,14 +82,22 @@ def _init_lines(key):
         st.session_state[key] = 1
 
 
-def _product_lines(prefix, n_lines, products=None):
+def _product_lines(prefix, n_lines, products=None, locked_plant=None):
     """Renders `n_lines` Product/Qty Ordered/Qty Dispatched/Rate rows (plain
     widgets, not inside a form, so Add/Remove can rerun immediately — same
     pattern as DPR's multi-product lines). Returns nothing; read back via
     st.session_state[f"{prefix}_prod_{i}"] etc. at submit time. `products`
     lets a plant-locked operator only pick from their plant's products;
-    defaults to every dispatchable product."""
+    defaults to every dispatchable product.
+
+    Pole Factory products (Slab/Pillar/PSC Pole/Fencing Pillar) are sold at
+    the fixed price admin already set in Product Cost Configuration — the
+    Pole operator shouldn't be typing/overriding a price, so when
+    `locked_plant` is "Pole Factory", Rate is pulled from that config and
+    the field is locked. Pipe Factory rates stay manual (client-negotiated
+    per order), as does the unrestricted admin/headoffice flow."""
     products = products or DISPATCH_PRODUCTS
+    cfg = get_product_config() if locked_plant == "Pole Factory" else None
     header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
     header[0].markdown("**Product**")
     header[1].markdown("**Qty Ordered**")
@@ -100,7 +111,16 @@ def _product_lines(prefix, n_lines, products=None):
         cols[0].selectbox("Product", products, key=f"{prefix}_prod_{i}", label_visibility="collapsed")
         cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
         cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
-        cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
+
+        product_i  = st.session_state.get(f"{prefix}_prod_{i}", products[0])
+        fixed_rate = cfg.get(product_i, {}).get("selling_price", 0.0) if cfg else 0.0
+        if fixed_rate > 0:
+            st.session_state[f"{prefix}_rate_{i}"] = fixed_rate
+            cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}",
+                                 label_visibility="collapsed", disabled=True,
+                                 help="Fixed price set in Admin > Product Cost Configuration.")
+        else:
+            cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
         _row_unit = selling_price_unit(st.session_state.get(f"{prefix}_prod_{i}", ""))
         if _row_unit != "nos":
             cols[3].caption(f"₹/{_row_unit} for this product")
@@ -237,7 +257,7 @@ def _show_dispatch_operator():
     delivery_addr = cb.text_input("Delivery Address", key="disp_op_addr")
 
     st.markdown("**Products in this Challan**")
-    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products)
+    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products, locked_plant=locked_plant)
     _show_di_warnings(di_no, _line_products("disp_op", st.session_state["disp_op_lines"]), df_orders, df_known)
 
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")
