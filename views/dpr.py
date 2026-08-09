@@ -257,7 +257,7 @@ def show(PLOT):
                 st.dataframe(mine_disp, use_container_width=True, hide_index=True)
         return
 
-    # ── Recent entries ────────────────────────────────────────────────────────
+    # ── Recent entries — one tab per plant, never mixed ─────────────────────────
     st.markdown("---")
     st.markdown('<div class="section-header">Recent DPR Entries</div>', unsafe_allow_html=True)
     from core.ui import interactive_table, date_range_filter
@@ -270,31 +270,25 @@ def show(PLOT):
         df = df.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
         df = add_ist_timestamp(df)
 
-        show_cols = ["date","product","nos","plant",
-                     "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
-                     "emi_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
-                     ] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + ["created_at"]
-        show_cols = [c for c in show_cols if c in df.columns]
-        rename = {
-            "date":"Date","product":"Product","nos":"Nos.","plant":"Plant",
-            "rm_cost":"RM Cost","production_cost":"Production","loading_unloading_cost":"Loading/Unloading",
-            "power_cost":"Power","welding_cost":"Welding","jalli_cost":"Jalli","emi_cost":"EMI",
-            "admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
-            "profit":"Profit","profit_pct":"Profit %","created_at":"Entered At",
-            **{f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS},
-        }
-        sum_cols = [c for c in ["nos","revenue","rm_cost","production_cost","loading_unloading_cost",
-                                 "power_cost","welding_cost","jalli_cost","emi_cost","admin_cost","misc_cost",
-                                 "total_cost","profit"] if c in df.columns]
-        col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
-                   "created_at": timestamp_col_config()}
-        interactive_table(df, key="dpr_rec", sum_cols=sum_cols, show_cols=show_cols,
-                          rename=rename, col_config=col_cfg)
-    else:
-        st.info("No entries yet. Submit your first DPR above.")
+    show_cols = ["date","product","nos",
+                 "rm_cost","production_cost","loading_unloading_cost","power_cost","welding_cost","jalli_cost",
+                 "emi_cost","admin_cost","misc_cost","total_cost","revenue","profit","profit_pct",
+                 ] + [f"{m['key']}_qty" for m in RAW_MATERIALS] + ["created_at"]
+    rename = {
+        "date":"Date","product":"Product","nos":"Nos.",
+        "rm_cost":"RM Cost","production_cost":"Production","loading_unloading_cost":"Loading/Unloading",
+        "power_cost":"Power","welding_cost":"Welding","jalli_cost":"Jalli","emi_cost":"EMI",
+        "admin_cost":"Admin","misc_cost":"Misc","total_cost":"Total Cost","revenue":"Revenue",
+        "profit":"Profit","profit_pct":"Profit %","created_at":"Entered At",
+        **{f"{m['key']}_qty": f"{m['label']} ({m['unit']})" for m in RAW_MATERIALS},
+    }
+    sum_cols = ["nos","revenue","rm_cost","production_cost","loading_unloading_cost",
+                "power_cost","welding_cost","jalli_cost","emi_cost","admin_cost","misc_cost",
+                "total_cost","profit"]
+    col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+               "created_at": timestamp_col_config()}
 
-    # ── Recent RM usage (Cement/GGBS) ──────────────────────────────────────────
-    st.markdown('<div class="section-header">Recent Cement/GGBS Usage</div>', unsafe_allow_html=True)
+    # ── Recent RM usage (Cement/GGBS) — same per-plant tabs ─────────────────────
     from core.db import get_rm_usage
     df_rmu = get_rm_usage()
     if not df_rmu.empty:
@@ -302,17 +296,34 @@ def show(PLOT):
         df_rmu = df_rmu[(df_rmu["date"] >= pd.Timestamp(dpr_start)) & (df_rmu["date"] <= pd.Timestamp(dpr_end))]
         df_rmu = df_rmu.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
         df_rmu = add_ist_timestamp(df_rmu)
-        show_cols_rmu = [c for c in ["date", "plant", "cement_bags", "ggbs_bags", "remarks", "created_at"] if c in df_rmu.columns]
-        interactive_table(
-            df_rmu, key="dpr_rmu", show_cols=show_cols_rmu,
-            sum_cols=[c for c in ["cement_bags", "ggbs_bags"] if c in df_rmu.columns],
-            rename={"date": "Date", "plant": "Plant", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)", "remarks": "Remarks",
-                    "created_at": "Entered At"},
-            col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
-                        "created_at": timestamp_col_config()},
-        )
-    else:
-        st.info("No Cement/GGBS usage recorded yet.")
+    show_cols_rmu = ["date", "cement_bags", "ggbs_bags", "remarks", "created_at"]
+    rename_rmu = {"date": "Date", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)",
+                  "remarks": "Remarks", "created_at": "Entered At"}
+
+    tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
+    for tab, plant in zip(tabs, PLANTS):
+        with tab:
+            df_p = df[df["plant"] == plant] if not df.empty else df
+            if not df_p.empty:
+                interactive_table(df_p, key=f"dpr_rec_{plant}", sum_cols=sum_cols,
+                                  show_cols=[c for c in show_cols if c in df_p.columns],
+                                  rename=rename, col_config=col_cfg)
+            else:
+                st.info("No entries yet for this plant.")
+
+            st.markdown('<div class="section-header">Recent Cement/GGBS Usage</div>', unsafe_allow_html=True)
+            df_rmu_p = df_rmu[df_rmu["plant"] == plant] if not df_rmu.empty else df_rmu
+            if not df_rmu_p.empty:
+                interactive_table(
+                    df_rmu_p, key=f"dpr_rmu_{plant}",
+                    show_cols=[c for c in show_cols_rmu if c in df_rmu_p.columns],
+                    sum_cols=[c for c in ["cement_bags", "ggbs_bags"] if c in df_rmu_p.columns],
+                    rename=rename_rmu,
+                    col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                                "created_at": timestamp_col_config()},
+                )
+            else:
+                st.info("No Cement/GGBS usage recorded yet for this plant.")
 
     # ── Edit entry ────────────────────────────────────────────────────────────
     if can_edit_dpr:

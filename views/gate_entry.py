@@ -198,19 +198,30 @@ def show(PLOT):
                 st.info("No gate entries in this date range.")
                 return
             df = add_ist_timestamp(df)
-            show_cols = ["date", "plant", "category", "direction", "item", "challan_no", "invoice_no",
+            show_cols = ["date", "category", "direction", "item", "challan_no", "invoice_no",
                          "truck_no", "qty", "unit", "supplier_name", "site", "remarks", "created_at"]
-            show_cols = [c for c in show_cols if c in df.columns]
             rename = {
-                "date": "Date", "plant": "Plant", "category": "Category", "direction": "In/Out", "item": "Item",
+                "date": "Date", "category": "Category", "direction": "In/Out", "item": "Item",
                 "challan_no": "Challan", "invoice_no": "Invoice", "truck_no": "Truck",
                 "qty": "Qty", "unit": "Unit", "supplier_name": "Supplier", "site": "Site",
                 "remarks": "Remarks", "created_at": "Entered At",
             }
-            interactive_table(df, key="gate_log", show_cols=show_cols, rename=rename,
-                              sum_cols=["qty"],
-                              col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
-                                          "created_at": timestamp_col_config()})
+            col_cfg = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+                       "created_at": timestamp_col_config()}
+            if locked_plant:
+                interactive_table(df, key="gate_log", show_cols=[c for c in show_cols if c in df.columns],
+                                  rename=rename, sum_cols=["qty"], col_config=col_cfg)
+            else:
+                tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
+                for tab, plant_name in zip(tabs, PLANTS):
+                    with tab:
+                        df_p = df[df["plant"] == plant_name]
+                        if df_p.empty:
+                            st.info("No gate entries for this plant in this date range.")
+                        else:
+                            interactive_table(df_p, key=f"gate_log_{plant_name}",
+                                              show_cols=[c for c in show_cols if c in df_p.columns],
+                                              rename=rename, sum_cols=["qty"], col_config=col_cfg)
 
             df["label"] = (
                 df["date"].dt.strftime("%d-%b-%Y") + " | " + df["category"].fillna("") + " | " +
