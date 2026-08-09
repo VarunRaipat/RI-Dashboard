@@ -3,7 +3,6 @@ import pandas as pd
 from core.tz import today_ist
 from core.config import GATE_CATEGORIES, GATE_DIRECTIONS, GATE_UNITS, GATE_RM_ITEMS, PLANTS
 from core.db import insert_gate_entry, get_gate_entries, delete_gate_entry, update_gate_entry
-from core.sequencing import is_duplicate
 from core.ui import (interactive_table, flash, show_flashes, date_range_filter,
                      supplier_name_field, site_name_field, unit_field, item_name_field,
                      add_ist_timestamp, timestamp_col_config)
@@ -139,12 +138,27 @@ def show(PLOT):
                  disabled=not can_add_gate):
         valid_lines = [l for l in lines if l[2] > 0]
         dup_no = challan_no.strip() or invoice_no.strip()
-        is_dup = (
-            (challan_no.strip() and is_duplicate(df_known, "challan_no", challan_no)) or
-            (invoice_no.strip() and is_duplicate(df_known, "invoice_no", invoice_no))
-        )
-        if is_dup:
-            st.error(f"An entry with Challan/Invoice No. \"{dup_no}\" already exists. "
+
+        # A challan/invoice number can legitimately recur (a later, separate
+        # delivery against the same running challan) — so the duplicate
+        # check must only fire when the SAME item was already logged against
+        # that SAME challan/invoice, not merely whenever the number repeats.
+        def _already_logged(no_col, no_val, item):
+            no_val = no_val.strip()
+            if not no_val or df_known.empty or no_col not in df_known.columns:
+                return False
+            same_no = df_known[df_known[no_col].astype(str).str.strip().str.lower() == no_val.lower()]
+            if same_no.empty or "item" not in same_no.columns:
+                return False
+            return (same_no["item"].astype(str).str.strip().str.lower() == item.strip().lower()).any()
+
+        dup_items = sorted({
+            item for _, item, _, _ in valid_lines
+            if _already_logged("challan_no", challan_no, item) or _already_logged("invoice_no", invoice_no, item)
+        })
+
+        if dup_items:
+            st.error(f"Already logged against Challan/Invoice No. \"{dup_no}\": {', '.join(dup_items)}. "
                      f"Change it if this is a genuinely new entry.")
         elif not valid_lines:
             st.error("Add at least one item with Quantity > 0.")
