@@ -348,7 +348,23 @@ def show(PLOT):
         # variants of the same diameter+class are separate physical stock,
         # even though they share one price (see SKU_TO_PRICING_KEY).
         cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"ord_prod_{i}", label_visibility="collapsed")
-        cols[1].number_input("Qty", min_value=0.0, step=100.0,   key=f"ord_qty_{i}",   label_visibility="collapsed")
+        _prod_i = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
+
+        # Boundary Wall: Wall Length/Height/Slab Type are REQUIRED (not just
+        # an optional add-on) — Qty (sqft) is derived from them automatically
+        # instead of being typed separately, so headoffice can't skip past
+        # this and lose the Slab/Pillar summary shown after saving.
+        _bw_locked = False
+        if _prod_i == "Boundary Wall":
+            _bw_rft = st.session_state.get(f"ord_bw_rft_{i}", 0) or 0
+            _bw_h   = st.session_state.get(f"ord_bw_height_{i}")
+            if _bw_rft > 0 and _bw_h:
+                st.session_state[f"ord_qty_{i}"] = _bw_rft * _bw_h
+                _bw_locked = True
+
+        cols[1].number_input("Qty", min_value=0.0, step=100.0,   key=f"ord_qty_{i}",   label_visibility="collapsed",
+                             disabled=_bw_locked,
+                             help="Calculated as Wall Length × Height below." if _bw_locked else None)
         cols[2].number_input("Rate", min_value=0.0, step=0.5, key=f"ord_rate_{i}", label_visibility="collapsed")
         _row_unit = selling_price_unit(st.session_state.get(f"ord_prod_{i}", ""))
         if _row_unit != "nos":
@@ -372,18 +388,15 @@ def show(PLOT):
                 st.session_state.order_lines = n_lines - 1
                 st.rerun()
 
-        # Boundary Wall: optional dimensions so a Slab/Pillar quantity
-        # summary (no cost — this is visible to headoffice too) can be shown
-        # right after the DI is saved. Doesn't touch Qty (sqft)/Rate above —
-        # those are still entered as normal.
-        if st.session_state.get(f"ord_prod_{i}") == "Boundary Wall":
+        if _prod_i == "Boundary Wall":
             bwc = st.columns([2, 2, 2, 4])
-            bwc[0].number_input("Wall Length (rft)", min_value=0.0, step=10.0, key=f"ord_bw_rft_{i}")
+            bwc[0].number_input("Wall Length (rft) *", min_value=0.0, step=10.0, key=f"ord_bw_rft_{i}")
             _bw_h_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
-            bwc[1].selectbox("Wall Height (ft)", _bw_h_opts, key=f"ord_bw_height_{i}",
+            bwc[1].selectbox("Wall Height (ft) *", _bw_h_opts, key=f"ord_bw_height_{i}",
                              format_func=lambda h: f"{h}'")
-            bwc[2].selectbox("Slab Type", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key=f"ord_bw_slab_{i}")
-            bwc[3].caption("Optional — fill this in to get a Slabs/Pillars needed summary after saving.")
+            bwc[2].selectbox("Slab Type *", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key=f"ord_bw_slab_{i}")
+            bwc[3].caption("Required for Boundary Wall — Qty (sqft) above is calculated from this, "
+                           "and it drives the Slabs/Pillars needed summary shown after saving.")
 
     ca, cb = st.columns([1, 5])
     if ca.button("➕ Add Product", key="ord_add_line"):
@@ -414,6 +427,13 @@ def show(PLOT):
         if _ptype_val == REQUIRED_PLACEHOLDER:   missing.append("Product Type")
         if _payment_val == REQUIRED_PLACEHOLDER: missing.append("Payment Mode")
         if _sale_val == REQUIRED_PLACEHOLDER:    missing.append("Sale Type")
+        for i in range(st.session_state.order_lines):
+            if st.session_state.get(f"ord_prod_{i}") != "Boundary Wall":
+                continue
+            if float(st.session_state.get(f"ord_qty_{i}", 0) or 0) <= 0:
+                continue  # empty line, not being submitted anyway
+            if not (st.session_state.get(f"ord_bw_rft_{i}", 0) or 0) > 0:
+                missing.append(f"Wall Length/Height/Slab Type (Boundary Wall line {i + 1})")
 
         if missing:
             st.error(f"Required: {', '.join(missing)}.")
