@@ -22,7 +22,7 @@ RAW_MATERIALS = [
 ]
 
 DEFAULT_RM_PRICES = {m["key"]: 0.0 for m in RAW_MATERIALS}
-DEFAULT_RM_PRICES["concrete"] = 2500.0  # confirmed rate: Concrete Cost = Volume (m³) x 2500
+DEFAULT_RM_PRICES["concrete"] = 3500.0  # confirmed rate: Concrete Cost = Volume (m³) x 3500
 RM_LABELS = {m["key"]: f"{m['label']} (Rs./{m['unit']})" for m in RAW_MATERIALS}
 
 # ── Product cost config ────────────────────────────────────────────────────────

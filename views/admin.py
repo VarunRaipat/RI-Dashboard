@@ -553,12 +553,15 @@ def show(PLOT):
                             st.success(f"✅ {null_count} entries marked as BILLED.")
                             st.rerun()
             st.markdown("---")
-        c3, c4 = st.columns(2)
+        c3, c4, c5 = st.columns(3)
         from core.tz import today_ist
         start2 = c3.date_input("From", today_ist().replace(day=1), key="disp_start")
         end2   = c4.date_input("To",   today_ist(), key="disp_end")
+        plant2 = c5.selectbox("Plant", ["All Plants"] + PLANTS, key="disp_plant")
 
         df2 = get_dispatch(str(start2), str(end2))
+        if plant2 != "All Plants" and not df2.empty:
+            df2 = df2[df2["product"].apply(lambda p: plant_for_product(p) == plant2)]
         if df2.empty:
             st.info("No dispatch records found.")
         else:
@@ -613,14 +616,21 @@ def show(PLOT):
                     st.rerun()
 
                 st.markdown("---")
-                st.markdown("**🗑️ Bulk Delete — entire date range**")
-                st.caption(f"This will delete ALL {len(df2)} dispatch records from {start2} to {end2} in one shot.")
+                plant_scope = plant2 if plant2 != "All Plants" else "All Plants"
+                st.markdown(f"**🗑️ Bulk Delete — {plant_scope}, entire date range**")
+                st.caption(f"This will delete ALL {len(df2)} dispatch records from {start2} to {end2}"
+                           + (f" for {plant_scope}" if plant2 != "All Plants" else "") + " in one shot.")
                 confirm_txt = st.text_input("Type DELETE to confirm", key="bulk_del_confirm")
                 if st.button(f"🗑️ Delete ALL {len(df2)} records in range", type="primary", key="bulk_del_btn"):
                     if confirm_txt.strip() == "DELETE":
-                        from core.db import delete_dispatch_range
-                        delete_dispatch_range(str(start2), str(end2))
-                        st.success(f"✅ Deleted {len(df2)} records ({start2} → {end2}). Now re-import fresh data.")
+                        if plant2 == "All Plants":
+                            from core.db import delete_dispatch_range
+                            delete_dispatch_range(str(start2), str(end2))
+                        else:
+                            from core.db import delete_dispatch_ids
+                            delete_dispatch_ids(df2["id"].tolist())
+                        st.success(f"✅ Deleted {len(df2)} records ({start2} → {end2}"
+                                   f"{', ' + plant_scope if plant2 != 'All Plants' else ''}). Now re-import fresh data.")
                         st.rerun()
                     else:
                         st.error("Type exactly DELETE to confirm.")

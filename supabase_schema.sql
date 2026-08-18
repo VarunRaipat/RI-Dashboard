@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS dispatch (
 CREATE TABLE IF NOT EXISTS rm_prices (
     id              BIGSERIAL PRIMARY KEY,
     effective_date  TEXT    NOT NULL,
-    concrete        REAL DEFAULT 2500,
+    concrete        REAL DEFAULT 3500,
     steel           REAL DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -297,7 +297,7 @@ ALTER TABLE production     ADD COLUMN IF NOT EXISTS production_cost REAL DEFAULT
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS loading_unloading_cost REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS welding_cost REAL DEFAULT 0;
 ALTER TABLE production     ADD COLUMN IF NOT EXISTS jalli_cost REAL DEFAULT 0;
-ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS concrete REAL DEFAULT 2500;
+ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS concrete REAL DEFAULT 3500;
 ALTER TABLE rm_prices      ADD COLUMN IF NOT EXISTS steel REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS production_cost REAL DEFAULT 0;
 ALTER TABLE product_config ADD COLUMN IF NOT EXISTS loading_unloading_cost REAL DEFAULT 0;

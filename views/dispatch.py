@@ -7,7 +7,10 @@ from core.config import (
     CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant,
 )
 from core.calculations import dispatch_value, gst_split, transport_charge
-from core.db import insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch, create_edit_request, get_edit_requests
+from core.db import (
+    insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch,
+    create_edit_request, get_edit_requests, add_custom_product,
+)
 from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
 from core.visibility import di_dispatch_warnings
@@ -79,14 +82,31 @@ def _init_lines(key):
         st.session_state[key] = 1
 
 
-def _product_lines(prefix, n_lines, products=None):
+_OTHER_PRODUCT = "➕ Other (type new)"
+
+
+def _resolve_product_name(prefix, i, default=None):
+    """Selectbox value for line `i`, or the typed name if _OTHER_PRODUCT was
+    picked (stripped; empty string if not yet typed)."""
+    raw = st.session_state.get(f"{prefix}_prod_{i}", default)
+    if raw == _OTHER_PRODUCT:
+        return (st.session_state.get(f"{prefix}_other_{i}") or "").strip()
+    return raw
+
+
+def _product_lines(prefix, n_lines, products=None, allow_other=False):
     """Renders `n_lines` Product/Qty Ordered/Qty Dispatched/Rate rows (plain
     widgets, not inside a form, so Add/Remove can rerun immediately — same
     pattern as DPR's multi-product lines). Returns nothing; read back via
     st.session_state[f"{prefix}_prod_{i}"] etc. at submit time. `products`
     lets a plant-locked operator only pick from their plant's products;
-    defaults to every dispatchable product."""
-    products = products or DISPATCH_PRODUCTS
+    defaults to every dispatchable product. `allow_other` adds an "Other
+    (type new)" choice — for a one-off product not in the list yet, e.g.
+    Pole Factory occasionally dispatching something new; the typed name gets
+    saved as a custom product on submit so it's a normal dropdown pick from
+    then on (see core.db.add_custom_product)."""
+    base_products = products or DISPATCH_PRODUCTS
+    products = list(base_products) + ([_OTHER_PRODUCT] if allow_other else [])
     header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
     header[0].markdown("**Product**")
     header[1].markdown("**Qty Ordered**")
@@ -101,13 +121,19 @@ def _product_lines(prefix, n_lines, products=None):
         cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
         cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
         cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
-        _row_unit = selling_price_unit(st.session_state.get(f"{prefix}_prod_{i}", ""))
+        _sel = st.session_state.get(f"{prefix}_prod_{i}", "")
+        if _sel == _OTHER_PRODUCT:
+            st.text_input(
+                "New product name", key=f"{prefix}_other_{i}",
+                placeholder="Type the product name — it's saved for next time",
+            )
+        _row_unit = selling_price_unit(_sel if _sel != _OTHER_PRODUCT else "")
         if _row_unit != "nos":
             cols[3].caption(f"₹/{_row_unit} for this product")
         if n_lines > 1:
             if cols[4].button("✕", key=f"{prefix}_rem_{i}"):
                 for j in range(i, n_lines - 1):
-                    for f in ("prod", "qo", "qd", "rate"):
+                    for f in ("prod", "qo", "qd", "rate", "other"):
                         st.session_state[f"{prefix}_{f}_{j}"] = st.session_state.get(f"{prefix}_{f}_{j+1}")
                 st.session_state[f"{prefix}_lines"] = n_lines - 1
                 st.rerun()
@@ -119,11 +145,12 @@ def _product_lines(prefix, n_lines, products=None):
 
 def _line_products(prefix, n_lines):
     """Products currently selected with Qty Dispatched > 0, read back from
-    the plain session_state widgets _product_lines() renders."""
+    the plain session_state widgets _product_lines() renders (an Other line
+    resolves to its typed name, or is dropped if not typed yet)."""
     return [
-        st.session_state.get(f"{prefix}_prod_{i}")
-        for i in range(n_lines)
+        name for i in range(n_lines)
         if (st.session_state.get(f"{prefix}_qd_{i}", 0) or 0) > 0
+        and (name := _resolve_product_name(prefix, i))
     ]
 
 
@@ -168,7 +195,7 @@ def _show_di_warnings(di_no, products, df_orders, df_disp):
 
 def _reset_lines(prefix, n_lines):
     for i in range(n_lines):
-        for f in ("prod", "qo", "qd", "rate"):
+        for f in ("prod", "qo", "qd", "rate", "other"):
             st.session_state.pop(f"{prefix}_{f}_{i}", None)
     st.session_state[f"{prefix}_lines"] = 1
 
@@ -236,8 +263,14 @@ def _show_dispatch_operator():
     client_name   = client_name_field(ca, known_clients, "disp_op_client")
     delivery_addr = cb.text_input("Delivery Address", key="disp_op_addr")
 
+    # Pole Factory occasionally dispatches something not yet in the product
+    # list — let them type it in as "Other" (see _product_lines); Pipe
+    # Factory's catalog is fixed (barrel-thickness-driven), so it doesn't
+    # get this option.
+    allow_other = locked_plant != "Pipe Factory"
+
     st.markdown("**Products in this Challan**")
-    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products)
+    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products, allow_other=allow_other)
     _show_di_warnings(di_no, _line_products("disp_op", st.session_state["disp_op_lines"]), df_orders, df_known)
 
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")
@@ -252,14 +285,15 @@ def _show_dispatch_operator():
 
     if st.button("✅ Submit Challan", type="primary", use_container_width=True, key="disp_op_submit"):
         n_lines = st.session_state["disp_op_lines"]
-        lines = [
-            (st.session_state.get(f"disp_op_prod_{i}", op_products[0]),
+        raw_lines = [
+            (_resolve_product_name("disp_op", i, op_products[0]),
              st.session_state.get(f"disp_op_qo_{i}", 0) or 0,
              st.session_state.get(f"disp_op_qd_{i}", 0) or 0,
              st.session_state.get(f"disp_op_rate_{i}", 0.0) or 0.0)
             for i in range(n_lines)
         ]
-        lines = [l for l in lines if l[2] > 0]
+        raw_lines = [l for l in raw_lines if l[2] > 0]
+        lines = [l for l in raw_lines if l[0]]  # drop an Other line whose name wasn't typed yet
 
         if challan_plant is None:
             st.error("This challan mixes Pipe Factory and Pole Factory products. Each plant has "
@@ -267,11 +301,19 @@ def _show_dispatch_operator():
         elif is_duplicate(df_seq, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
             st.error(f"Challan No. {challan_no} already exists for {challan_plant}. "
                      f"Refresh the page and try again.")
-        elif not lines:
+        elif not raw_lines:
             st.error("Add at least one product line with Qty Dispatched > 0.")
+        elif len(lines) != len(raw_lines):
+            st.error("Type a name for the new (\"Other\") product, or pick one from the list.")
         elif any(rate <= 0 for _, _, _, rate in lines):
             st.error("Rate must be > 0 for every product line.")
         else:
+            new_names = {p for p, *_ in lines if p not in DISPATCH_PRODUCTS}
+            for name in new_names:
+                add_custom_product(name, "nos", st.session_state.get("username") or "")
+            if new_names:
+                st.toast(f"➕ Added new product(s): {', '.join(sorted(new_names))} — they'll appear in the list from now on.")
+
             saved = []
             for idx, (product, qty_ordered, qty_dispatched, rate) in enumerate(lines):
                 base_value = dispatch_value(qty_dispatched, rate)
