@@ -116,9 +116,15 @@ def _product_lines(prefix, n_lines, products=None, allow_other=False, locked_pla
     base_products = products or DISPATCH_PRODUCTS
     products = list(base_products) + ([_OTHER_PRODUCT] if allow_other else [])
     cfg = get_product_config() if locked_plant == "Pole Factory" else None
+    # Pole Factory operators don't track Qty Ordered separately (always
+    # dispatched in full, see the submit handler), and Rate is either fixed
+    # by admin (nothing to show) or, for a brand-new "Other" product, still
+    # needs a manual entry — so only show it in that one case.
+    show_qty_ordered = cfg is None
     header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
     header[0].markdown("**Product**")
-    header[1].markdown("**Qty Ordered**")
+    if show_qty_ordered:
+        header[1].markdown("**Qty Ordered**")
     header[2].markdown("**Qty Dispatched**")
     header[3].markdown("**Rate (₹/nos.)**")
 
@@ -127,16 +133,15 @@ def _product_lines(prefix, n_lines, products=None, allow_other=False, locked_pla
         if st.session_state.get(f"{prefix}_prod_{i}") not in products:
             st.session_state.pop(f"{prefix}_prod_{i}", None)
         cols[0].selectbox("Product", products, key=f"{prefix}_prod_{i}", label_visibility="collapsed")
-        cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
+        if show_qty_ordered:
+            cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
         cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
 
         product_i  = st.session_state.get(f"{prefix}_prod_{i}", products[0])
         fixed_rate = cfg.get(product_i, {}).get("selling_price", 0.0) if cfg else 0.0
         if fixed_rate > 0:
+            # Fixed by admin and non-interactive — nothing worth showing.
             st.session_state[f"{prefix}_rate_{i}"] = fixed_rate
-            cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}",
-                                 label_visibility="collapsed", disabled=True,
-                                 help="Fixed price set in Admin > Product Cost Configuration.")
         else:
             cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
         if product_i == _OTHER_PRODUCT:
@@ -303,13 +308,19 @@ def _show_dispatch_operator():
 
     if st.button("✅ Submit Challan", type="primary", use_container_width=True, key="disp_op_submit"):
         n_lines = st.session_state["disp_op_lines"]
-        raw_lines = [
-            (_resolve_product_name("disp_op", i, op_products[0]),
-             st.session_state.get(f"disp_op_qo_{i}", 0) or 0,
-             st.session_state.get(f"disp_op_qd_{i}", 0) or 0,
-             st.session_state.get(f"disp_op_rate_{i}", 0.0) or 0.0)
-            for i in range(n_lines)
-        ]
+        raw_lines = []
+        for i in range(n_lines):
+            qty_dispatched = st.session_state.get(f"disp_op_qd_{i}", 0) or 0
+            # Qty Ordered isn't shown for Pole Factory (see _product_lines) —
+            # treat each line as fully dispatched (Balance = 0) rather than
+            # silently recording an unset 0.
+            qty_ordered = qty_dispatched if locked_plant == "Pole Factory" \
+                else (st.session_state.get(f"disp_op_qo_{i}", 0) or 0)
+            raw_lines.append((
+                _resolve_product_name("disp_op", i, op_products[0]),
+                qty_ordered, qty_dispatched,
+                st.session_state.get(f"disp_op_rate_{i}", 0.0) or 0.0,
+            ))
         raw_lines = [l for l in raw_lines if l[2] > 0]
         lines = [l for l in raw_lines if l[0]]  # drop an Other line whose name wasn't typed yet
 
