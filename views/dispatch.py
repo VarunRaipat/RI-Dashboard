@@ -108,25 +108,27 @@ def _product_lines(prefix, n_lines, products=None, allow_other=False, locked_pla
 
     Pole Factory products (Slab/Pillar/PSC Pole/Fencing Pillar) are sold at
     the fixed price admin already set in Product Cost Configuration — the
-    Pole operator shouldn't be typing/overriding a price, so when
-    `locked_plant` is "Pole Factory", Rate is pulled from that config and
-    the field is locked (an Other line has no config entry yet, so it stays
-    editable). Pipe Factory rates stay manual (client-negotiated per order),
-    as does the unrestricted admin/headoffice flow."""
+    Pole operator never sees or types a Rate at all, whether or not that
+    product has a price set yet (an unpriced "Other" product just goes out
+    at ₹0 until admin sets its price in Product Cost Configuration and
+    corrects this entry — confirmed acceptable since it's a rare one-off).
+    Pipe Factory rates stay manual (client-negotiated per order), as does
+    the unrestricted admin/headoffice flow."""
     base_products = products or DISPATCH_PRODUCTS
     products = list(base_products) + ([_OTHER_PRODUCT] if allow_other else [])
     cfg = get_product_config() if locked_plant == "Pole Factory" else None
     # Pole Factory operators don't track Qty Ordered separately (always
-    # dispatched in full, see the submit handler), and Rate is either fixed
-    # by admin (nothing to show) or, for a brand-new "Other" product, still
-    # needs a manual entry — so only show it in that one case.
+    # dispatched in full, see the submit handler) or Rate (always the
+    # admin-set price, or 0 until admin sets one — see the docstring).
     show_qty_ordered = cfg is None
+    show_rate = cfg is None
     header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
     header[0].markdown("**Product**")
     if show_qty_ordered:
         header[1].markdown("**Qty Ordered**")
     header[2].markdown("**Qty Dispatched**")
-    header[3].markdown("**Rate (₹/nos.)**")
+    if show_rate:
+        header[3].markdown("**Rate (₹/nos.)**")
 
     for i in range(n_lines):
         cols = st.columns([3, 1.7, 1.7, 1.5, 0.5])
@@ -139,11 +141,12 @@ def _product_lines(prefix, n_lines, products=None, allow_other=False, locked_pla
 
         product_i  = st.session_state.get(f"{prefix}_prod_{i}", products[0])
         fixed_rate = cfg.get(product_i, {}).get("selling_price", 0.0) if cfg else 0.0
-        if fixed_rate > 0:
-            # Fixed by admin and non-interactive — nothing worth showing.
-            st.session_state[f"{prefix}_rate_{i}"] = fixed_rate
-        else:
+        if show_rate:
             cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
+        else:
+            # Not shown at all — admin-set price (or 0 if unpriced) goes
+            # straight into session_state, same key the submit handler reads.
+            st.session_state[f"{prefix}_rate_{i}"] = fixed_rate
         if product_i == _OTHER_PRODUCT:
             st.text_input(
                 "New product name", key=f"{prefix}_other_{i}",
@@ -334,7 +337,10 @@ def _show_dispatch_operator():
             st.error("Add at least one product line with Qty Dispatched > 0.")
         elif len(lines) != len(raw_lines):
             st.error("Type a name for the new (\"Other\") product, or pick one from the list.")
-        elif any(rate <= 0 for _, _, _, rate in lines):
+        elif locked_plant != "Pole Factory" and any(rate <= 0 for _, _, _, rate in lines):
+            # Pole Factory Rate is never operator-entered — an unpriced
+            # product (no admin price set yet) legitimately goes out at ₹0
+            # rather than blocking the challan (see _product_lines).
             st.error("Rate must be > 0 for every product line.")
         else:
             new_names = {p for p, *_ in lines if p not in DISPATCH_PRODUCTS}
