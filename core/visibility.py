@@ -1,6 +1,7 @@
 """Role-based data visibility rules that can't be expressed as a simple
 column filter (e.g. time-limited access after an order is fulfilled)."""
 from core.tz import today_ist
+from core.config import BOUNDARY_WALL_DISPATCH_SKUS
 import pandas as pd
 
 SALE_B_GRACE_DAYS = 5
@@ -96,6 +97,12 @@ def di_dispatch_warnings(di_no, products, df_orders, df_disp):
     warnings = []
     for prod in dict.fromkeys(p for p in products if p):
         if prod not in ordered:
+            # A Boundary Wall order is never dispatched as "Boundary Wall" —
+            # it's fulfilled by dispatching the Slab/Pillar SKUs that make up
+            # the wall (see core.config's BOUNDARY_WALL_* comments), so that's
+            # not a mismatch worth warning about.
+            if "Boundary Wall" in ordered and prod in BOUNDARY_WALL_DISPATCH_SKUS:
+                continue
             warnings.append(f"DI {di_no}'s Sales Order doesn't include \"{prod}\" — check the product or DI No.")
             continue
         o_qty = ordered[prod]

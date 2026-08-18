@@ -9,7 +9,7 @@ from core.config import (
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import (
     insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch,
-    create_edit_request, get_edit_requests, add_custom_product,
+    create_edit_request, get_edit_requests, add_custom_product, get_product_config,
 )
 from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
 from core.sequencing import next_sequence_number, is_duplicate
@@ -94,7 +94,7 @@ def _resolve_product_name(prefix, i, default=None):
     return raw
 
 
-def _product_lines(prefix, n_lines, products=None, allow_other=False):
+def _product_lines(prefix, n_lines, products=None, allow_other=False, locked_plant=None):
     """Renders `n_lines` Product/Qty Ordered/Qty Dispatched/Rate rows (plain
     widgets, not inside a form, so Add/Remove can rerun immediately — same
     pattern as DPR's multi-product lines). Returns nothing; read back via
@@ -104,9 +104,18 @@ def _product_lines(prefix, n_lines, products=None, allow_other=False):
     (type new)" choice — for a one-off product not in the list yet, e.g.
     Pole Factory occasionally dispatching something new; the typed name gets
     saved as a custom product on submit so it's a normal dropdown pick from
-    then on (see core.db.add_custom_product)."""
+    then on (see core.db.add_custom_product).
+
+    Pole Factory products (Slab/Pillar/PSC Pole/Fencing Pillar) are sold at
+    the fixed price admin already set in Product Cost Configuration — the
+    Pole operator shouldn't be typing/overriding a price, so when
+    `locked_plant` is "Pole Factory", Rate is pulled from that config and
+    the field is locked (an Other line has no config entry yet, so it stays
+    editable). Pipe Factory rates stay manual (client-negotiated per order),
+    as does the unrestricted admin/headoffice flow."""
     base_products = products or DISPATCH_PRODUCTS
     products = list(base_products) + ([_OTHER_PRODUCT] if allow_other else [])
+    cfg = get_product_config() if locked_plant == "Pole Factory" else None
     header = st.columns([3, 1.7, 1.7, 1.5, 0.5])
     header[0].markdown("**Product**")
     header[1].markdown("**Qty Ordered**")
@@ -120,14 +129,22 @@ def _product_lines(prefix, n_lines, products=None, allow_other=False):
         cols[0].selectbox("Product", products, key=f"{prefix}_prod_{i}", label_visibility="collapsed")
         cols[1].number_input("Qty Ordered", min_value=0, step=100, key=f"{prefix}_qo_{i}", label_visibility="collapsed")
         cols[2].number_input("Qty Dispatched", min_value=0, step=100, key=f"{prefix}_qd_{i}", label_visibility="collapsed")
-        cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
-        _sel = st.session_state.get(f"{prefix}_prod_{i}", "")
-        if _sel == _OTHER_PRODUCT:
+
+        product_i  = st.session_state.get(f"{prefix}_prod_{i}", products[0])
+        fixed_rate = cfg.get(product_i, {}).get("selling_price", 0.0) if cfg else 0.0
+        if fixed_rate > 0:
+            st.session_state[f"{prefix}_rate_{i}"] = fixed_rate
+            cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}",
+                                 label_visibility="collapsed", disabled=True,
+                                 help="Fixed price set in Admin > Product Cost Configuration.")
+        else:
+            cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"{prefix}_rate_{i}", label_visibility="collapsed")
+        if product_i == _OTHER_PRODUCT:
             st.text_input(
                 "New product name", key=f"{prefix}_other_{i}",
                 placeholder="Type the product name — it's saved for next time",
             )
-        _row_unit = selling_price_unit(_sel if _sel != _OTHER_PRODUCT else "")
+        _row_unit = selling_price_unit(product_i if product_i != _OTHER_PRODUCT else "")
         if _row_unit != "nos":
             cols[3].caption(f"₹/{_row_unit} for this product")
         if n_lines > 1:
@@ -270,7 +287,8 @@ def _show_dispatch_operator():
     allow_other = locked_plant != "Pipe Factory"
 
     st.markdown("**Products in this Challan**")
-    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products, allow_other=allow_other)
+    _product_lines("disp_op", st.session_state["disp_op_lines"], products=op_products,
+                   allow_other=allow_other, locked_plant=locked_plant)
     _show_di_warnings(di_no, _line_products("disp_op", st.session_state["disp_op_lines"]), df_orders, df_known)
 
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate", key="disp_op_gst")

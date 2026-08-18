@@ -298,18 +298,21 @@ def table_by_sale_type(df, key, sum_cols=None, show_cols=None,
                           col_config=col_config, date_col=date_col, show_export=show_export)
 
 
+_PLANT_TAB_ICON = {"Pipe Factory": "🔵", "Pole Factory": "⚙️"}
+
+
 def table_by_plant(df, key, sum_cols=None, show_cols=None,
                    rename=None, col_config=None, date_col="date", show_export=True,
                    plant_col="Plant"):
     """
-    Same as interactive_table, but rendered as one separate table per plant
-    (Pipe Factory / Pole Factory / any "Mixed" rows for a DI that spans
-    both), so each plant's rows — and their totals — are never pooled
+    Same as interactive_table, but rendered as one tab per plant (Pipe
+    Factory / Pole Factory / any other value like "Mixed" for a DI that
+    spans both), so each plant's rows — and their totals — are never shown
     together. Falls back to a single table if there's no plant_col column
-    to split on. Each sub-table shows its own totals row via
-    interactive_table; the combined grand total is expected to already be
-    shown separately (e.g. a KPI metric above), same convention as
-    table_by_sale_type.
+    to split on, or if every row shares one plant. Each tab shows its own
+    totals row via interactive_table; the combined grand total is expected
+    to already be shown separately (e.g. a KPI metric above), same
+    convention as table_by_sale_type.
     """
     if df is None or plant_col not in df.columns:
         return interactive_table(df, key=key, sum_cols=sum_cols, show_cols=show_cols,
@@ -319,8 +322,14 @@ def table_by_plant(df, key, sum_cols=None, show_cols=None,
     from core.config import PLANTS
     groups = [p for p in PLANTS if p in set(df[plant_col])] + \
              sorted(set(df[plant_col]) - set(PLANTS))
-    for group in groups:
-        st.markdown(f"**{group}**")
-        interactive_table(df[df[plant_col] == group], key=f"{key}_{re.sub(r'[^a-z0-9]+', '_', group.lower())}",
-                          sum_cols=sum_cols, show_cols=show_cols, rename=rename,
-                          col_config=col_config, date_col=date_col, show_export=show_export)
+    if len(groups) <= 1:
+        return interactive_table(df, key=key, sum_cols=sum_cols, show_cols=show_cols,
+                                 rename=rename, col_config=col_config, date_col=date_col,
+                                 show_export=show_export)
+
+    tabs = st.tabs([f"{_PLANT_TAB_ICON.get(g, '🔀')} {g}" for g in groups])
+    for tab, group in zip(tabs, groups):
+        with tab:
+            interactive_table(df[df[plant_col] == group], key=f"{key}_{re.sub(r'[^a-z0-9]+', '_', group.lower())}",
+                              sum_cols=sum_cols, show_cols=show_cols, rename=rename,
+                              col_config=col_config, date_col=date_col, show_export=show_export)

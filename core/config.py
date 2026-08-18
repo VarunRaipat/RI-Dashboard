@@ -227,6 +227,10 @@ BOUNDARY_WALL_INSTALL_RATE_PER_RFT = {6: 95.0, 8: 90.0, 10: 95.0}
 # Slab panel length (ft) -> pillar spacing along the wall (one slab course
 # spans exactly one gap between two adjacent pillars).
 BOUNDARY_WALL_SLAB_LENGTH_FT = {"Slab 7'": 7, "Slab 8'": 8}
+# The SKUs a Boundary Wall DI is actually fulfilled with on Dispatch (see
+# comment above) — used by core.visibility.di_dispatch_warnings so dispatching
+# Slab/Pillar against a Boundary Wall Sales Order isn't flagged as a mismatch.
+BOUNDARY_WALL_DISPATCH_SKUS = set(BOUNDARY_WALL_SLAB_LENGTH_FT) | set(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.values())
 
 # ── SKUs vs. pricing keys ──────────────────────────────────────────────────────
 # Joint Type doesn't change price, but a Collar pipe and an M/F pipe of the

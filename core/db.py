@@ -1017,32 +1017,6 @@ def delete_dispatch_range(start, end):
     log_activity("delete", "Dispatch", f"All entries {start} to {end}")
 
 
-def delete_dispatch_ids(ids):
-    """Delete specific dispatch rows by ID — used for plant-filtered bulk delete
-    (dispatch has no plant column, so the caller resolves matching IDs via
-    core.config.plant_for_product first)."""
-    ids = [int(i) for i in ids]
-    if not ids:
-        return
-    if _use_supabase():
-        url, _ = _creds()
-        id_list = ",".join(str(i) for i in ids)
-        r = requests.delete(
-            f"{url}/rest/v1/dispatch",
-            headers={**_headers(), "Prefer": ""},
-            params={"id": f"in.({id_list})"},
-        )
-        if r.status_code not in (200, 204):
-            raise Exception(f"Bulk delete failed: {r.text}")
-    else:
-        con = _conn()
-        placeholders = ",".join("?" for _ in ids)
-        con.execute(f"DELETE FROM dispatch WHERE id IN ({placeholders})", ids)
-        con.commit(); con.close()
-    _invalidate_cache()
-    log_activity("delete", "Dispatch", f"{len(ids)} entries (plant-filtered bulk delete)")
-
-
 def insert_order(data):
     if _use_supabase(): _sb_insert("orders", data)
     else: _sqlite_insert("orders", data)

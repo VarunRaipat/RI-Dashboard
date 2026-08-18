@@ -46,56 +46,59 @@ def show(PLOT):
     <div class="page-subtitle">Order entry · Dispatch tracking · DI pipeline</div>
     """, unsafe_allow_html=True)
 
-    with st.expander("🧮 Boundary Wall Calculator — Slabs/Pillars needed + cost"):
-        st.caption(
-            "Boundary Wall is quoted as one Rs./sqft line on the DI, but it's never itself cast or "
-            "dispatched — production casts Slab + Pillar separately, and Dispatch draws down those "
-            "two SKUs directly. Use this to work out how many of each a job needs, and sanity-check "
-            "the Rs./sqft you quote."
-        )
-        bwc1, bwc2, bwc3 = st.columns(3)
-        bw_rft = bwc1.number_input("Wall Length (rft)", min_value=0.0, step=10.0, key="bw_calc_rft")
-        bw_height_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
-        bw_height = bwc2.selectbox(
-            "Wall Height (ft)", bw_height_opts, key="bw_calc_height",
-            format_func=lambda h: f"{h}' (uses {BOUNDARY_WALL_PILLAR_FOR_HEIGHT[h]})",
-        )
-        bw_slab = bwc3.selectbox("Slab Type", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key="bw_calc_slab")
+    # Cost/margin data (Pillar/Slab/Installation cost, cost-per-sqft) isn't
+    # for headoffice's eyes — they only handle billing/DI paperwork.
+    if role != "headoffice":
+        with st.expander("🧮 Boundary Wall Calculator — Slabs/Pillars needed + cost"):
+            st.caption(
+                "Boundary Wall is quoted as one Rs./sqft line on the DI, but it's never itself cast or "
+                "dispatched — production casts Slab + Pillar separately, and Dispatch draws down those "
+                "two SKUs directly. Use this to work out how many of each a job needs, and sanity-check "
+                "the Rs./sqft you quote."
+            )
+            bwc1, bwc2, bwc3 = st.columns(3)
+            bw_rft = bwc1.number_input("Wall Length (rft)", min_value=0.0, step=10.0, key="bw_calc_rft")
+            bw_height_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
+            bw_height = bwc2.selectbox(
+                "Wall Height (ft)", bw_height_opts, key="bw_calc_height",
+                format_func=lambda h: f"{h}' (uses {BOUNDARY_WALL_PILLAR_FOR_HEIGHT[h]})",
+            )
+            bw_slab = bwc3.selectbox("Slab Type", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key="bw_calc_slab")
 
-        _default_rate = BOUNDARY_WALL_INSTALL_RATE_PER_RFT.get(bw_height)
-        bw_rate = st.number_input(
-            "Installation Rate (Rs./rft)",
-            value=float(_default_rate) if _default_rate is not None else 0.0,
-            min_value=0.0, step=1.0, key=f"bw_calc_rate_{bw_height}",
-            help=("Pre-filled with the confirmed rate for this height — edit if it's changed."
-                  if _default_rate is not None else
-                  "No confirmed installation rate yet for this height — enter one."),
-        )
+            _default_rate = BOUNDARY_WALL_INSTALL_RATE_PER_RFT.get(bw_height)
+            bw_rate = st.number_input(
+                "Installation Rate (Rs./rft)",
+                value=float(_default_rate) if _default_rate is not None else 0.0,
+                min_value=0.0, step=1.0, key=f"bw_calc_rate_{bw_height}",
+                help=("Pre-filled with the confirmed rate for this height — edit if it's changed."
+                      if _default_rate is not None else
+                      "No confirmed installation rate yet for this height — enter one."),
+            )
 
-        if bw_rft > 0:
-            from core.calculations import boundary_wall_estimate
-            from core.db import get_rm_prices, get_product_config
-            est = boundary_wall_estimate(bw_rft, bw_height, bw_slab, get_rm_prices(),
-                                         get_product_config(), install_rate=bw_rate)
-            if est:
-                e1, e2, e3, e4 = st.columns(4)
-                e1.metric("Pillars Needed", f"{est['pillars_needed']} ({est['pillar_product']})",
-                         help=f"Exact: {est['pillars_exact']} — rounded up to a whole pillar")
-                e2.metric("Slabs Needed", f"{est['slabs_needed']} ({est['slab_product']})",
-                         help=f"Exact: {est['slabs_exact']} — rounded up to a whole slab")
-                e3.metric("Area", f"{est['area_sqft']:,.0f} sqft")
-                e4.metric("Cost / sqft", f"₹{est['cost_per_sqft']:.2f}",
-                         help="Production cost only (Slab + Pillar + Installation) — add your margin "
-                              "on top to get the quoted Rs./sqft rate.")
+            if bw_rft > 0:
+                from core.calculations import boundary_wall_estimate
+                from core.db import get_rm_prices, get_product_config
+                est = boundary_wall_estimate(bw_rft, bw_height, bw_slab, get_rm_prices(),
+                                             get_product_config(), install_rate=bw_rate)
+                if est:
+                    e1, e2, e3, e4 = st.columns(4)
+                    e1.metric("Pillars Needed", f"{est['pillars_needed']} ({est['pillar_product']})",
+                             help=f"Exact: {est['pillars_exact']} — rounded up to a whole pillar")
+                    e2.metric("Slabs Needed", f"{est['slabs_needed']} ({est['slab_product']})",
+                             help=f"Exact: {est['slabs_exact']} — rounded up to a whole slab")
+                    e3.metric("Area", f"{est['area_sqft']:,.0f} sqft")
+                    e4.metric("Cost / sqft", f"₹{est['cost_per_sqft']:.2f}",
+                             help="Production cost only (Slab + Pillar + Installation) — add your margin "
+                                  "on top to get the quoted Rs./sqft rate.")
 
-                b1, b2, b3, b4 = st.columns(4)
-                b1.metric("Pillar Cost", f"₹{est['pillar_total_cost']:,.0f}",
-                         help=f"₹{est['pillar_unit_cost']:.2f}/pc × {est['pillars_needed']}")
-                b2.metric("Slab Cost", f"₹{est['slab_total_cost']:,.0f}",
-                         help=f"₹{est['slab_unit_cost']:.2f}/pc × {est['slabs_needed']}")
-                b3.metric("Installation Cost", f"₹{est['installation_cost']:,.0f}",
-                         help=f"₹{est['installation_rate']:.0f}/rft × {bw_rft:.0f} rft")
-                b4.metric("Total Cost", f"₹{est['total_cost']:,.0f}")
+                    b1, b2, b3, b4 = st.columns(4)
+                    b1.metric("Pillar Cost", f"₹{est['pillar_total_cost']:,.0f}",
+                             help=f"₹{est['pillar_unit_cost']:.2f}/pc × {est['pillars_needed']}")
+                    b2.metric("Slab Cost", f"₹{est['slab_total_cost']:,.0f}",
+                             help=f"₹{est['slab_unit_cost']:.2f}/pc × {est['slabs_needed']}")
+                    b3.metric("Installation Cost", f"₹{est['installation_cost']:,.0f}",
+                             help=f"₹{est['installation_rate']:.0f}/rft × {bw_rft:.0f} rft")
+                    b4.metric("Total Cost", f"₹{est['total_cost']:,.0f}")
 
     if st.session_state.get("last_di_pdf"):
         st.markdown(
@@ -113,7 +116,17 @@ def show(PLOT):
         if pcol2.button("✕ Dismiss", key="dismiss_last_di_pdf", use_container_width=True):
             del st.session_state["last_di_pdf"]
             del st.session_state["last_di_no"]
+            st.session_state.pop("last_di_bw_summaries", None)
             st.rerun()
+
+        # Slab/Pillar quantities needed for any Boundary Wall line(s) just
+        # saved — quantities only, no cost (visible to headoffice too).
+        for est in st.session_state.get("last_di_bw_summaries", []):
+            bw1, bw2, bw3 = st.columns(3)
+            bw1.metric("Pillars Needed", f"{est['pillars_needed']} ({est['pillar_product']})")
+            bw2.metric("Slabs Needed", f"{est['slabs_needed']} ({est['slab_product']})")
+            bw3.metric("Area", f"{est['area_sqft']:,.0f} sqft")
+
         st.markdown("---")
 
     df_orders = get_orders()
@@ -231,12 +244,16 @@ def show(PLOT):
     else:
         di_no_display = ""
 
+    # Assigned, not typed — always this Sale Type's last DI No. + 1, so the
+    # sequence can't skip a number or get overwritten with an arbitrary
+    # value (same convention as Dispatch's auto-assigned Challan No.).
     # Keyed to the value itself (not a fixed key) so Streamlit always shows
     # the freshly computed number — a fixed key would "stick" to whatever
     # was in session_state from the first render and ignore later `value=`.
     di_no_input  = h1.text_input("DI No.", value=di_no_display, key=f"ord_di_no_{di_no_display}",
-                                 disabled=(di_mode == "Add product to existing DI" and existing_dis),
-                                 help="Pre-filled with the next number for the selected Sale Type — edit if your paper DI differs."
+                                 disabled=True,
+                                 help="Assigned automatically — this Sale Type's last DI No. + 1, so no "
+                                      "number gets skipped or duplicated. Ask an admin if it needs to differ."
                                  if not (di_mode == "Add product to existing DI" and existing_dis)
                                  else "Adding to an existing DI — number is fixed.")
     order_date   = h2.date_input("Order Date", value=today_ist(), key="ord_date")
@@ -331,7 +348,23 @@ def show(PLOT):
         # variants of the same diameter+class are separate physical stock,
         # even though they share one price (see SKU_TO_PRICING_KEY).
         cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"ord_prod_{i}", label_visibility="collapsed")
-        cols[1].number_input("Qty", min_value=0.0, step=100.0,   key=f"ord_qty_{i}",   label_visibility="collapsed")
+        _prod_i = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
+
+        # Boundary Wall: Wall Length/Height/Slab Type are REQUIRED (not just
+        # an optional add-on) — Qty (sqft) is derived from them automatically
+        # instead of being typed separately, so headoffice can't skip past
+        # this and lose the Slab/Pillar summary shown after saving.
+        _bw_locked = False
+        if _prod_i == "Boundary Wall":
+            _bw_rft = st.session_state.get(f"ord_bw_rft_{i}", 0) or 0
+            _bw_h   = st.session_state.get(f"ord_bw_height_{i}")
+            if _bw_rft > 0 and _bw_h:
+                st.session_state[f"ord_qty_{i}"] = _bw_rft * _bw_h
+                _bw_locked = True
+
+        cols[1].number_input("Qty", min_value=0.0, step=100.0,   key=f"ord_qty_{i}",   label_visibility="collapsed",
+                             disabled=_bw_locked,
+                             help="Calculated as Wall Length × Height below." if _bw_locked else None)
         cols[2].number_input("Rate", min_value=0.0, step=0.5, key=f"ord_rate_{i}", label_visibility="collapsed")
         _row_unit = selling_price_unit(st.session_state.get(f"ord_prod_{i}", ""))
         if _row_unit != "nos":
@@ -354,6 +387,16 @@ def show(PLOT):
                     st.session_state[f"ord_rate_{j}"]  = st.session_state.get(f"ord_rate_{j+1}",  0.0)
                 st.session_state.order_lines = n_lines - 1
                 st.rerun()
+
+        if _prod_i == "Boundary Wall":
+            bwc = st.columns([2, 2, 2, 4])
+            bwc[0].number_input("Wall Length (rft) *", min_value=0.0, step=10.0, key=f"ord_bw_rft_{i}")
+            _bw_h_opts = sorted(BOUNDARY_WALL_PILLAR_FOR_HEIGHT.keys())
+            bwc[1].selectbox("Wall Height (ft) *", _bw_h_opts, key=f"ord_bw_height_{i}",
+                             format_func=lambda h: f"{h}'")
+            bwc[2].selectbox("Slab Type *", list(BOUNDARY_WALL_SLAB_LENGTH_FT.keys()), key=f"ord_bw_slab_{i}")
+            bwc[3].caption("Required for Boundary Wall — Qty (sqft) above is calculated from this, "
+                           "and it drives the Slabs/Pillars needed summary shown after saving.")
 
     ca, cb = st.columns([1, 5])
     if ca.button("➕ Add Product", key="ord_add_line"):
@@ -384,6 +427,13 @@ def show(PLOT):
         if _ptype_val == REQUIRED_PLACEHOLDER:   missing.append("Product Type")
         if _payment_val == REQUIRED_PLACEHOLDER: missing.append("Payment Mode")
         if _sale_val == REQUIRED_PLACEHOLDER:    missing.append("Sale Type")
+        for i in range(st.session_state.order_lines):
+            if st.session_state.get(f"ord_prod_{i}") != "Boundary Wall":
+                continue
+            if float(st.session_state.get(f"ord_qty_{i}", 0) or 0) <= 0:
+                continue  # empty line, not being submitted anyway
+            if not (st.session_state.get(f"ord_bw_rft_{i}", 0) or 0) > 0:
+                missing.append(f"Wall Length/Height/Slab Type (Boundary Wall line {i + 1})")
 
         if missing:
             st.error(f"Required: {', '.join(missing)}.")
@@ -409,12 +459,25 @@ def show(PLOT):
             }
             saved = 0
             pdf_lines = []
+            bw_summaries = []
             for i in range(st.session_state.order_lines):
                 qty_v  = float(st.session_state.get(f"ord_qty_{i}", 0) or 0)
                 rate_v = float(st.session_state.get(f"ord_rate_{i}", 0.0) or 0.0)
                 if qty_v <= 0:
                     continue
                 prod = st.session_state.get(f"ord_prod_{i}", ORDER_PRODUCTS[0])
+                if prod == "Boundary Wall":
+                    bw_rft = float(st.session_state.get(f"ord_bw_rft_{i}", 0) or 0)
+                    if bw_rft > 0:
+                        from core.calculations import boundary_wall_estimate
+                        from core.db import get_rm_prices, get_product_config
+                        est = boundary_wall_estimate(
+                            bw_rft, st.session_state.get(f"ord_bw_height_{i}"),
+                            st.session_state.get(f"ord_bw_slab_{i}"),
+                            get_rm_prices(), get_product_config(),
+                        )
+                        if est:
+                            bw_summaries.append(est)
                 gst_amt, total_final = gst_split(qty_v * rate_v, gst_applicable)
                 # Per-unit transport applies to every line; a Flat amount is
                 # billed once per DI, so it only goes on the first line of a
@@ -449,6 +512,7 @@ def show(PLOT):
                 pdf_header = dict(common_fields)
                 st.session_state["last_di_pdf"] = generate_dispatch_instruction(di_no_final, pdf_header, pdf_lines)
                 st.session_state["last_di_no"]  = di_no_final
+                st.session_state["last_di_bw_summaries"] = bw_summaries
                 flash(f"✅ Order saved — DI {di_no_final}")
                 # Reset lines plus every header/client field so the next order
                 # starts from a clean form instead of silently reusing this
@@ -458,7 +522,7 @@ def show(PLOT):
                 # them each time.
                 st.session_state.order_lines = 1
                 for k in list(st.session_state.keys()):
-                    if k.startswith(("ord_prod_", "ord_qty_", "ord_rate_", "ord_total_",
+                    if k.startswith(("ord_prod_", "ord_qty_", "ord_rate_", "ord_total_", "ord_bw_",
                                       "ord_contact_person_", "ord_phone_", "ord_office_",
                                       "ord_client_type_", "ord_addr_", "ord_site_person_",
                                       "ord_site_phone_")):
