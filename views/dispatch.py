@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from core.tz import today_ist
 from core.config import (
     DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, challan_no_start,
-    CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant,
+    CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant, PLANTS,
 )
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import (
@@ -999,11 +999,15 @@ def show(PLOT):
             from core.db import delete_dispatch_ids
             st.caption("Filter entries below, then delete all matching in one click.")
 
-            da, db_, dc, dd = st.columns(4)
+            da, db_, de_ = st.columns(3)
             del_start  = da.date_input("From", value=df_edit["date"].min().date() if not df_edit.empty else today_ist(), key="del_from")
             del_end    = db_.date_input("To",  value=df_edit["date"].max().date() if not df_edit.empty else today_ist(), key="del_to")
+            del_plant  = de_.selectbox("Plant", ["All Plants"] + PLANTS, key="del_plant")
+
+            dc, dd = st.columns(2)
+            products_in_range = df_edit if del_plant == "All Plants" else df_edit[df_edit["product"].map(plant_for_product) == del_plant]
             all_clients  = ["All"] + sorted(df_edit["client_name"].dropna().unique().tolist())
-            all_products = ["All"] + sorted(df_edit["product"].dropna().unique().tolist())
+            all_products = ["All"] + sorted(products_in_range["product"].dropna().unique().tolist())
             del_client  = dc.selectbox("Client",  all_clients,  key="del_client")
             del_product = dd.selectbox("Product", all_products, key="del_product")
 
@@ -1011,6 +1015,8 @@ def show(PLOT):
                 (df_edit["date"] >= pd.Timestamp(del_start)) &
                 (df_edit["date"] <= pd.Timestamp(del_end))
             )
+            if del_plant != "All Plants":
+                del_mask &= df_edit["product"].map(plant_for_product) == del_plant
             if del_client != "All":
                 del_mask &= df_edit["client_name"] == del_client
             if del_product != "All":
