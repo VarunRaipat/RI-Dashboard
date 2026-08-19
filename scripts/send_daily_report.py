@@ -2,6 +2,7 @@
 Daily RI report — runs via GitHub Actions every evening at 8pm IST.
 Fetches today's production + dispatch from Supabase and emails the owner.
 """
+import hashlib
 import os
 import re
 import requests
@@ -17,15 +18,39 @@ GMAIL_USER   = os.environ["GMAIL_USER"]
 GMAIL_PASS   = os.environ["GMAIL_APP_PASSWORD"]
 
 
+# Addresses that must not receive the report even while REPORT_TO_EMAIL still
+# lists them, held as SHA-256 of the lowercased address rather than in the
+# clear — this repository is public, and writing an address here in plain text
+# would publish it to every scraper that walks GitHub.
+#
+# This is a backstop, not the way recipients are meant to be managed: taking
+# an address out of the REPORT_TO_EMAIL secret is the real fix, and the
+# matching entry here should be deleted once that's done. It exists because
+# the secret can only be edited by hand in the repository settings, and two
+# addresses that had been added to it needed to come off straight away.
+EXCLUDED_SHA256 = {
+    # both requested for removal 19 Aug 2026
+    "4e51c56708fce2467b9e117fe336e5d3cb57a1ddb79d6c30b7464b93635e0967",
+    "ea47449a8b0ecae3e02de2ff767c57881fad548f1cca919bcb0f3e837953d612",
+}
+
+
+def _excluded(address):
+    return hashlib.sha256(address.strip().lower().encode()).hexdigest() in EXCLUDED_SHA256
+
+
 def _recipients(raw):
     """The report can go to more than one person: set REPORT_TO_EMAIL to a
     comma- or semicolon-separated list ("owner@x.com, manager@y.com").
     A single address still works exactly as before, and an unset or blank
     value falls back to the sending account. Blanks left by a trailing
     separator are dropped and repeats removed, so nobody gets two copies
-    of the same report."""
+    of the same report. Anything listed in EXCLUDED_SHA256 is dropped,
+    matched on the lowercased address so a differently-cased spelling in the
+    secret can't slip past."""
     parts = [p.strip() for p in re.split(r"[,;]", raw or "")]
-    return list(dict.fromkeys(p for p in parts if p)) or [GMAIL_USER]
+    kept = [p for p in parts if p and not _excluded(p)]
+    return list(dict.fromkeys(kept)) or [GMAIL_USER]
 
 
 TO_EMAILS = _recipients(os.environ.get("REPORT_TO_EMAIL"))
