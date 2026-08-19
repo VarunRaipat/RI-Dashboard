@@ -47,13 +47,18 @@ def _recipients(raw):
     separator are dropped and repeats removed, so nobody gets two copies
     of the same report. Anything listed in EXCLUDED_SHA256 is dropped,
     matched on the lowercased address so a differently-cased spelling in the
-    secret can't slip past."""
+    secret can't slip past.
+
+    Returns (addresses, excluded_count) — the count is only used to say in
+    the run log that the filter did something, so an address quietly not
+    arriving is traceable to this file rather than looking like a bug."""
     parts = [p.strip() for p in re.split(r"[,;]", raw or "")]
-    kept = [p for p in parts if p and not _excluded(p)]
-    return list(dict.fromkeys(kept)) or [GMAIL_USER]
+    present = list(dict.fromkeys(p for p in parts if p))
+    kept = [p for p in present if not _excluded(p)]
+    return (kept or [GMAIL_USER]), len(present) - len(kept)
 
 
-TO_EMAILS = _recipients(os.environ.get("REPORT_TO_EMAIL"))
+TO_EMAILS, EXCLUDED_COUNT = _recipients(os.environ.get("REPORT_TO_EMAIL"))
 
 REPORT_DATE = date.today() - timedelta(days=1)
 TODAY = str(REPORT_DATE)
@@ -245,7 +250,14 @@ def send_email(html, no_prod):
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, TO_EMAILS, msg.as_string())
 
-    print(f"Report sent to {len(TO_EMAILS)} recipient(s): {', '.join(TO_EMAILS)}")
+    # Count only, never the addresses themselves: this repository is public,
+    # which makes its Actions logs public too, so printing the recipient list
+    # published everyone's address to anyone who opened a run.
+    print(f"Report sent to {len(TO_EMAILS)} recipient(s)")
+    if EXCLUDED_COUNT:
+        print(f"{EXCLUDED_COUNT} address(es) in REPORT_TO_EMAIL were skipped by "
+              f"EXCLUDED_SHA256 in scripts/send_daily_report.py — remove them from "
+              f"the secret and delete the matching entries there to retire the filter.")
 
 
 if __name__ == "__main__":
