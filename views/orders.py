@@ -7,11 +7,11 @@ from core.config import (
     PRODUCT_TYPES, selling_price_unit, plant_for_product,
     BOUNDARY_WALL_PILLAR_FOR_HEIGHT, BOUNDARY_WALL_INSTALL_RATE_PER_RFT, BOUNDARY_WALL_SLAB_LENGTH_FT,
 )
-from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch, create_edit_request, get_edit_requests
+from core.db import insert_order, get_orders, get_order_by_di, update_order, delete_order, get_dispatch, create_edit_request, get_edit_requests, get_sequence_overrides
 from core.calculations import gst_split, transport_charge
 from core.pdf import generate_dispatch_instruction
 from core.ui import client_name_field, flash, show_flashes, transport_fields
-from core.sequencing import next_sequence_number, is_duplicate
+from core.sequencing import next_sequence_number, is_duplicate, sequence_key
 from core.permissions import has_permission
 
 LAKH = 100_000
@@ -239,8 +239,12 @@ def show(PLOT):
     if di_mode == "Add product to existing DI" and existing_dis:
         di_no_display = str(di_no_val or "")
     elif sale_type in SALE_TYPES:
+        # An admin-set override (Admin > Sequence Numbers) takes priority
+        # over the code-configured DI_NO_START.
+        _di_start = get_sequence_overrides().get(sequence_key("di_no", None, sale_type),
+                                                  DI_NO_START.get(sale_type, 1))
         di_no_display = str(next_sequence_number(df_orders_raw, "di_no", sale_type,
-                                                  start=DI_NO_START.get(sale_type, 1)))
+                                                  start=_di_start))
     else:
         di_no_display = ""
 

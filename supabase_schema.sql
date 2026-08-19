@@ -114,6 +114,26 @@ CREATE TABLE IF NOT EXISTS product_config (
     created_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Admin-set floors for the auto-assigned Challan No. / DI No. sequences
+-- (core/sequencing.py's next_sequence_number, via its `start` argument).
+-- Lets an admin correct the app's sequence from the portal (Admin > Sequence
+-- Numbers) when the physical challan book or a Sales Order DI has drifted
+-- ahead of what the app would otherwise suggest, instead of needing a code
+-- change to core/config.py's CHALLAN_NO_START/DI_NO_START. Setting this below
+-- the current real max is harmless — next_sequence_number always returns
+-- max(existing_max + 1, start) and skips any number already taken, so it
+-- can never create a duplicate or step backwards.
+-- seq_key must be unique so the app's upsert (Prefer: resolution=merge-
+-- duplicates) works — see core/sequencing.py's sequence_key() for the format
+-- ("challan_no::<plant>::<sale_type>" or "di_no::-::<sale_type>").
+CREATE TABLE IF NOT EXISTS sequence_overrides (
+    id          BIGSERIAL PRIMARY KEY,
+    seq_key     TEXT UNIQUE NOT NULL,
+    next_value  INTEGER NOT NULL,
+    updated_by  TEXT,
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Production/Loading-Unloading/Welding/Jalli/Steel rates for Hume Pipes,
 -- keyed by diameter (mm) only — the same rate applies to every class
 -- (NP2/NP3/NP4) and Joint Type at that diameter, confirmed by the client.

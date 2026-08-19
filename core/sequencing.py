@@ -4,6 +4,16 @@ from core.tz import today_ist
 import pandas as pd
 
 
+def sequence_key(kind, plant, sale_type):
+    """Composite key for an admin-set sequence override (see
+    core/db.py's get_sequence_overrides/save_sequence_override).
+
+    `kind` is "challan_no" or "di_no". DI No. isn't split per plant, so
+    callers pass plant=None there and it's normalized to "-" so the key
+    stays stable regardless of whether None or "" was passed."""
+    return f"{kind}::{plant or '-'}::{sale_type}"
+
+
 def fy_start(on_date=None):
     """Start date (Apr 1) of the Indian financial year containing `on_date`."""
     d = on_date or today_ist()

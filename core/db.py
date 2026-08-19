@@ -293,6 +293,13 @@ def init_db():
         created_at        TEXT DEFAULT (datetime('now','localtime')),
         reviewed_at       TEXT
     );
+    CREATE TABLE IF NOT EXISTS sequence_overrides (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        seq_key    TEXT UNIQUE NOT NULL,
+        next_value INTEGER NOT NULL,
+        updated_by TEXT,
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     CREATE TABLE IF NOT EXISTS user_permissions (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         username   TEXT NOT NULL,
@@ -695,6 +702,62 @@ def save_product_config(product, data):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("update", "Admin", f"Product config updated: {product}")
+
+
+@st.cache_data(ttl=60)
+def get_sequence_overrides():
+    """{seq_key: next_value} admin-set floors for Challan No. / DI No.
+
+    seq_key format is core/sequencing.py's sequence_key() output. Absent
+    keys fall back to core/config.py's CHALLAN_NO_START/DI_NO_START —
+    callers look those up themselves, this only returns what's been
+    explicitly set from the Admin panel.
+
+    Called from the normal Dispatch/Sales Order entry forms, not just
+    Admin — so like log_activity(), this must never raise. If the
+    sequence_overrides table hasn't been migrated onto this database yet,
+    entry should still work off the code-configured floors rather than
+    breaking Challan No./DI No. assignment for everyone."""
+    try:
+        if _use_supabase():
+            df = _sb_select("sequence_overrides", order="seq_key.asc", limit=1000)
+        else:
+            con = _conn()
+            df = pd.read_sql("SELECT * FROM sequence_overrides", con)
+            con.close()
+        if df.empty or "seq_key" not in df.columns:
+            return {}
+        return dict(zip(df["seq_key"], df["next_value"].astype(int)))
+    except Exception:
+        return {}
+
+
+def save_sequence_override(seq_key, next_value):
+    payload = {
+        "seq_key": seq_key,
+        "next_value": int(next_value),
+        "updated_by": st.session_state.get("username") or "",
+    }
+    if _use_supabase():
+        r = requests.post(
+            _sb_url("sequence_overrides"),
+            headers={**_headers(), "Prefer": "resolution=merge-duplicates"},
+            params={"on_conflict": "seq_key"},
+            json=payload,
+        )
+        if r.status_code not in (200, 201):
+            raise Exception(f"Save failed: {r.text}")
+    else:
+        con = _conn()
+        con.execute(
+            "INSERT INTO sequence_overrides (seq_key, next_value, updated_by) VALUES (?, ?, ?) "
+            "ON CONFLICT(seq_key) DO UPDATE SET next_value = excluded.next_value, "
+            "updated_by = excluded.updated_by, updated_at = datetime('now','localtime')",
+            [payload["seq_key"], payload["next_value"], payload["updated_by"]],
+        )
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("update", "Admin", f"Sequence override: {seq_key} -> next {next_value}")
 
 
 # ── Custom (admin-added) non-pipe products ────────────────────────────────────

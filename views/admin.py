@@ -7,6 +7,7 @@ from core.config import (
     PRODUCTION_PRODUCTS, DISPATCH_PRODUCTS, SKU_TO_PRICING_KEY, PLANTS, SALE_TYPES, plant_for_product,
     EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, selling_price_unit,
     INVENTORY_PRODUCTS, RM_INVENTORY_OPENING, INVENTORY_MATERIAL_LABELS, INVENTORY_ANCHOR_DATE,
+    challan_no_start, DI_NO_START, CHALLAN_NO_IGNORE,
 )
 from core.db import (
     get_rm_prices, save_rm_prices, get_production, get_dispatch, delete_row,
@@ -17,8 +18,10 @@ from core.db import (
     get_inventory_opening, save_inventory_opening, delete_inventory_opening,
     get_custom_products, add_custom_product,
     get_custom_diameters, add_custom_diameter,
+    get_sequence_overrides, save_sequence_override,
 )
 from core.calculations import calculate_production, dispatch_value, gst_split
+from core.sequencing import next_sequence_number, sequence_key
 from core.ui import sanitize_for_export
 from core.ui import interactive_table, date_range_filter, add_ist_timestamp, timestamp_col_config
 from core.permissions import has_permission, get_all_users, MODULES, MODULE_LABELS, ROLE_DEFAULTS
@@ -44,10 +47,10 @@ def show(PLOT):
         st.warning(f"📝 **{len(_pending_reqs)} edit request(s)** waiting for review — see the "
                    f"**Edit Requests** tab below.")
 
-    tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+    tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
         ["💰 RM Prices", "📦 Product Config", "🏭 Inventory Opening", "📋 All Production", "🚚 All Dispatch",
          "🧩 Merge Client Names", "🕵️ Activity Log", f"📝 Edit Requests ({len(_pending_reqs)})",
-         "👤 User Permissions"]
+         "👤 User Permissions", "🔢 Sequence Numbers"]
     )
 
     # ── Tab 1: RM Prices ──────────────────────────────────────────────────────
@@ -974,3 +977,73 @@ def show(PLOT):
                 })
                 cols = [c for c in ["User","Module","View","Add","Edit","Delete","Set By","Updated At"] if c in disp.columns]
                 st.dataframe(disp[cols], use_container_width=True, hide_index=True)
+
+    # ── Tab 9: Sequence Numbers ──────────────────────────────────────────────
+    with tab9:
+        st.markdown("### Challan No. / DI No. Sequence")
+        st.caption(
+            "Challan No. and DI No. are auto-assigned — each new entry gets the previous one "
+            "in that book + 1, so operators never type it. If the app's number has drifted from "
+            "the physical challan book or a Sales Order DI, set the next number to hand out here. "
+            "It only ever moves the sequence forward or leaves it unchanged — it can never create "
+            "a duplicate or an already-used number, even if you type a low value by mistake."
+        )
+        if not can_edit:
+            st.info("👁️ View-only — only Admin can change sequence numbers.")
+
+        df_orders_seq   = get_orders()
+        df_dispatch_seq = get_dispatch()
+        overrides       = get_sequence_overrides()
+
+        seq_kind = st.radio("Sequence", ["Challan No. (Dispatch)", "DI No. (Sales Order)"],
+                            horizontal=True, key="seq_kind_sel")
+
+        if seq_kind.startswith("Challan"):
+            sc1, sc2 = st.columns(2)
+            sel_plant = sc1.selectbox("Plant", PLANTS, key="seq_plant_sel")
+            sel_st    = sc2.selectbox("Sale Type", SALE_TYPES, key="seq_sale_type_sel_challan")
+            key       = sequence_key("challan_no", sel_plant, sel_st)
+            # Dispatch has no plant column — plant is derived from product,
+            # same as views/dispatch.py's _plant_rows().
+            df_scope  = df_dispatch_seq[df_dispatch_seq["product"].map(plant_for_product) == sel_plant] \
+                        if not df_dispatch_seq.empty and "product" in df_dispatch_seq.columns else df_dispatch_seq
+            current_next = next_sequence_number(
+                df_scope, "challan_no", sel_st, date_col="date",
+                start=overrides.get(key, challan_no_start(sel_plant, sel_st)),
+                ignore=CHALLAN_NO_IGNORE.get(sel_st, ()),
+            )
+        else:
+            sel_plant = None
+            sel_st    = st.selectbox("Sale Type", SALE_TYPES, key="seq_sale_type_sel_di")
+            key       = sequence_key("di_no", None, sel_st)
+            current_next = next_sequence_number(
+                df_orders_seq, "di_no", sel_st,
+                start=overrides.get(key, DI_NO_START.get(sel_st, 1)),
+            )
+
+        st.metric("Next number the app will assign right now", current_next)
+        if key in overrides:
+            st.caption(f"Admin override in effect: floor set to {overrides[key]}.")
+
+        if can_edit:
+            with st.form(f"seq_override_form_{key}"):
+                new_next = st.number_input(
+                    "Set next number to", min_value=1, step=1, value=int(current_next),
+                    help="The next entry in this book will get this number (or higher, if real "
+                         "data already exceeds it). Entries after that continue counting up on their own.",
+                )
+                if st.form_submit_button("💾 Save", type="primary", use_container_width=True):
+                    save_sequence_override(key, new_next)
+                    st.success(f"✅ Next number for this sequence is now {new_next}.")
+                    st.rerun()
+
+        st.markdown("---")
+        st.markdown("**All active overrides**")
+        if not overrides:
+            st.caption("No overrides set — every sequence is running off its own data (or the "
+                       "code-configured floor in core/config.py).")
+        else:
+            st.dataframe(
+                pd.DataFrame([{"Sequence": k, "Next Value": v} for k, v in sorted(overrides.items())]),
+                use_container_width=True, hide_index=True,
+            )

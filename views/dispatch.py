@@ -10,13 +10,24 @@ from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import (
     insert_dispatch, get_dispatch, get_orders, delete_row, update_dispatch,
     create_edit_request, get_edit_requests, add_custom_product, get_product_config,
+    get_sequence_overrides,
 )
 from core.ui import client_name_field, truck_name_field, driver_name_field, flash, show_flashes, transport_fields
-from core.sequencing import next_sequence_number, is_duplicate
+from core.sequencing import next_sequence_number, is_duplicate, sequence_key
 from core.visibility import di_dispatch_warnings
 from core.permissions import has_permission
 
 LAKH = 100_000
+
+
+def _challan_start(plant, sale_type):
+    """Effective floor for this (plant, Sale Type)'s Challan No. sequence —
+    an admin-set override (Admin > Sequence Numbers) takes priority over
+    the code-configured CHALLAN_NO_START, same as core/config.py's
+    challan_no_start() otherwise falls back to."""
+    overrides = get_sequence_overrides()
+    return overrides.get(sequence_key("challan_no", plant, sale_type),
+                          challan_no_start(plant, sale_type))
 
 
 def _pending_mask(df):
@@ -265,7 +276,7 @@ def _show_dispatch_operator():
     challan_plant = _challan_plant("disp_op", st.session_state["disp_op_lines"], locked_plant)
     df_seq        = _plant_rows(df_known, challan_plant)
     next_challan  = next_sequence_number(df_seq, "challan_no", sale_type, date_col="date",
-                                         start=challan_no_start(challan_plant, sale_type),
+                                         start=_challan_start(challan_plant, sale_type),
                                          ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
 
     c1, c2, c3 = st.columns(3)
@@ -695,7 +706,7 @@ def show(PLOT):
         challan_plant_main = _challan_plant("disp_main", st.session_state["disp_main_lines"])
         df_seq_main        = _plant_rows(df_all, challan_plant_main)
         next_challan_main  = next_sequence_number(df_seq_main, "challan_no", sale_type, date_col="date",
-                                                  start=challan_no_start(challan_plant_main, sale_type),
+                                                  start=_challan_start(challan_plant_main, sale_type),
                                                   ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
 
         c1, c2, c3, c4 = st.columns(4)
