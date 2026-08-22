@@ -259,7 +259,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
         header     : dict with order_date, client_name, contact_person, phone,
                      office, gstin, client_type, mode_of_payment, sale_type,
                      delivery_address (site address), site_person, site_phone,
-                     remarks.
+                     po_name, po_date, remarks.
         lines      : list of dicts with product, qty_ordered, rate, total_amount.
         dispatched : optional dict {product: {"qty": x, "value": y}} of qty already
                      dispatched against this DI, for a pending-qty column.
@@ -283,6 +283,7 @@ def generate_dispatch_instruction(di_no, header, lines, dispatched=None):
     order_pairs = [
         [("DI No.", di_no), ("Order Date", header.get("order_date", "—"))],
         [("Payment Mode", header.get("mode_of_payment", "—")), ("Sale Type", header.get("sale_type", "—"))],
+        [("PO Name", header.get("po_name") or "—"), ("PO Date", header.get("po_date") or "—")],
     ]
     story.append(_detail_grid(ss, order_pairs, [43 * mm, 43 * mm, 43 * mm, 45 * mm]))
     story.append(Spacer(1, 2 * mm))

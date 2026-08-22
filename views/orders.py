@@ -317,6 +317,12 @@ def show(PLOT):
     office = j3.text_input("Office",  value=_cv("office"), key=f"ord_office_{_ck}")
     gstin  = j4.text_input("GSTIN",   value=_cv("gstin"),  key=f"ord_gstin_{_ck}")
 
+    p1, p2 = st.columns(2)
+    po_name = p1.text_input("PO Name", value=_hv("po_name"), key="ord_po_name")
+    _po_date_raw = pd.to_datetime(_hv("po_date"), errors="coerce") if hdr_row is not None else None
+    po_date = p2.date_input("PO Date", value=_po_date_raw.date() if pd.notna(_po_date_raw) else None,
+                             key="ord_po_date")
+
     _gst_default = str(hdr_row.get("gst_applicable", False)).lower() in ("true", "1") if hdr_row is not None else False
     gst_applicable = st.checkbox(f"Include GST (@{GST_PCT:.0f}%) — added on top of Rate for every line below",
                                   value=_gst_default, key="ord_gst_applicable")
@@ -458,6 +464,8 @@ def show(PLOT):
                 "delivery_address": delivery_addr,
                 "site_person":      site_person,
                 "site_phone":       site_phone,
+                "po_name":          po_name,
+                "po_date":          str(po_date) if po_date else "",
                 "remarks":          st.session_state.get("ord_remarks", ""),
                 "gst_applicable":   gst_applicable,
             }
@@ -533,7 +541,7 @@ def show(PLOT):
                         del st.session_state[k]
                 for k in ("ord_transport_mode", "ord_transport_rate", "ord_transport_gst",
                           "ord_payment", "ord_product_type", "ord_gst_applicable", "ord_remarks",
-                          "ord_client_pick", "ord_client_new"):
+                          "ord_client_pick", "ord_client_new", "ord_po_name", "ord_po_date"):
                     st.session_state.pop(k, None)
                 st.rerun()
             else:
@@ -578,6 +586,10 @@ def show(PLOT):
         _agg["product_type"] = ("product_type", "first")
     if "sale_type" in df_orders.columns:
         _agg["sale_type"] = ("sale_type", "first")
+    if "po_name" in df_orders.columns:
+        _agg["po_name"] = ("po_name", "first")
+    if "po_date" in df_orders.columns:
+        _agg["po_date"] = ("po_date", "first")
     if "created_at" in df_orders.columns:
         _agg["created_at"] = ("created_at", "first")
     di_summary = df_orders.groupby("di_no").agg(**_agg).reset_index().sort_values("order_date", ascending=False)
@@ -618,7 +630,7 @@ def show(PLOT):
     show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","Plant","products","Status",
                  "qty_ordered","dispatched_qty","pending_qty",
                  "total_ordered","gst_amount","transport_value","transport_gst_amount",
-                 "dispatched_value","pending_value","challans","created_at"]
+                 "dispatched_value","pending_value","po_name","po_date","challans","created_at"]
     show_cols = [c for c in show_cols if c in di_summary.columns]
     rename_map = {
         "di_no":"DI No.","order_date":"Date","client_name":"Client",
@@ -627,6 +639,7 @@ def show(PLOT):
         "pending_qty":"Pending Qty","total_ordered":"Material Val (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "dispatched_value":"Disp Val (₹)","pending_value":"Pending Val (₹)",
+        "po_name":"PO Name","po_date":"PO Date",
         "challans":"Challans","created_at":"Entered At",
     }
     sum_cols = [c for c in ["qty_ordered","dispatched_qty","pending_qty",
@@ -634,6 +647,7 @@ def show(PLOT):
                              "dispatched_value","pending_value"]
                 if c in di_summary.columns] if role != "headoffice" else None
     col_cfg = {"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
+               "po_date": st.column_config.DateColumn("PO Date", format="DD-MMM-YYYY"),
                "created_at": timestamp_col_config()}
 
     table_by_plant(di_summary, key="ord_pipeline", sum_cols=sum_cols,
@@ -690,6 +704,9 @@ def show(PLOT):
             "delivery_address": hdr.get("delivery_address", ""),
             "site_person":      hdr.get("site_person", ""),
             "site_phone":       hdr.get("site_phone", ""),
+            "po_name":          hdr.get("po_name", ""),
+            "po_date":          (lambda d: d.strftime('%d-%b-%Y') if pd.notna(d) else "")(
+                                    pd.to_datetime(hdr.get("po_date"), errors="coerce")),
             "remarks":          hdr.get("remarks", ""),
         }
         _pdf_cols2 = ["product", "qty_ordered", "rate", "total_amount"] + (["gst_amount"] if "gst_amount" in di_rows.columns else [])
@@ -745,6 +762,11 @@ def show(PLOT):
                 e_site_person = ec9.text_input("Site Person",    value=str(erow.get("site_person","") or ""))
                 e_site_phone  = ec10.text_input("Site Phone No.", value=str(erow.get("site_phone","") or ""))
 
+                ec11, ec12 = st.columns(2)
+                e_po_name = ec11.text_input("PO Name", value=str(erow.get("po_name","") or ""))
+                _e_po_date = pd.to_datetime(erow.get("po_date"), errors="coerce")
+                e_po_date = ec12.date_input("PO Date", value=_e_po_date.date() if pd.notna(_e_po_date) else None)
+
                 epr1, epr2, epr3, epr4 = st.columns(4)
                 e_prod   = epr1.selectbox("Product", ORDER_PRODUCTS,
                                          index=ORDER_PRODUCTS.index(erow["product"]) if erow.get("product") in ORDER_PRODUCTS else 0)
@@ -786,6 +808,7 @@ def show(PLOT):
                         "office": e_office, "gstin": e_gstin, "client_type": e_ctype,
                         "product_type": e_ptype,
                         "delivery_address": e_addr, "site_person": e_site_person, "site_phone": e_site_phone,
+                        "po_name": e_po_name, "po_date": str(e_po_date) if e_po_date else "",
                         "product": e_prod, "qty_ordered": e_qty, "rate": e_rate,
                         "total_amount": e_total if e_total > 0 else round(e_qty * e_rate, 2),
                         "gst_applicable": e_gst_applicable, "gst_amount": e_gst_amount,

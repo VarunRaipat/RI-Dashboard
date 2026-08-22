@@ -177,6 +177,8 @@ CREATE TABLE IF NOT EXISTS orders (
     delivery_date     TEXT,
     sale_type         TEXT DEFAULT 'Sale A',
     product_type      TEXT,
+    po_name           TEXT,
+    po_date           TEXT,
     remarks           TEXT,
     created_at        TIMESTAMPTZ DEFAULT NOW()
 );
@@ -404,6 +406,8 @@ ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS po_name TEXT;
+ALTER TABLE orders   ADD COLUMN IF NOT EXISTS po_date TEXT;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_mode TEXT DEFAULT 'per_unit';
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
