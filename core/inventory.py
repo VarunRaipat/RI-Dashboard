@@ -13,10 +13,10 @@ _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
 _RM_LABEL = INVENTORY_MATERIAL_LABELS
 
-# Cement/GGBS aren't tied to any single product — they're the day's total
-# batch usage entered once per DPR submission (see views/dpr.py), summed
-# from the rm_usage table instead.
-_RM_USAGE_CONSUME_COL = {"cement_ppc": "cement_bags", "ggbs": "ggbs_bags"}
+# Cement/GGBS/Sand aren't tied to any single product — they're the day's
+# total batch usage entered once per DPR submission (see views/dpr.py),
+# summed from the rm_usage table instead.
+_RM_USAGE_CONSUME_COL = {"cement_ppc": "cement_bags", "ggbs": "ggbs_bags", "sand": "sand_cft"}
 
 
 def _since_anchor(df, date_col="date"):
@@ -78,8 +78,8 @@ def finished_goods_summary(plant=None):
 
 
 def rm_summary(plant):
-    """Current stock — and its value at RM cost price — for Cement and GGBS,
-    scoped to one plant (`plant` is required — Pipe Factory and Pole Factory
+    """Current stock — and its value at RM cost price — for Cement, GGBS and
+    Sand, scoped to one plant (`plant` is required — Pipe Factory and Pole Factory
     each carry their own separate cement/GGBS stock, per Gate Entry's Plant
     field and the DPR-level Plant tag on rm_usage rows). "Received" comes
     from Gate Entry ("In" log rows for that item and plant). "Consumed"

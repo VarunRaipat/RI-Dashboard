@@ -93,12 +93,13 @@ def show(PLOT):
         st.rerun()
 
     st.markdown('<div class="section-header">Raw Materials Used Today</div>', unsafe_allow_html=True)
-    st.caption("Total Cement and GGBS bags consumed today, across all products above — for "
+    st.caption("Total Cement, GGBS and Sand consumed today, across all products above — for "
                "inventory reconciliation only (doesn't affect cost/profit, which uses Concrete "
                "Volume instead).")
-    rmc1, rmc2 = st.columns(2)
+    rmc1, rmc2, rmc3 = st.columns(3)
     cement_bags = rmc1.number_input("Cement Used (Bags)", min_value=0.0, step=0.5, key="dpr_cement_bags")
     ggbs_bags   = rmc2.number_input("GGBS Used (Bags)",    min_value=0.0, step=0.5, key="dpr_ggbs_bags")
+    sand_cft    = rmc3.number_input("Sand Used (CFT)",     min_value=0.0, step=0.5, key="dpr_sand_cft")
 
     st.markdown("")
     if not can_add_dpr:
@@ -128,14 +129,14 @@ def show(PLOT):
         if not saved_rows:
             st.error("Enter Nos. > 0 for at least one product line.")
         else:
-            if cement_bags > 0 or ggbs_bags > 0:
+            if cement_bags > 0 or ggbs_bags > 0 or sand_cft > 0:
                 try:
                     insert_rm_usage({
                         "date": str(entry_date), "plant": plant,
-                        "cement_bags": cement_bags, "ggbs_bags": ggbs_bags,
+                        "cement_bags": cement_bags, "ggbs_bags": ggbs_bags, "sand_cft": sand_cft,
                     })
                 except Exception:
-                    st.warning("⚠️ Product lines saved, but Cement/GGBS usage could not be recorded "
+                    st.warning("⚠️ Product lines saved, but Cement/GGBS/Sand usage could not be recorded "
                                "(reconciliation only — doesn't affect cost/profit).")
 
             st.toast("✅ DPR entry saved!")
@@ -150,7 +151,7 @@ def show(PLOT):
                     if k in st.session_state:
                         del st.session_state[k]
             st.session_state.dpr_lines = 1
-            for k in ("dpr_cement_bags", "dpr_ggbs_bags"):
+            for k in ("dpr_cement_bags", "dpr_ggbs_bags", "dpr_sand_cft"):
                 if k in st.session_state:
                     del st.session_state[k]
 
@@ -296,9 +297,9 @@ def show(PLOT):
         df_rmu = df_rmu[(df_rmu["date"] >= pd.Timestamp(dpr_start)) & (df_rmu["date"] <= pd.Timestamp(dpr_end))]
         df_rmu = df_rmu.sort_values(["date", "id"], ascending=[False, False]).reset_index(drop=True)
         df_rmu = add_ist_timestamp(df_rmu)
-    show_cols_rmu = ["date", "cement_bags", "ggbs_bags", "remarks", "created_at"]
+    show_cols_rmu = ["date", "cement_bags", "ggbs_bags", "sand_cft", "remarks", "created_at"]
     rename_rmu = {"date": "Date", "cement_bags": "Cement (Bags)", "ggbs_bags": "GGBS (Bags)",
-                  "remarks": "Remarks", "created_at": "Entered At"}
+                  "sand_cft": "Sand (CFT)", "remarks": "Remarks", "created_at": "Entered At"}
 
     tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
     for tab, plant in zip(tabs, PLANTS):
@@ -311,13 +312,13 @@ def show(PLOT):
             else:
                 st.info("No entries yet for this plant.")
 
-            st.markdown('<div class="section-header">Recent Cement/GGBS Usage</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Recent Cement/GGBS/Sand Usage</div>', unsafe_allow_html=True)
             df_rmu_p = df_rmu[df_rmu["plant"] == plant] if not df_rmu.empty else df_rmu
             if not df_rmu_p.empty:
                 interactive_table(
                     df_rmu_p, key=f"dpr_rmu_{plant}",
                     show_cols=[c for c in show_cols_rmu if c in df_rmu_p.columns],
-                    sum_cols=[c for c in ["cement_bags", "ggbs_bags"] if c in df_rmu_p.columns],
+                    sum_cols=[c for c in ["cement_bags", "ggbs_bags", "sand_cft"] if c in df_rmu_p.columns],
                     rename=rename_rmu,
                     col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
                                 "created_at": timestamp_col_config()},

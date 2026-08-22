@@ -51,11 +51,13 @@ CREATE TABLE IF NOT EXISTS rm_usage (
     plant           TEXT,
     cement_bags     REAL DEFAULT 0,
     ggbs_bags       REAL DEFAULT 0,
+    sand_cft        REAL DEFAULT 0,
     remarks         TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
 ALTER TABLE rm_usage ADD COLUMN IF NOT EXISTS plant TEXT;
+ALTER TABLE rm_usage ADD COLUMN IF NOT EXISTS sand_cft REAL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS dispatch (
     id              BIGSERIAL PRIMARY KEY,
@@ -353,20 +355,22 @@ CREATE TABLE IF NOT EXISTS pipe_diameter_config (
 );
 ALTER TABLE pipe_diameter_config DISABLE ROW LEVEL SECURITY;
 
--- ── Migration: Cement/GGBS batch usage (inventory reconciliation only) ──────
--- New table — DPR now asks for the day's total Cement/GGBS bags consumed,
--- separate from any single product line. Doesn't affect cost/profit.
+-- ── Migration: Cement/GGBS/Sand batch usage (inventory reconciliation only) ──
+-- New table — DPR now asks for the day's total Cement/GGBS bags and Sand CFT
+-- consumed, separate from any single product line. Doesn't affect cost/profit.
 CREATE TABLE IF NOT EXISTS rm_usage (
     id              BIGSERIAL PRIMARY KEY,
     date            TEXT    NOT NULL,
     plant           TEXT,
     cement_bags     REAL DEFAULT 0,
     ggbs_bags       REAL DEFAULT 0,
+    sand_cft        REAL DEFAULT 0,
     remarks         TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE rm_usage DISABLE ROW LEVEL SECURITY;
 ALTER TABLE rm_usage ADD COLUMN IF NOT EXISTS plant TEXT;
+ALTER TABLE rm_usage ADD COLUMN IF NOT EXISTS sand_cft REAL DEFAULT 0;
 
 -- ── Migration: Power becomes a flat Rs.1,000/entry cost ─────────────────────
 -- Power_per_block columns (if they exist from an earlier version) are left

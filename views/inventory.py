@@ -7,7 +7,7 @@ from core.ui import interactive_table, show_flashes
 LAKH = 100_000
 
 
-def _render_plant_section(plant, can_export, show_value):
+def _render_plant_section(plant, can_export, show_value, can_export_rm):
     fg = finished_goods_summary(plant=plant)
     fg_disp = fg.copy()
     for col in ["Opening", "Produced", "Dispatched", "Current Stock", "Value (₹)"]:
@@ -33,8 +33,8 @@ def _render_plant_section(plant, can_export, show_value):
                       show_export=can_export)
 
     st.markdown("---")
-    st.markdown('<div class="section-header">Raw Materials — Cement / GGBS</div>', unsafe_allow_html=True)
-    st.caption(f"{plant}'s own Cement/GGBS balance — received via Gate Entry (tagged {plant}), "
+    st.markdown('<div class="section-header">Raw Materials — Cement / GGBS / Sand</div>', unsafe_allow_html=True)
+    st.caption(f"{plant}'s own Cement/GGBS/Sand balance — received via Gate Entry (tagged {plant}), "
                "consumed via this plant's Production Entries.")
 
     rm = rm_summary(plant)
@@ -49,13 +49,14 @@ def _render_plant_section(plant, can_export, show_value):
         rm_sum_cols = rm_sum_cols + ["Value (₹)"]
 
     interactive_table(rm_disp, key=f"inv_rm_{plant}", sum_cols=rm_sum_cols, show_cols=rm_cols,
-                      show_export=can_export)
+                      show_export=can_export_rm)
 
 
 def show(PLOT):
     show_flashes()
     role = st.session_state.get("role", "dispatch")
     can_export = role not in ("dispatch", "factory")
+    can_export_rm = role != "dispatch"  # factory operator can export the Raw Material table specifically
     show_value = role not in ("dispatch", "factory")  # dispatch/factory see quantities only, no ₹ value
     locked_plant = st.session_state.get("plant")
 
@@ -69,12 +70,12 @@ def show(PLOT):
                f"Cement/GGBS stock.")
 
     if locked_plant:
-        _render_plant_section(locked_plant, can_export, show_value)
+        _render_plant_section(locked_plant, can_export, show_value, can_export_rm)
     else:
         tabs = st.tabs([f"🔵 {PLANTS[0]}", f"⚙️ {PLANTS[1]}"] if len(PLANTS) >= 2 else [f"🏭 {p}" for p in PLANTS])
         for tab, plant in zip(tabs, PLANTS):
             with tab:
-                _render_plant_section(plant, can_export, show_value)
+                _render_plant_section(plant, can_export, show_value, can_export_rm)
 
     # ── Plant Equipment & Misc Parts (from Gate Entry log) ─────────────────────
     st.markdown("---")

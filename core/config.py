@@ -458,14 +458,14 @@ del _d, _c, _joint, _sku, _prod_names, _disp_names, _collar_sku, _np4_sku
 # above. "Consumed" for these two comes from the rm_usage table (one row per
 # DPR submission, not tied to any single product), not from a production
 # table column.
-RM_INVENTORY_OPENING = {"cement_ppc": 82, "ggbs": 0}
+RM_INVENTORY_OPENING = {"cement_ppc": 82, "ggbs": 0, "sand": 0}
 CEMENT_GGBS_KG_PER_BAG = 50
 
-# Labels for every RM_INVENTORY_OPENING key — cement_ppc/ggbs are
+# Labels for every RM_INVENTORY_OPENING key — cement_ppc/ggbs/sand are
 # inventory-only entries that aren't priced/costed materials, just tracked
 # for stock reconciliation.
 INVENTORY_MATERIAL_LABELS = {m["key"]: m["label"] for m in RAW_MATERIALS}
-INVENTORY_MATERIAL_LABELS.update({"cement_ppc": "PPC Cement", "ggbs": "GGBS"})
+INVENTORY_MATERIAL_LABELS.update({"cement_ppc": "PPC Cement", "ggbs": "GGBS", "sand": "Sand"})
 
 # ── Gate Entry (raw material / equipment / parts movement log) ───────────────
 GATE_CATEGORIES = ["Raw Material", "Plant Equipment & Parts", "Miscellaneous Parts"]

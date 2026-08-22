@@ -449,12 +449,13 @@ def insert_production(data):
 
 
 def insert_rm_usage(data):
-    """One row per DPR submission (batch) — Cement/GGBS bags consumed that
-    day, not tied to any single product line (see views/dpr.py)."""
+    """One row per DPR submission (batch) — Cement/GGBS bags and Sand CFT
+    consumed that day, not tied to any single product line (see
+    views/dpr.py)."""
     if _use_supabase(): _sb_insert("rm_usage", data)
     else: _sqlite_insert("rm_usage", data)
     _invalidate_cache()
-    log_activity("create", "DPR Entry", f"RM usage: cement {data.get('cement_bags','')} bags, ggbs {data.get('ggbs_bags','')} bags")
+    log_activity("create", "DPR Entry", f"RM usage: cement {data.get('cement_bags','')} bags, ggbs {data.get('ggbs_bags','')} bags, sand {data.get('sand_cft','')} cft")
 
 
 @st.cache_data(ttl=30)
