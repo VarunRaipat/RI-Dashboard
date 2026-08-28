@@ -4,7 +4,7 @@ from core.config import (
     PRODUCT_CONFIG, RAW_MATERIALS, PIPE_DIAMETER_CONFIG, PRICING_KEY_TO_DIAMETER_MM,
     SKU_TO_PRICING_KEY, EMI_PER_DAY, POWER_PER_DAY, ADMIN_PER_DAY, MISC_PCT, GST_PCT,
     REPAIRING_PCT_OF_PRODUCTION, BOUNDARY_WALL_PILLAR_FOR_HEIGHT, BOUNDARY_WALL_INSTALL_RATE_PER_RFT,
-    BOUNDARY_WALL_SLAB_LENGTH_FT,
+    BOUNDARY_WALL_SLAB_LENGTH_FT, plant_for_product,
 )
 
 
@@ -182,13 +182,25 @@ def loading_unloading_for_dispatch(df_dispatch: pd.DataFrame, product_config: di
 
 
 def liability_totals(df_production: pd.DataFrame, df_dispatch: pd.DataFrame = None,
-                      product_config: dict = None, pipe_diameter_config: dict = None) -> dict:
+                      product_config: dict = None, pipe_diameter_config: dict = None,
+                      plant: str = None) -> dict:
     """Labour cost totals for the given (already date-filtered) period:
     Production + Jalli + Welding (from DPR), Repairing (always
     REPAIRING_PCT_OF_PRODUCTION% of Production cost — not a separate DPR
     figure), and Loading/Unloading (from Dispatch quantity, not DPR Nos —
     see loading_unloading_for_dispatch). "total_cost" is the plain sum of
-    all five — no percentage/markup applied."""
+    all five — no percentage/markup applied.
+
+    If `plant` ("Pipe Factory" / "Pole Factory") is given, both DataFrames
+    are first narrowed to rows whose product maps to that plant
+    (plant_for_product) so the figures are for that plant alone; plant=None
+    keeps the combined company total."""
+    if plant is not None:
+        if df_production is not None and not df_production.empty and "product" in df_production.columns:
+            df_production = df_production[df_production["product"].map(plant_for_product) == plant]
+        if df_dispatch is not None and not df_dispatch.empty and "product" in df_dispatch.columns:
+            df_dispatch = df_dispatch[df_dispatch["product"].map(plant_for_product) == plant]
+
     if df_production is not None and not df_production.empty:
         production_cost = float(df_production.get("production_cost", 0).sum())
         welding_cost    = float(df_production.get("welding_cost", 0).sum())

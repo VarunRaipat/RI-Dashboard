@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import timedelta
 from core.db import get_production, get_dispatch, get_product_config, get_pipe_diameter_config
 from core.calculations import liability_totals
-from core.config import REPAIRING_PCT_OF_PRODUCTION
+from core.config import REPAIRING_PCT_OF_PRODUCTION, PLANTS
 from core.ui import show_flashes
 from core.tz import today_ist
 
@@ -44,16 +44,25 @@ def show(PLOT):
 
     df_prod = get_production(str(start), str(end))
     df_disp = get_dispatch(str(start), str(end))
-    r = liability_totals(df_prod, df_disp, get_product_config(), get_pipe_diameter_config())
+    pcfg, dcfg = get_product_config(), get_pipe_diameter_config()
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Production", f"₹{r['production_cost']:,.0f}")
-    c2.metric("Welding", f"₹{r['welding_cost']:,.0f}")
-    c3.metric("Jalli", f"₹{r['jalli_cost']:,.0f}")
+    def _breakdown(r):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Production", f"₹{r['production_cost']:,.0f}")
+        c2.metric("Welding", f"₹{r['welding_cost']:,.0f}")
+        c3.metric("Jalli", f"₹{r['jalli_cost']:,.0f}")
 
-    c4, c5 = st.columns(2)
-    c4.metric(f"Repairing ({REPAIRING_PCT_OF_PRODUCTION:.0f}%)", f"₹{r['repairing_cost']:,.0f}")
-    c5.metric("Loading/Unloading", f"₹{r['loading_unloading_cost']:,.0f}")
+        c4, c5 = st.columns(2)
+        c4.metric(f"Repairing ({REPAIRING_PCT_OF_PRODUCTION:.0f}%)", f"₹{r['repairing_cost']:,.0f}")
+        c5.metric("Loading/Unloading", f"₹{r['loading_unloading_cost']:,.0f}")
+        st.metric("Total", f"₹{r['total_cost']:,.0f}")
 
-    st.markdown("---")
-    st.metric("Total", f"₹{r['total_cost']:,.0f}")
+    per_plant = {p: liability_totals(df_prod, df_disp, pcfg, dcfg, plant=p) for p in PLANTS}
+    combined  = liability_totals(df_prod, df_disp, pcfg, dcfg)
+
+    tabs = st.tabs([*PLANTS, "Combined"])
+    for tab, plant in zip(tabs, PLANTS):
+        with tab:
+            _breakdown(per_plant[plant])
+    with tabs[-1]:
+        _breakdown(combined)
