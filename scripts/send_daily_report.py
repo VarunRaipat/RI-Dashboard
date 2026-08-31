@@ -79,10 +79,10 @@ HTTP_TIMEOUT = 30
 SMTP_TIMEOUT = 60
 
 
-def _fetch(table, date_filter=True):
+def _fetch(table, date_filter=True, date_col="date"):
     params = {"select": "*", "limit": "1000"}
     if date_filter:
-        params["date"] = f"eq.{TODAY}"
+        params[date_col] = f"eq.{TODAY}"
     r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, params=params,
                      timeout=HTTP_TIMEOUT)
     # Fail the run rather than returning no rows. An empty list here is
@@ -100,8 +100,9 @@ def _fetch(table, date_filter=True):
 
 
 def build_email():
-    prod_rows = _fetch("production")
-    disp_rows = _fetch("dispatch")
+    prod_rows  = _fetch("production")
+    disp_rows  = _fetch("dispatch")
+    order_rows = _fetch("orders", date_col="order_date")
 
     # ── Production totals ─────────────────────────────────────────────────────
     total_nos     = sum(r.get("nos", 0) for r in prod_rows)
@@ -119,6 +120,12 @@ def build_email():
     # ── Dispatch totals ───────────────────────────────────────────────────────
     total_dispatch = sum(r.get("dispatch_value", 0) for r in disp_rows)
     dispatch_trips = len(disp_rows)
+
+    # ── Orders booked today ───────────────────────────────────────────────────
+    # One order (DI) spans several rows — one per product line — so the order
+    # count is the number of distinct di_no values, not len(order_rows).
+    order_count  = len({r.get("di_no") for r in order_rows if r.get("di_no")})
+    orders_value = sum(r.get("total_amount", 0) for r in order_rows)
 
     # ── Colour logic ──────────────────────────────────────────────────────────
     profit_color = "#27AE60" if total_profit >= 0 else "#E05252"
@@ -199,6 +206,10 @@ def build_email():
                     <tr>
                       <td style="font-size:12px;color:#7A6565;padding-top:6px;">Total Cost</td>
                       <td style="font-size:13px;color:#F2EDED;font-weight:600;text-align:right;padding-top:6px;">₹{total_cost:,.0f}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:12px;color:#7A6565;padding-top:6px;border-top:1px solid rgba(139,36,40,0.12);">Orders Booked</td>
+                      <td style="font-size:13px;color:#F2EDED;font-weight:600;text-align:right;padding-top:6px;border-top:1px solid rgba(139,36,40,0.12);">{order_count} &nbsp;·&nbsp; ₹{orders_value:,.0f}</td>
                     </tr>
                   </table>
                 </td>
