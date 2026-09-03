@@ -479,15 +479,11 @@ def _operator_entry_form(locked_plant, sale_type, df_known, df_orders, op_produc
                 f'<div class="success-box">✅ <b>Challan {challan_no} saved — {len(saved)} product line(s)!</b></div>',
                 unsafe_allow_html=True,
             )
+            # Operators don't see money — quantities only, no Rate / Value / Transport totals.
             for product, qty_dispatched, rate, d_value, gst_amt, qty_ordered, t_value, t_gst_amt in saved:
-                m1, m2, m3, m4 = st.columns(4)
+                m1, m2 = st.columns(2)
                 m1.metric(product[:22], f"{int(qty_dispatched):,} nos")
-                m2.metric("Rate",           f"₹{rate:.2f}/nos")
-                m3.metric("Material Value", f"₹{d_value:,.0f}" + (f" (incl. ₹{gst_amt:,.0f} GST)" if gst_amt else ""))
-                m4.metric("Balance",        f"{int(qty_ordered - qty_dispatched):,} nos")
-                if t_value or t_gst_amt:
-                    st.caption(f"Transport: ₹{t_value:,.0f}" + (f" + ₹{t_gst_amt:,.0f} GST" if t_gst_amt else "")
-                               + f" — **Grand Total: ₹{(d_value + t_value + t_gst_amt):,.0f}**")
+                m2.metric("Balance",    f"{int(qty_ordered - qty_dispatched):,} nos")
 
             _reset_lines("disp_op", n_lines)
             _reset_challan_fields("disp_op")
@@ -507,16 +503,17 @@ def _operator_recent_and_edits(locked_plant, op_products):
         df_op_rec = df_op_rec.sort_values(["date", "id"], ascending=[False, False]).head(200).reset_index(drop=True)
         from core.ui import interactive_table, add_ist_timestamp, timestamp_col_config
         df_op_rec = add_ist_timestamp(df_op_rec)
-        has_status = "status" in df_op_rec.columns
-        rec_cols = ["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched", "rate", "dispatch_value"]
-        if has_status:
+        # Operators don't see money — no Rate / Value columns here (admin and
+        # office roles get the full table in the main dispatch view).
+        rec_cols = ["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched"]
+        if "status" in df_op_rec.columns:
             rec_cols.append("status")
         rec_cols.append("created_at")
         interactive_table(
             df_op_rec, key="disp_op_rec",
             show_cols=rec_cols,
             rename={"date": "Date", "challan_no": "Challan", "di_no": "DI No.", "client_name": "Client",
-                    "product": "Product", "qty_dispatched": "Qty Dispatched", "rate": "Rate", "dispatch_value": "Value (₹)",
+                    "product": "Product", "qty_dispatched": "Qty Dispatched",
                     "status": "Status", "created_at": "Entered At"},
             col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
                         "created_at": timestamp_col_config()},
