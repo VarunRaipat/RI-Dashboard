@@ -118,8 +118,12 @@ def build_email():
         product_nos[p] = product_nos.get(p, 0) + r.get("nos", 0)
 
     # ── Dispatch totals ───────────────────────────────────────────────────────
-    total_dispatch = sum(r.get("dispatch_value", 0) for r in disp_rows)
-    dispatch_trips = len(disp_rows)
+    # Cancelled challans are ₹0 voids that never left the yard — keep them out
+    # of both the value and the trip count.
+    live_disp = [r for r in disp_rows
+                 if str(r.get("status") or "active").lower() != "cancelled"]
+    total_dispatch = sum(r.get("dispatch_value", 0) for r in live_disp)
+    dispatch_trips = len(live_disp)
 
     # ── Orders booked today ───────────────────────────────────────────────────
     # One order (DI) spans several rows — one per product line — so the order

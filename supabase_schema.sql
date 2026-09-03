@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS dispatch (
     remarks         TEXT,
     form_filled_by  TEXT,
     sale_type       TEXT DEFAULT 'Sale A',
+    status          TEXT DEFAULT 'active',
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -413,6 +414,12 @@ ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
+
+-- ── Migration: Cancelled / void challans ───────────────────────────────────
+-- A cancelled challan keeps its number (so the sequence doesn't skip) but is
+-- recorded as a ₹0, zero-qty row with status='cancelled' and only a remark.
+-- Existing rows are all live dispatches, so 'active' is the right backfill.
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
 
 -- ── Migration: Two plants (Pipe Factory / Pole Factory) ─────────────────────
 -- Finished-good products already map 1:1 to a plant by name (see

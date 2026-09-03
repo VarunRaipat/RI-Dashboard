@@ -5,6 +5,7 @@ from core.tz import today_ist
 from core.config import (
     DISPATCH_PRODUCTS, TRUCKS, DRIVERS, CLIENTS, SALE_TYPES, GST_PCT, challan_no_start,
     CHALLAN_NO_IGNORE, selling_price_unit, plant_for_product, products_for_plant, PLANTS,
+    cancelled_product_label,
 )
 from core.calculations import dispatch_value, gst_split, transport_charge
 from core.db import (
@@ -39,6 +40,9 @@ def _pending_mask(df):
         pending = df["bill_no"].isna() | (df["bill_no"].astype(str).str.strip().isin(["", "None", "nan"]))
     if "sale_type" in df.columns:
         pending = pending & (df["sale_type"] == "Sale A")
+    if "status" in df.columns:
+        # A cancelled challan is a ₹0 void — it's never "pending an invoice".
+        pending = pending & (df["status"].fillna("active").astype(str).str.lower() != "cancelled")
     return pending
 
 
@@ -249,6 +253,72 @@ def _reset_challan_fields(prefix, extra_keys=()):
         st.session_state.pop(key, None)
 
 
+def _render_cancel_entry(prefix, sale_type, df_scope, locked_plant):
+    """Minimal 'cancel this challan' form: it burns the next challan number
+    as a void so the paper book and the app stay in step, but asks for
+    nothing except a reason. Writes one status='cancelled', ₹0, zero-qty row
+    (product = the CANCELLED-<plant> sentinel so the number stays in that
+    plant's sequence) and returns after st.rerun() on success.
+
+    `df_scope` is the dispatch history to number against (all rows, or the
+    locked plant's rows) — it's narrowed to the chosen plant here."""
+    st.markdown('<div class="warn-box">🚫 <b>Cancelling a challan</b> — the number is recorded '
+                'as void (₹0, no stock or invoice impact). Only a reason is needed.</div>',
+                unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    entry_date = c1.date_input("Date", today_ist(), key=f"{prefix}_cx_date")
+    if locked_plant:
+        challan_plant = locked_plant
+        c2.text_input("Plant", value=locked_plant, disabled=True, key=f"{prefix}_cx_plant_locked")
+    else:
+        challan_plant = c2.selectbox("Plant (whose challan book?)", PLANTS, key=f"{prefix}_cx_plant")
+
+    df_seq = _plant_rows(df_scope, challan_plant)
+    next_challan = next_sequence_number(df_seq, "challan_no", sale_type, date_col="date",
+                                        start=_challan_start(challan_plant, sale_type),
+                                        ignore=CHALLAN_NO_IGNORE.get(sale_type, ()))
+    challan_no = str(next_challan)
+    c3.text_input("Challan No. being cancelled", value=challan_no, disabled=True,
+                  key=f"{prefix}_cx_challan_{challan_plant}_{next_challan}",
+                  help=f"{challan_plant}'s next {sale_type} number. Recording it as cancelled "
+                       f"keeps the sequence unbroken — the following challan will be "
+                       f"{int(next_challan) + 1}.")
+
+    reason = st.text_input("Reason for cancellation *", key=f"{prefix}_cx_reason",
+                           placeholder="e.g. truck broke down, client refused delivery, wrong entry")
+    filled_by = st.text_input("Form Filled By", key=f"{prefix}_cx_filled_by")
+
+    if st.button("🚫 Confirm Cancel Challan", type="primary", use_container_width=True,
+                 key=f"{prefix}_cx_submit"):
+        if not reason.strip():
+            st.error("Enter a reason for cancelling this challan.")
+        elif is_duplicate(df_seq, "challan_no", challan_no, sale_type=sale_type, date_col="date"):
+            st.error(f"Challan No. {challan_no} already exists for {challan_plant}. "
+                     f"Refresh the page and try again.")
+        else:
+            insert_dispatch({
+                "date": str(entry_date), "challan_no": challan_no, "di_no": None,
+                "bill_no": None, "sale_type": sale_type,
+                "client_name": None, "delivery_address": None,
+                "product": cancelled_product_label(challan_plant),
+                "qty_ordered": 0, "qty_dispatched": 0, "rate": 0,
+                "dispatch_value": 0, "gst_applicable": False, "gst_amount": 0,
+                "transport_mode": "per_unit", "transport_rate": 0,
+                "transport_value": 0, "transport_gst_applicable": False,
+                "transport_gst_amount": 0,
+                "trip_distance": 0, "truck_no": None, "driver_name": None,
+                "remarks": reason.strip(), "form_filled_by": filled_by.strip() or None,
+                "status": "cancelled",
+            })
+            flash(f"🚫 Challan {challan_no} ({challan_plant}) cancelled.")
+            st.success(f"🚫 Challan {challan_no} recorded as cancelled. "
+                       f"Next challan will be {int(next_challan) + 1}.")
+            for k in (f"{prefix}_cx_reason", f"{prefix}_cx_filled_by", f"{prefix}_cancel"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+
 def _show_dispatch_operator():
     """Minimal view for dispatch role: challan entry form only."""
     locked_plant = st.session_state.get("plant")
@@ -270,6 +340,25 @@ def _show_dispatch_operator():
     sale_type    = st.selectbox("Sale Type", SALE_TYPES, key="disp_op_sale_type")
     _init_lines("disp_op_lines")
 
+    cancel_mode = st.checkbox(
+        "🚫 Cancel this challan instead — voids the next number, only a reason needed",
+        key="disp_op_cancel",
+        help="Use when a challan number was written in the paper book but the dispatch "
+             "never happened. The number is recorded as cancelled (₹0, no stock or "
+             "invoice impact) so the sequence stays unbroken.")
+
+    if cancel_mode:
+        _render_cancel_entry("disp_op", sale_type, df_known, locked_plant)
+    else:
+        _operator_entry_form(locked_plant, sale_type, df_known, df_orders, op_products,
+                             known_clients, known_trucks, known_drivers)
+
+    _operator_recent_and_edits(locked_plant, op_products)
+
+
+def _operator_entry_form(locked_plant, sale_type, df_known, df_orders, op_products,
+                         known_clients, known_trucks, known_drivers):
+    """The normal (non-cancel) challan entry form for the dispatch operator."""
     # Challan No. runs as its own sequence per plant, so both the max it
     # counts up from and the duplicate check are scoped to this plant's rows
     # only — the other plant's challans are a different book entirely.
@@ -404,7 +493,10 @@ def _show_dispatch_operator():
             _reset_challan_fields("disp_op")
             st.rerun()
 
-    # ── Recent challans + request-an-edit ──────────────────────────────────────
+
+def _operator_recent_and_edits(locked_plant, op_products):
+    """Recent Challans table + 'request an edit' expander — shown for the
+    dispatch operator in both normal and cancel mode."""
     st.markdown("---")
     st.markdown('<div class="section-header">Recent Challans</div>', unsafe_allow_html=True)
     df_op_rec = get_dispatch()
@@ -415,12 +507,17 @@ def _show_dispatch_operator():
         df_op_rec = df_op_rec.sort_values(["date", "id"], ascending=[False, False]).head(200).reset_index(drop=True)
         from core.ui import interactive_table, add_ist_timestamp, timestamp_col_config
         df_op_rec = add_ist_timestamp(df_op_rec)
+        has_status = "status" in df_op_rec.columns
+        rec_cols = ["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched", "rate", "dispatch_value"]
+        if has_status:
+            rec_cols.append("status")
+        rec_cols.append("created_at")
         interactive_table(
             df_op_rec, key="disp_op_rec",
-            show_cols=["date", "challan_no", "di_no", "client_name", "product", "qty_dispatched", "rate", "dispatch_value", "created_at"],
+            show_cols=rec_cols,
             rename={"date": "Date", "challan_no": "Challan", "di_no": "DI No.", "client_name": "Client",
                     "product": "Product", "qty_dispatched": "Qty Dispatched", "rate": "Rate", "dispatch_value": "Value (₹)",
-                    "created_at": "Entered At"},
+                    "status": "Status", "created_at": "Entered At"},
             col_config={"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
                         "created_at": timestamp_col_config()},
             show_export=False,
@@ -700,6 +797,15 @@ def show(PLOT):
         sale_type          = st.selectbox("Sale Type", SALE_TYPES, key="disp_main_sale_type")
         _init_lines("disp_main_lines")
 
+        if st.checkbox(
+            "🚫 Cancel a challan instead — voids the next number, only a reason needed",
+            key="disp_main_cancel",
+            help="Records the next challan number as cancelled (₹0, no stock or invoice "
+                 "impact) so the paper book and the app stay in step. Untick to go back "
+                 "to normal entry."):
+            _render_cancel_entry("disp_main", sale_type, df_all, None)
+            return
+
         # Per-plant challan book — see the operator form above. No locked
         # plant here, so the book is whichever plant the product lines
         # belong to; None means they span both and no number can be assigned.
@@ -855,7 +961,7 @@ def show(PLOT):
 
     show_cols = ["date","challan_no","di_no","bill_no","sale_type","Plant","client_name","product",
                  "qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount",
-                 "truck_no","driver_name","trip_distance","remarks","created_at"]
+                 "truck_no","driver_name","trip_distance","remarks","status","created_at"]
     show_cols = [c for c in show_cols if c in df.columns]
     rename_map = {
         "date":"Date","challan_no":"Challan","di_no":"DI No.","bill_no":"Bill No.","sale_type":"Sale Type",
@@ -863,15 +969,20 @@ def show(PLOT):
         "qty_dispatched":"Qty","dispatch_value":"Material Value (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "truck_no":"Truck","driver_name":"Driver","trip_distance":"Dist km","remarks":"Remarks",
-        "created_at":"Entered At",
+        "status":"Status","created_at":"Entered At",
     }
     sum_cols = [c for c in ["qty_dispatched","dispatch_value","gst_amount","transport_value","transport_gst_amount","trip_distance"] if c in df.columns]
     col_cfg  = {"date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY"),
                 "created_at": timestamp_col_config()}
 
+    if "status" in df.columns:
+        cancelled_mask = df["status"].fillna("active").astype(str).str.lower().eq("cancelled")
+    else:
+        cancelled_mask = pd.Series(False, index=df.index)
     pending_mask = _pending_mask(df)
-    df_pending = df[pending_mask.values].copy()
-    df_billed  = df[~pending_mask.values].copy()
+    df_pending   = df[pending_mask.values].copy()
+    df_billed    = df[(~pending_mask & ~cancelled_mask).values].copy()
+    df_cancelled = df[cancelled_mask.values].copy()
 
     if not df_pending.empty:
         st.markdown(f'<div class="warn-box">⏳ <b>{len(df_pending)} challans pending invoice</b> — Bill No. not yet assigned</div>', unsafe_allow_html=True)
@@ -881,6 +992,12 @@ def show(PLOT):
     if not df_billed.empty:
         st.markdown('<div class="section-header">Invoiced Challans</div>', unsafe_allow_html=True)
         table_by_plant(df_billed, key="disp_billed", sum_cols=sum_cols,
+                       show_cols=show_cols, rename=rename_map, col_config=col_cfg)
+
+    if not df_cancelled.empty:
+        st.markdown(f'<div class="section-header">🚫 Cancelled Challans ({len(df_cancelled)})</div>', unsafe_allow_html=True)
+        st.caption("Numbers recorded as void — ₹0, no stock or invoice impact. Kept so the challan sequence stays unbroken.")
+        table_by_plant(df_cancelled, key="disp_cancelled", sum_cols=sum_cols,
                        show_cols=show_cols, rename=rename_map, col_config=col_cfg)
 
     # ── Edit Entry (uses all data, not date-filtered) ─────────────────────────

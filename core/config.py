@@ -348,6 +348,19 @@ QUOTATION_VALIDITY_DAYS = 30
 
 PLANTS = ["Pipe Factory", "Pole Factory"]
 
+# Sentinel product written on a cancelled/void challan (see views/dispatch.py's
+# cancel-challan flow). It carries the plant name so the row still sits in the
+# right plant's challan book for sequencing — plant_for_product() reads it back
+# out below. The challan number is consumed (so the next challan is +1) but the
+# row has ₹0 value, 0 qty and status='cancelled', so it never touches stock,
+# invoicing or revenue.
+CANCELLED_PRODUCT_PREFIX = "CANCELLED"
+
+
+def cancelled_product_label(plant: str) -> str:
+    return f"{CANCELLED_PRODUCT_PREFIX} — {plant}"
+
+
 # Two physically separate plants (confirmed): every Hume Pipe SKU is cast at
 # Pipe Factory; every other product (Slab, Pillar, Fencing Pillar, PSC Pole,
 # Boundary Wall, and any admin-added custom product — those are always
@@ -358,6 +371,11 @@ PLANTS = ["Pipe Factory", "Pole Factory"]
 # ("Hume Pipe 300mm NP2 (M/F)") and a bare pricing key ("Hume Pipe 300mm
 # NP2") since SKU_TO_PRICING_KEY.get() falls back to the input unchanged.
 def plant_for_product(product_or_sku: str) -> str:
+    s = str(product_or_sku)
+    if s.startswith(CANCELLED_PRODUCT_PREFIX):
+        # Cancelled-challan sentinel — the plant is baked into the label so the
+        # void number stays in the correct plant's sequence.
+        return "Pipe Factory" if "Pipe Factory" in s else "Pole Factory"
     pricing_key = SKU_TO_PRICING_KEY.get(product_or_sku, product_or_sku)
     return "Pipe Factory" if str(pricing_key).startswith("Hume Pipe") else "Pole Factory"
 
