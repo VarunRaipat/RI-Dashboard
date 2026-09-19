@@ -531,3 +531,11 @@ ALTER TABLE quality_control    DISABLE ROW LEVEL SECURITY;
 ALTER TABLE rm_purchases       DISABLE ROW LEVEL SECURITY;
 ALTER TABLE gate_entries       DISABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_log       DISABLE ROW LEVEL SECURITY;
+
+-- Daily report double-send guard (scripts/send_daily_report.py). Run manually in
+-- the Supabase SQL editor; until then the guard is skipped (report still sends).
+CREATE TABLE IF NOT EXISTS report_log (
+    report_date DATE PRIMARY KEY,
+    sent_at     TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE report_log DISABLE ROW LEVEL SECURITY;

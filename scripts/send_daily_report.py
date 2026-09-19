@@ -1,6 +1,11 @@
 """
-Daily RI report — runs via GitHub Actions every evening at 8pm IST.
-Fetches today's production + dispatch from Supabase and emails the owner.
+Daily RI report — runs via GitHub Actions and lands in the inbox at 20:00 IST.
+Fetches the day's production + dispatch from Supabase and emails the owner.
+
+GitHub's cron only starts a job *near* the requested time, so the workflow
+triggers ~25 min early and this script sleeps until exactly 20:00:00 IST.
+A `report_log` row per report date stops the backstop run from re-sending.
+Set REPORT_FORCE=true (manual workflow input) to skip the wait and the guard.
 """
 import hashlib
 import os
@@ -8,7 +13,9 @@ import re
 import requests
 import smtplib
 import sys
-from datetime import date, timedelta
+import time
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -77,6 +84,47 @@ HEADERS = {
 # with no report and nothing in the log to say why.
 HTTP_TIMEOUT = 30
 SMTP_TIMEOUT = 60
+
+IST         = ZoneInfo("Asia/Kolkata")
+SEND_HOUR   = 20          # report is sent at 20:00:00 IST
+MAX_WAIT_S  = 55 * 60     # never sleep longer than this (workflow timeout is 70 min)
+FORCE       = os.environ.get("REPORT_FORCE", "").strip().lower() in ("1", "true", "yes")
+
+
+def _wait_until_send_time():
+    """Sleep until 20:00:00 IST today. Already past it (late cron start) or
+    forced -> return immediately."""
+    now = datetime.now(IST)
+    target = now.replace(hour=SEND_HOUR, minute=0, second=0, microsecond=0)
+    wait = (target - now).total_seconds()
+    if FORCE or wait <= 0:
+        return
+    if wait > MAX_WAIT_S:
+        print(f"Send time is {wait/60:.0f} min away (> cap) - sending now instead")
+        return
+    print(f"Waiting {wait:.0f}s until 20:00 IST")
+    time.sleep(wait)
+
+
+def _already_sent():
+    """True if a report for REPORT_DATE is already logged. A missing report_log
+    table (migration not run yet) disables the guard rather than the report."""
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/report_log", headers=HEADERS,
+                     params={"select": "report_date", "report_date": f"eq.{TODAY}"},
+                     timeout=HTTP_TIMEOUT)
+    if r.status_code == 404:
+        print("report_log table missing - double-send guard disabled")
+        return False
+    if r.status_code != 200:
+        raise RuntimeError(f"report_log read failed with HTTP {r.status_code}: {r.text[:300]}")
+    return bool(r.json())
+
+
+def _mark_sent():
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/report_log", headers=HEADERS,
+                      json={"report_date": TODAY}, timeout=HTTP_TIMEOUT)
+    if r.status_code not in (200, 201, 204, 404):
+        print(f"Warning: could not write report_log (HTTP {r.status_code})")
 
 
 def _fetch(table, date_filter=True, date_col="date"):
@@ -276,6 +324,11 @@ def send_email(html, no_prod):
 
 
 if __name__ == "__main__":
-    html, no_prod = build_email()
+    _wait_until_send_time()
+    if not FORCE and _already_sent():
+        print(f"Report for {TODAY} already sent - nothing to do")
+        sys.exit(0)
+    html, no_prod = build_email()   # built after the wait so it sees the latest data
     send_email(html, no_prod)
+    _mark_sent()
     sys.exit(0)
