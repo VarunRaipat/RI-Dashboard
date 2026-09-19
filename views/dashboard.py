@@ -977,11 +977,11 @@ def show(PLOT):
 
     # -- Production financials, split by plant (Hume Pipes = Pipe Factory,
     # everything else = Pole Factory) so their economics never blend --------
-    is_pipe = df_prod["product"].isin(HUME_PIPE_PRODUCTS) if not df_prod.empty else pd.Series(dtype=bool)
+    is_pipe = df_prod["product"].map(lambda p: plant_for_product(p) == "Pipe Factory") if not df_prod.empty else pd.Series(dtype=bool)
     df_prod_pipe  = df_prod[is_pipe]  if not df_prod.empty else df_prod
     df_prod_other = df_prod[~is_pipe] if not df_prod.empty else df_prod
 
-    is_disp_pipe = df_disp["product"].isin(HUME_PIPE_PRODUCTS) if not df_disp.empty else pd.Series(dtype=bool)
+    is_disp_pipe = df_disp["product"].map(lambda p: plant_for_product(p) == "Pipe Factory") if not df_disp.empty else pd.Series(dtype=bool)
     df_disp_pipe  = df_disp[is_disp_pipe]  if not df_disp.empty else df_disp
     df_disp_other = df_disp[~is_disp_pipe] if not df_disp.empty else df_disp
 

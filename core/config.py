@@ -196,6 +196,12 @@ for _pillar in ["Pillar 8'", "Pillar 10'", "Pillar 12'"]:
 
 PRODUCT_CONFIG["Fencing Pillar"] = {"display": "Fencing Pillar", **_blank_rates()}
 PRODUCT_CONFIG["PSC Pole"]       = {"display": "PSC Pole", **_blank_rates()}
+# Standalone Collar (the joint ring sold on its own) — distinct from the NP2
+# "(Collar)" joint-type SKU of a Hume Pipe. Cast at the Pipe Factory, but named
+# without the "Hume Pipe" prefix so it isn't mistaken for a diameter/class pipe
+# SKU (see PIPE_FACTORY_EXTRA_PRODUCTS / plant_for_product below). Unpriced
+# (all rates 0) until set in Admin > Product Cost Configuration.
+PRODUCT_CONFIG["Pipe Collar"]    = {"display": "Pipe Collar", **_blank_rates()}
 PRODUCT_CONFIG["Boundary Wall"]  = {"display": "Boundary Wall", **_blank_rates()}  # quantity still entered as Nos.
 
 # Selling Price unit shown in Admin > Product Cost Configuration — every
@@ -370,6 +376,10 @@ def cancelled_product_label(plant: str) -> str:
 # appears (Dispatch, Sales Orders, Quotations). Works for both a full SKU
 # ("Hume Pipe 300mm NP2 (M/F)") and a bare pricing key ("Hume Pipe 300mm
 # NP2") since SKU_TO_PRICING_KEY.get() falls back to the input unchanged.
+# Non-"Hume Pipe"-named products that are still cast at the Pipe Factory.
+PIPE_FACTORY_EXTRA_PRODUCTS = {"Pipe Collar"}
+
+
 def plant_for_product(product_or_sku: str) -> str:
     s = str(product_or_sku)
     if s.startswith(CANCELLED_PRODUCT_PREFIX):
@@ -377,7 +387,9 @@ def plant_for_product(product_or_sku: str) -> str:
         # void number stays in the correct plant's sequence.
         return "Pipe Factory" if "Pipe Factory" in s else "Pole Factory"
     pricing_key = SKU_TO_PRICING_KEY.get(product_or_sku, product_or_sku)
-    return "Pipe Factory" if str(pricing_key).startswith("Hume Pipe") else "Pole Factory"
+    if str(pricing_key).startswith("Hume Pipe") or pricing_key in PIPE_FACTORY_EXTRA_PRODUCTS:
+        return "Pipe Factory"
+    return "Pole Factory"
 
 
 def products_for_plant(products, plant: str):
