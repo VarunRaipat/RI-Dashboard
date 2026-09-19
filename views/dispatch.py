@@ -71,24 +71,58 @@ def _show_headoffice():
         st.success("✅ All challans have Bill No. assigned. Nothing pending.")
         return
 
-    pending["label"] = (
-        pending["date"].dt.strftime("%d-%b-%Y") + " | Challan " +
-        pending["challan_no"].fillna("").astype(str) + " | " +
-        pending["client_name"].fillna("").astype(str) + " | " +
-        pending["product"].fillna("").astype(str)
+    # A challan can carry several product lines (one DB row each). The
+    # billing operator assigns ONE bill number to the whole challan, so
+    # collapse the pending lines to one row per challan and show its total
+    # Qty and Value (Σ qty × rate) — the figure being invoiced. GST (if the
+    # challan carries it) is shown alongside, not folded into "Total Value".
+    qcol = "qty_dispatched" if "qty_dispatched" in pending.columns else "qty"
+    pending[qcol]   = pd.to_numeric(pending[qcol], errors="coerce").fillna(0)
+    pending["rate"] = pd.to_numeric(pending.get("rate"), errors="coerce").fillna(0)
+    pending["_line_val"] = pending[qcol] * pending["rate"]
+    pending["_gst"] = (pd.to_numeric(pending["gst_amount"], errors="coerce").fillna(0)
+                       if "gst_amount" in pending.columns else 0.0)
+
+    chal = (
+        pending.groupby(["challan_no", "date", "client_name"], dropna=False)
+        .agg(qty=(qcol, "sum"), value=("_line_val", "sum"), gst=("_gst", "sum"),
+             lines=("product", "count"),
+             products=("product", lambda s: ", ".join(str(x) for x in s)),
+             ids=("id", list))
+        .reset_index()
+        .sort_values(["date", "challan_no"], ascending=[False, False])
+    )
+
+    chal["label"] = (
+        chal["date"].dt.strftime("%d-%b-%Y") + " | Challan " +
+        chal["challan_no"].fillna("").astype(str) + " | " +
+        chal["client_name"].fillna("").astype(str) + " | " +
+        chal["products"].str.slice(0, 40) + " | " +
+        chal["qty"].map(lambda q: f"{q:,.0f} nos") + " → ₹" +
+        chal["value"].map(lambda v: f"{v:,.0f}")
     )
 
     with st.form("ho_bill_form", clear_on_submit=True):
-        sel = st.selectbox(f"Pending challan ({len(pending)} remaining)", pending["label"].tolist())
+        sel  = st.selectbox(f"Pending challan ({len(chal)} remaining)", chal["label"].tolist())
+        srow = chal.loc[chal["label"] == sel].iloc[0]
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Qty",   f"{srow['qty']:,.0f} nos")
+        m2.metric("Total Value", f"₹{srow['value']:,.0f}")
+        m3.metric("Incl. GST",   f"₹{srow['value'] + srow['gst']:,.0f}" if srow["gst"] else "—")
+        if srow["lines"] > 1:
+            st.caption(f"{int(srow['lines'])} product lines on this challan — the Bill No. is saved against all of them.")
+
         bill_val = st.text_input("Bill No.", placeholder="e.g. INV-2026-001")
         if st.form_submit_button("💾 Save Bill No.", type="primary", use_container_width=True):
             if not bill_val.strip():
                 st.error("Enter a Bill No.")
             else:
-                rid = int(pending.loc[pending["label"] == sel, "id"].iloc[0])
-                update_dispatch(rid, {"bill_no": bill_val.strip()})
+                for rid in srow["ids"]:
+                    update_dispatch(int(rid), {"bill_no": bill_val.strip()})
                 flash(f"✅ Bill No. {bill_val.strip()} saved!")
-                st.success(f"✅ Saved! Bill No. **{bill_val.strip()}** assigned.")
+                st.success(f"✅ Saved! Bill No. **{bill_val.strip()}** assigned"
+                           + (f" to {int(srow['lines'])} lines." if srow["lines"] > 1 else "."))
                 st.rerun()
 
 

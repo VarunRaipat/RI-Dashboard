@@ -2,18 +2,39 @@ name: RI Daily Report
 
 on:
   schedule:
-    # 8:00 PM IST = 14:30 UTC
-    - cron: "30 14 * * *"
-  workflow_dispatch:  # allows manual trigger from GitHub Actions tab
+    # The report must land in the inbox at 20:00 IST *sharp*. GitHub's cron only
+    # starts a scheduled job *near* the requested time — routinely 5-30 min late
+    # under load, and occasionally dropped entirely — so we can't just schedule
+    # it for 20:00. Instead we trigger early and scripts/send_daily_report.py
+    # sleeps until exactly 20:00:00 IST before sending.
+    #   14:05 UTC = 19:35 IST  — primary run
+    #   14:20 UTC = 19:50 IST  — backstop, covers the primary being dropped
+    - cron: "5 14 * * *"
+    - cron: "20 14 * * *"
+  workflow_dispatch:            # manual trigger from the Actions tab
+    inputs:
+      force:
+        description: "Send now even if it isn't 20:00 IST yet / today's report already went out"
+        type: boolean
+        default: false
+
+# If the backstop fires while the primary is still sleeping, hand over to the
+# newer run rather than have two runners wait in parallel (and if the primary
+# ever hangs, this lets the backstop take over instead of queuing behind it).
+# The real double-send guard is the report_log marker in Supabase.
+concurrency:
+  group: ri-daily-report
+  cancel-in-progress: true
 
 jobs:
   send-report:
     runs-on: ubuntu-latest
-    # The whole job takes ~20 seconds. Without this it would inherit GitHub's
-    # 6-hour default, so anything that stalls burns most of a day before it
-    # fails — and the failure notification arrives long after the report was
-    # due. Ten minutes is generous for a job this size.
-    timeout-minutes: 10
+    # Triggered up to ~25 min before the 20:00 IST send time, then the script
+    # sleeps out the remainder (capped at 55 min inside the script). 70 min
+    # leaves headroom while still avoiding GitHub's 6-hour default if something
+    # truly stalls — a stall that ate most of a day would surface long after
+    # the report was due.
+    timeout-minutes: 70
 
     steps:
       - name: Checkout repo
@@ -34,4 +55,5 @@ jobs:
           GMAIL_USER:         ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           REPORT_TO_EMAIL:    ${{ secrets.REPORT_TO_EMAIL }}
+          REPORT_FORCE:       ${{ github.event.inputs.force }}
         run: python scripts/send_daily_report.py
