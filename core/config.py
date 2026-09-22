@@ -93,7 +93,7 @@ JOINT_TYPES = ["Collar", "Socket & Spigot", "M/F"]
 # Which Joint Types are actually manufactured for a given diameter+class —
 # used to narrow the Joint Type dropdown per product on the Sales Order line
 # (Joint Type is still a spec only, not a price driver). Rule, as confirmed:
-#   NP2, 150-600mm  -> Collar or M/F
+#   NP2, 150-600mm  -> Collar, Socket & Spigot, or M/F
 #   NP2, 750-1200mm -> M/F only
 #   NP3, 150-600mm  -> Socket & Spigot or M/F
 #   NP3, 750-1200mm -> M/F only
@@ -101,17 +101,19 @@ def _joint_types_for(diameter_mm, cls):
     if diameter_mm > 600:
         return ["M/F"]
     if cls == "NP2":
-        return ["Collar", "M/F"]
+        return ["Collar", "Socket & Spigot", "M/F"]
     return ["Socket & Spigot", "M/F"]  # NP3
 
-# NP2 Collar and NP2 M/F (confirmed) are the exact same physical pipe cast —
-# the joint is only fitted/specified at dispatch, not during production — so
-# they share one production/inventory pool, with M/F as the canonical SKU
-# that's produced and stocked. Collar stays a separate, selectable line item
-# on Sales Order/Dispatch, but draws down the same M/F stock (see
-# INVENTORY_PRODUCTS below). NP3's Socket & Spigot vs M/F remain genuinely
-# separate physical SKUs — this fold does not apply to NP3.
-NP2_JOINTS_SHARE_STOCK = {"Collar", "M/F"}
+# NP2 Collar, NP2 Socket & Spigot, and NP2 M/F (confirmed) are the exact same
+# physical pipe cast — the joint is only fitted/specified at dispatch, not
+# during production — so they share one production/inventory pool, with M/F
+# as the canonical SKU that's produced and stocked. Collar and Socket &
+# Spigot each stay a separate, selectable line item on Sales Order/Dispatch,
+# but draw down the same M/F stock (see INVENTORY_PRODUCTS below). NP3's
+# Socket & Spigot vs M/F remain genuinely separate physical SKUs — this fold
+# does not apply to NP3.
+NP2_EXTRA_JOINTS       = ("Collar", "Socket & Spigot")
+NP2_JOINTS_SHARE_STOCK = {*NP2_EXTRA_JOINTS, "M/F"}
 NP2_CANONICAL_JOINT    = "M/F"
 
 def _production_joint_types_for(diameter_mm, cls):
@@ -453,14 +455,18 @@ for _d in HUME_PIPE_DIAMETERS_MM:
             _sku = f"Hume Pipe {_d}mm {_c} ({_joint})"
             _prod_names = [_sku]
             _disp_names = [_sku]
-            # NP2 Collar shares the M/F row's production+dispatch history —
-            # it was never a separate physical pipe, just an earlier way of
-            # specifying the same stock (see _production_joint_types_for).
-            if _c == "NP2" and _joint == NP2_CANONICAL_JOINT and "Collar" in _joint_types_for(_d, _c):
-                _collar_sku = f"Hume Pipe {_d}mm NP2 (Collar)"
-                if _collar_sku in _PIPE_SKUS:
-                    _prod_names.append(_collar_sku)
-                    _disp_names.append(_collar_sku)
+            # NP2 Collar/Socket & Spigot share the M/F row's production+
+            # dispatch history — neither is a separate physical pipe, just
+            # another way of specifying the same stock (see
+            # _production_joint_types_for).
+            if _c == "NP2" and _joint == NP2_CANONICAL_JOINT:
+                for _extra_joint in NP2_EXTRA_JOINTS:
+                    if _extra_joint not in _joint_types_for(_d, _c):
+                        continue
+                    _extra_sku = f"Hume Pipe {_d}mm NP2 ({_extra_joint})"
+                    if _extra_sku in _PIPE_SKUS:
+                        _prod_names.append(_extra_sku)
+                        _disp_names.append(_extra_sku)
             if _c == NP4_SHARES_CLASS:
                 _np4_sku = f"Hume Pipe {_d}mm NP4 ({_joint})"
                 if _np4_sku in _PIPE_SKUS:
@@ -473,7 +479,7 @@ for _d in HUME_PIPE_DIAMETERS_MM:
             ))
 INVENTORY_PRODUCTS += [(p, p, p, 0) for p in _NON_PIPE_PRODUCTION_DISPATCH]
 
-del _d, _c, _joint, _sku, _prod_names, _disp_names, _collar_sku, _np4_sku
+del _d, _c, _joint, _sku, _prod_names, _disp_names, _extra_joint, _extra_sku, _np4_sku
 
 # Steel inventory: opening qty as of INVENTORY_ANCHOR_DATE. Current balance =
 # opening + received (Gate Entry "In" log) - consumed (computed from
@@ -575,11 +581,14 @@ def register_diameter(diameter_mm, np2_thickness_mm=0, np3_thickness_mm=0):
 
             prod_names = [sku]
             disp_names = [sku]
-            if c == "NP2" and joint == NP2_CANONICAL_JOINT and "Collar" in _joint_types_for(diameter_mm, c):
-                collar_sku = f"Hume Pipe {diameter_mm}mm NP2 (Collar)"
-                if collar_sku in new_pipe_skus:
-                    prod_names.append(collar_sku)
-                    disp_names.append(collar_sku)
+            if c == "NP2" and joint == NP2_CANONICAL_JOINT:
+                for extra_joint in NP2_EXTRA_JOINTS:
+                    if extra_joint not in _joint_types_for(diameter_mm, c):
+                        continue
+                    extra_sku = f"Hume Pipe {diameter_mm}mm NP2 ({extra_joint})"
+                    if extra_sku in new_pipe_skus:
+                        prod_names.append(extra_sku)
+                        disp_names.append(extra_sku)
             if c == NP4_SHARES_CLASS:
                 np4_sku = f"Hume Pipe {diameter_mm}mm NP4 ({joint})"
                 if np4_sku in new_pipe_skus:
