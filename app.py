@@ -13,11 +13,16 @@ def _get_today_stats(d):
     return get_production(d, d)
 
 st.set_page_config(
-    page_title="RI",
-    page_icon="🏗️",
+    page_title="RI · Rameshwaram Industries",
+    page_icon="assets/favicon.png",
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={"Get help": None, "Report a bug": None, "About": "Rameshwaram Industries · Manufacturing Portal"},
 )
+
+# Company logo in the sidebar header and in the top bar when the sidebar is
+# collapsed — replaces the Streamlit mark in both spots.
+st.logo("assets/Logo.png", icon_image="assets/favicon.png", size="large")
 
 init_db()
 sync_custom_diameters()
@@ -45,6 +50,14 @@ html, body, [class*="css"], button, input, select, textarea,
 .stMarkdown, label, p, div {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
 }
+
+/* ── Hide Streamlit branding (menu, Deploy button, footer, running-man
+   status icon, top colour strip). The header itself stays so the
+   sidebar expand arrow keeps working. ── */
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
+[data-testid="stStatusWidget"], [data-testid="stAppDeployButton"],
+.viewerBadge_container__1QSob, [class^="viewerBadge_"] { display: none !important; }
+[data-testid="stHeader"] { background: transparent !important; }
 
 /* ── App base ── */
 .stApp { background: #0B0C0D !important; }
@@ -543,9 +556,7 @@ ROLE_BADGE = {
 }
 
 with st.sidebar:
-    st.markdown('<div class="sb-header">', unsafe_allow_html=True)
-    st.image("assets/Logo.png", use_container_width=True)
-    st.markdown('<div class="sb-sub">RI · Manufacturing Portal</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sb-header"><div class="sb-sub">RI · Manufacturing Portal</div></div>', unsafe_allow_html=True)
 
     user_plant = st.session_state.get("plant")
     st.markdown(f"""
