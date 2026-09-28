@@ -227,6 +227,8 @@ ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_rate REAL DEFAULT 0;
 ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_value REAL DEFAULT 0;
 ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN DEFAULT false;
 ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
+-- Terms & Conditions printed on the quotation PDF (editable per quote):
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS terms TEXT;
 
 CREATE TABLE IF NOT EXISTS vendor_transactions (
     id              BIGSERIAL PRIMARY KEY,

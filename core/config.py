@@ -354,6 +354,15 @@ QUOTATION_UNITS         = ["Nos", "Rft", "Cft", "Sqft"]
 QUOTATION_STATUS        = ["Draft", "Sent", "Accepted", "Rejected", "Expired", "Converted"]
 QUOTATION_VALIDITY_DAYS = 30
 
+# Pre-filled into the Quotation form's "Terms & Conditions" box (editable per
+# quotation) and printed on the PDF, one term per line.
+DEFAULT_QUOTATION_TERMS = """1. Place of delivery : Free Delivery by our platform type (Open-Dala) truck up to your approachable work-site. Unloading of Pipes at site to be arranged & borne by your scope.
+2. Term of payment : Advance against PI.
+3. Mode of payment : Through Bank (NEFT or RTGS). Bank Details : RAMESHWARAM INDUSTRIES, State Bank of India, Branch: HINOO Branch, A/C No. 33480866545, IFSC: SBIN0030527.
+4. Stock : Pipes are ready in stock. Can start to supply within 2-3 days after receipt of PO & its Payment.
+5. Lot wise MTC will be provided along with the consignment.
+6. Validity : As mentioned here-in-above."""
+
 PLANTS = ["Pipe Factory", "Pole Factory"]
 
 # Sentinel product written on a cancelled/void challan (see views/dispatch.py's

@@ -4,6 +4,7 @@ Premium letterhead style: gold/ink palette, tinted header card, dark
 ink+gold table headers, and a running gold-bar/footer on every page.
 """
 import io
+from xml.sax.saxutils import escape
 from core.config import GST_PCT
 from core.tz import now_ist
 from pathlib import Path
@@ -63,6 +64,8 @@ def _styles():
                           textColor=MUTED, leading=11))
     ss.add(ParagraphStyle("Value", fontName="Helvetica-Bold", fontSize=9.5,
                           textColor=INK, leading=13))
+    ss.add(ParagraphStyle("Term", fontName="Helvetica", fontSize=8.8,
+                          textColor=INK, leading=12, leftIndent=10, firstLineIndent=-10))
     ss.add(ParagraphStyle("SectionLabel", fontName="Helvetica-Bold", fontSize=7.8,
                           textColor=ACCENT, leading=10))
     ss.add(ParagraphStyle("TableHeadL", fontName="Helvetica-Bold", fontSize=8.2,
@@ -425,7 +428,7 @@ def generate_quotation(quote_no, header, lines):
         quote_no : Quotation number (str), e.g. "QTN/25-26/0001".
         header   : dict with quote_date, valid_until, client_name, contact_person,
                    phone, office, gstin, client_type, sales_person, sale_type,
-                   discount_pct, remarks.
+                   discount_pct, remarks, terms (newline-separated).
         lines    : list of dicts with product, qty, unit, rate, amount, gst_amount.
     Returns:
         bytes of the generated PDF.
@@ -533,6 +536,15 @@ def generate_quotation(quote_no, header, lines):
         story.append(Spacer(1, 1.5 * mm))
         story.append(Paragraph(remarks, ss["Value"]))
         story.append(Spacer(1, 8 * mm))
+
+    terms = [t.strip() for t in str(header.get("terms") or "").splitlines() if t.strip()]
+    if terms:
+        story.append(_section_label(ss, "Terms & Conditions"))
+        story.append(Spacer(1, 1.5 * mm))
+        for t in terms:
+            story.append(Paragraph(escape(t), ss["Term"]))
+            story.append(Spacer(1, 1 * mm))
+        story.append(Spacer(1, 7 * mm))
 
     story.append(HRFlowable(width="100%", thickness=0.4, color=HAIRLINE))
     story.append(Spacer(1, 12 * mm))

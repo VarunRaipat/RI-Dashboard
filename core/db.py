@@ -1150,7 +1150,15 @@ def delete_order(row_id):
 
 
 def insert_quotation(data):
-    if _use_supabase(): _sb_insert("quotations", data)
+    if _use_supabase():
+        try:
+            _sb_insert("quotations", data)
+        except Exception as e:
+            # `terms` column not migrated yet — save without it rather than
+            # blocking quotations (the PDF still prints the terms).
+            if "terms" not in str(e):
+                raise
+            _sb_insert("quotations", {k: v for k, v in data.items() if k != "terms"})
     else: _sqlite_insert("quotations", data)
     _invalidate_cache()
     log_activity("create", "Quotation", f"{data.get('quote_no','')} · {data.get('client_name','')} · {data.get('product','')}")

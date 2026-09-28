@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta
 from core.tz import today_ist
-from core.config import (ORDER_PRODUCTS, CLIENT_TYPES, QUOTATION_UNITS, QUOTATION_STATUS,
+from core.config import (DEFAULT_QUOTATION_TERMS, ORDER_PRODUCTS, CLIENT_TYPES, QUOTATION_UNITS, QUOTATION_STATUS,
                          QUOTATION_VALIDITY_DAYS, PAYMENT_MODES, SALE_TYPES, GST_PCT)
 from core.db import (insert_quotation, get_quotations, update_quotation, delete_quotation,
                      get_orders, insert_order)
@@ -200,6 +200,12 @@ def show(PLOT):
     remarks = st.text_input(
         "Additional Note (appears as an extra term on the PDF)", key="quo_remarks",
     )
+    if "quo_terms" not in st.session_state:
+        st.session_state["quo_terms"] = DEFAULT_QUOTATION_TERMS
+    terms = st.text_area(
+        "Terms & Conditions (printed on the PDF — edit for this quotation if needed)",
+        key="quo_terms", height=190,
+    )
 
     # ── Product lines ─────────────────────────────────────────────────────────
     st.markdown("**Product Lines**")
@@ -289,6 +295,7 @@ def show(PLOT):
                 "discount_pct":   discount_pct,
                 "sale_type":      sale_type,
                 "remarks":        remarks,
+                "terms":          terms.strip(),
             }
             saved = 0
             pdf_lines = []
@@ -329,6 +336,7 @@ def show(PLOT):
                 for k in list(st.session_state.keys()):
                     if k.startswith(("quo_prod_", "quo_qty_", "quo_unit_", "quo_rate_")):
                         del st.session_state[k]
+                st.session_state.pop("quo_terms", None)  # next quote starts from the default terms
                 st.rerun()
             else:
                 st.error("Enter qty > 0 for at least one product line.")
@@ -389,6 +397,7 @@ def show(PLOT):
             "discount_pct":   qhdr.get("discount_pct", 0),
             "sale_type":      qhdr.get("sale_type", "Sale A"),
             "remarks":        qhdr.get("remarks", ""),
+            "terms":          qhdr.get("terms", "") or "",
         }
         redl_cols = ["product", "qty", "unit", "rate", "amount", "gst_amount", "transport_value", "transport_gst_amount"]
         redl_cols = [c for c in redl_cols if c in q_rows.columns]
