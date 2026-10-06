@@ -709,8 +709,11 @@ def show(PLOT):
                                     pd.to_datetime(hdr.get("po_date"), errors="coerce")),
             "remarks":          hdr.get("remarks", ""),
         }
-        _pdf_cols2 = ["product", "qty_ordered", "rate", "total_amount"] + (["gst_amount"] if "gst_amount" in di_rows.columns else [])
-        pdf_lines2 = di_rows[_pdf_cols2].to_dict("records")
+        _pdf_cols2 = ["product", "qty_ordered", "rate", "total_amount"] + [
+            c for c in ("gst_amount", "transport_value", "transport_gst_amount") if c in di_rows.columns
+        ]
+        _num_cols2 = [c for c in _pdf_cols2 if c != "product"]
+        pdf_lines2 = di_rows[_pdf_cols2].fillna({c: 0 for c in _num_cols2}).to_dict("records")
         dispatched_map = {
             row["product"]: {"qty": row["dispatched_qty"], "value": row["dispatched_value"]}
             for _, row in di_disps.iterrows()
