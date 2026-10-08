@@ -147,7 +147,57 @@ def _fetch(table, date_filter=True, date_col="date"):
     return r.json()
 
 
+def _count_of(resp):
+    """Total row count from a PostgREST `Prefer: count=exact` response, which
+    reports it in Content-Range as "0-0/1234" (or "*/0" for no rows)."""
+    cr = resp.headers.get("Content-Range", "")
+    return cr.rsplit("/", 1)[-1] if "/" in cr else "?"
+
+
+def _census(table, date_col="date"):
+    """One line per table saying what the report could actually see.
+
+    An all-zero report has causes that look identical in the inbox: nothing
+    happened that day, the read came back empty because it was blocked (row
+    level security switched on in the Supabase dashboard, a key that no
+    longer reaches the table), or it was aimed at a date with no rows. The
+    HTTP layer cannot separate them — all three answer 200 with an empty
+    list. Rows-for-the-date vs rows-at-all vs latest-date-present can.
+
+    Diagnostics must never be what breaks the report, so any failure here is
+    swallowed after saying so."""
+    head = dict(HEADERS)
+    head["Prefer"] = "count=exact"
+    try:
+        for_date = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=head,
+                                params={"select": date_col, date_col: f"eq.{TODAY}",
+                                        "limit": "1"}, timeout=HTTP_TIMEOUT)
+        overall = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=head,
+                               params={"select": date_col, "limit": "1"},
+                               timeout=HTTP_TIMEOUT)
+        newest = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS,
+                              params={"select": date_col, "order": f"{date_col}.desc",
+                                      "limit": "1"}, timeout=HTTP_TIMEOUT)
+        rows = newest.json() if newest.status_code == 200 else []
+        latest = rows[0].get(date_col) if rows else "none"
+        print(f"census {table}: {_count_of(for_date)} row(s) for {TODAY} | "
+              f"{_count_of(overall)} row(s) total | latest {latest} | "
+              f"http {for_date.status_code}/{overall.status_code}/{newest.status_code}")
+    except Exception as exc:
+        print(f"census {table}: unavailable ({type(exc).__name__}: {exc})")
+
+
 def build_email():
+    # Printed before the reads so a zero report can be diagnosed from the run
+    # log alone. REPORT_DATE comes off the UTC clock while the send time is
+    # IST, so showing both makes any skew between them obvious.
+    now_utc = datetime.now(tz=ZoneInfo("UTC"))
+    print(f"clock: UTC {now_utc:%Y-%m-%d %H:%M} | IST {now_utc.astimezone(IST):%Y-%m-%d %H:%M} "
+          f"| reporting on {TODAY}")
+    _census("production")
+    _census("dispatch")
+    _census("orders", date_col="order_date")
+
     prod_rows  = _fetch("production")
     disp_rows  = _fetch("dispatch")
     order_rows = _fetch("orders", date_col="order_date")
