@@ -2,15 +2,31 @@ name: RI Daily Report
 
 on:
   schedule:
-    # The report must land in the inbox at 20:00 IST *sharp*. GitHub's cron only
-    # starts a scheduled job *near* the requested time — routinely 5-30 min late
-    # under load, and occasionally dropped entirely — so we can't just schedule
-    # it for 20:00. Instead we trigger early and scripts/send_daily_report.py
-    # sleeps until exactly 20:00:00 IST before sending.
-    #   14:05 UTC = 19:35 IST  — primary run
-    #   14:20 UTC = 19:50 IST  — backstop, covers the primary being dropped
-    - cron: "5 14 * * *"
-    - cron: "20 14 * * *"
+    # The report must land in the inbox at 20:00 IST (14:30 UTC) sharp.
+    # GitHub's cron only starts a scheduled job *near* the requested time, and
+    # on this repo it has been starting them 3.5-7.5 HOURS late, not minutes.
+    # One trigger can't absorb that: aimed to arrive on time when punctual it
+    # lands near midnight IST, and aimed for a 6-hour slip it fires hours early
+    # on a day the scheduler behaves.
+    #
+    # So the triggers are spread across the window jobs actually start in, and
+    # send_daily_report.py decides which run is the one that sends: a run more
+    # than MAX_WAIT_S before 20:00 IST exits without sending, a run inside that
+    # window sleeps out the remainder and sends exactly on time, and a run past
+    # 20:00 IST sends immediately so the day is never skipped. The report_log
+    # row in Supabase stops the other runs re-sending.
+    #
+    # Whatever the delay, one of these lands in the send window:
+    #   07:00 UTC — covers a ~7h slip
+    #   09:00 UTC — covers a ~5.5h slip
+    #   11:00 UTC — covers a ~3.5h slip
+    #   13:30 UTC — covers the scheduler being punctual again (sleeps 60 min)
+    #   14:30 UTC — last backstop; punctual means zero wait
+    - cron: "0 7 * * *"
+    - cron: "0 9 * * *"
+    - cron: "0 11 * * *"
+    - cron: "30 13 * * *"
+    - cron: "30 14 * * *"
   workflow_dispatch:            # manual trigger from the Actions tab
     inputs:
       force:
@@ -29,12 +45,12 @@ concurrency:
 jobs:
   send-report:
     runs-on: ubuntu-latest
-    # Triggered up to ~25 min before the 20:00 IST send time, then the script
-    # sleeps out the remainder (capped at 55 min inside the script). 70 min
-    # leaves headroom while still avoiding GitHub's 6-hour default if something
-    # truly stalls — a stall that ate most of a day would surface long after
-    # the report was due.
-    timeout-minutes: 70
+    # A run that lands inside the send window sleeps out the remainder before
+    # sending — up to MAX_WAIT_S (65 min) in the script. 80 min leaves headroom
+    # for that plus setup, while staying far short of GitHub's 6-hour default,
+    # where a genuine stall would surface long after the report was due. Runs
+    # that are too early exit in seconds and never reach the sleep.
+    timeout-minutes: 80
 
     steps:
       - name: Checkout repo
