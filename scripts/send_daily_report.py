@@ -14,7 +14,7 @@ import requests
 import smtplib
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -67,8 +67,8 @@ def _recipients(raw):
 
 TO_EMAILS, EXCLUDED_COUNT = _recipients(os.environ.get("REPORT_TO_EMAIL"))
 
-REPORT_DATE = date.today() - timedelta(days=1)
-TODAY = str(REPORT_DATE)
+REPORT_DATE = None        # settled below, once IST and _report_date() exist
+TODAY = None
 LAKH  = 100_000
 
 HEADERS = {
@@ -87,23 +87,64 @@ SMTP_TIMEOUT = 60
 
 IST         = ZoneInfo("Asia/Kolkata")
 SEND_HOUR   = 20          # report is sent at 20:00:00 IST
-MAX_WAIT_S  = 55 * 60     # never sleep longer than this (workflow timeout is 70 min)
+MAX_WAIT_S  = 65 * 60     # never sleep longer than this (workflow timeout is 80 min)
 FORCE       = os.environ.get("REPORT_FORCE", "").strip().lower() in ("1", "true", "yes")
 
 
-def _wait_until_send_time():
-    """Sleep until 20:00:00 IST today. Already past it (late cron start) or
-    forced -> return immediately."""
+def _report_date():
+    """The day the report covers: the day before the 20:00 IST slot this run
+    is servicing.
+
+    Read off the IST clock, never the runner's UTC clock. The two agree while
+    the job runs near 14:30 UTC, which is why this went unnoticed — but once a
+    runner passes 18:30 UTC the IST date has already rolled into tomorrow
+    while the UTC date has not, and a UTC-based date then names the day
+    before the one wanted. With jobs starting around 19:50 UTC, the report
+    was covering 7 Oct while IST was already the 9th.
+
+    _should_send() guarantees this is only reached within MAX_WAIT_S of
+    today's 20:00 IST or after it — never 18 hours early — so "the slot this
+    run services" is always today in IST."""
+    return datetime.now(IST).date() - timedelta(days=1)
+
+
+def _should_send():
+    """Sleep until 20:00:00 IST and return True, or return False if this run
+    is too early to be the one that sends.
+
+    GitHub starts these jobs hours after their cron time, so the next 20:00
+    IST is routinely most of a day away — far longer than a runner should be
+    held open. That case used to fall through to "sending now instead",
+    which is why the report had been arriving around 01:48 IST carrying the
+    wrong day. Such a run now exits and leaves the send to a later trigger.
+
+    The crons are spread across the window jobs actually start in, so one
+    lands inside MAX_WAIT_S of 20:00 IST and sends exactly on time; if every
+    one of them overshoots, the first past 20:00 sends immediately rather
+    than skipping the day. The report_log row keeps the rest from
+    re-sending."""
+    if FORCE:
+        return True
     now = datetime.now(IST)
     target = now.replace(hour=SEND_HOUR, minute=0, second=0, microsecond=0)
     wait = (target - now).total_seconds()
-    if FORCE or wait <= 0:
-        return
+    if wait <= 0:
+        print(f"Past 20:00 IST (now {now:%H:%M} IST) - sending now")
+        return True
     if wait > MAX_WAIT_S:
-        print(f"Send time is {wait/60:.0f} min away (> cap) - sending now instead")
-        return
+        print(f"20:00 IST is {wait/60:.0f} min away, over the {MAX_WAIT_S/60:.0f} min cap - "
+              f"too early to be the sending run, leaving it to a later trigger")
+        return False
     print(f"Waiting {wait:.0f}s until 20:00 IST")
     time.sleep(wait)
+    return True
+
+
+# Set at import so the module is usable on its own (tests, a REPL), and set
+# again in __main__ after the wait, which is the point at which the slot this
+# run services is settled.
+REPORT_DATE = _report_date()
+TODAY = str(REPORT_DATE)
 
 
 def _already_sent():
@@ -374,7 +415,10 @@ def send_email(html, no_prod):
 
 
 if __name__ == "__main__":
-    _wait_until_send_time()
+    if not _should_send():
+        sys.exit(0)
+    REPORT_DATE = _report_date()
+    TODAY = str(REPORT_DATE)
     if not FORCE and _already_sent():
         print(f"Report for {TODAY} already sent - nothing to do")
         sys.exit(0)
