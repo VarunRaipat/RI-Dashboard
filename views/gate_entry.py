@@ -79,6 +79,7 @@ def _item_lines(prefix, n_lines, known_items, known_units):
 def show(PLOT):
     role = st.session_state.get("role", "dispatch")
     username = st.session_state.get("username")
+    can_view_gate   = has_permission(username, role, "gate_entry", "view")
     can_add_gate    = has_permission(username, role, "gate_entry", "add")
     can_review_gate = has_permission(username, role, "gate_entry", "edit")
     can_delete_gate = has_permission(username, role, "gate_entry", "delete")
@@ -179,8 +180,9 @@ def show(PLOT):
                 st.session_state.pop(k, None)
             st.rerun()
 
-    # Log review is admin-only by default — the operator's screen just clears.
-    if can_review_gate:
+    # Anyone who can view Gate Entry sees the log (plant-locked logins only
+    # their own plant); editing/deleting entries still needs edit rights.
+    if can_view_gate:
         st.markdown("---")
         st.markdown('<div class="section-header">Gate Entry Log</div>', unsafe_allow_html=True)
         df = get_gate_entries()
@@ -223,59 +225,60 @@ def show(PLOT):
                                               show_cols=[c for c in show_cols if c in df_p.columns],
                                               rename=rename, sum_cols=["qty"], col_config=col_cfg)
 
-            df["label"] = (
-                df["date"].dt.strftime("%d-%b-%Y") + " | " + df["category"].fillna("") + " | " +
-                df["item"].fillna("").astype(str) + " | " + df["direction"].fillna("") +
-                " | ID:" + df["id"].astype(str)
-            )
-            with st.expander("✏️ Edit an entry"):
-                esel = st.selectbox("Select entry", df["label"].tolist(), key="gate_edit_sel")
-                erow = df.loc[df["label"] == esel].iloc[0]
-                eid  = int(erow["id"])
+            if can_review_gate:
+                df["label"] = (
+                    df["date"].dt.strftime("%d-%b-%Y") + " | " + df["category"].fillna("") + " | " +
+                    df["item"].fillna("").astype(str) + " | " + df["direction"].fillna("") +
+                    " | ID:" + df["id"].astype(str)
+                )
+                with st.expander("✏️ Edit an entry"):
+                    esel = st.selectbox("Select entry", df["label"].tolist(), key="gate_edit_sel")
+                    erow = df.loc[df["label"] == esel].iloc[0]
+                    eid  = int(erow["id"])
 
-                with st.form(f"gate_edit_form_{eid}"):
-                    ec0, ec1, ec2, ec3 = st.columns(4)
-                    e_plant = ec0.selectbox("Plant", PLANTS,
-                                            index=PLANTS.index(erow["plant"])
-                                            if erow.get("plant") in PLANTS else 0)
-                    e_date = ec1.date_input("Date", pd.to_datetime(erow["date"]))
-                    e_cat  = ec2.selectbox("Category", GATE_CATEGORIES,
-                                          index=GATE_CATEGORIES.index(erow["category"])
-                                          if erow.get("category") in GATE_CATEGORIES else 0)
-                    e_dir  = ec3.selectbox("In / Out", GATE_DIRECTIONS,
-                                          index=GATE_DIRECTIONS.index(erow["direction"])
-                                          if erow.get("direction") in GATE_DIRECTIONS else 0)
+                    with st.form(f"gate_edit_form_{eid}"):
+                        ec0, ec1, ec2, ec3 = st.columns(4)
+                        e_plant = ec0.selectbox("Plant", PLANTS,
+                                                index=PLANTS.index(erow["plant"])
+                                                if erow.get("plant") in PLANTS else 0)
+                        e_date = ec1.date_input("Date", pd.to_datetime(erow["date"]))
+                        e_cat  = ec2.selectbox("Category", GATE_CATEGORIES,
+                                              index=GATE_CATEGORIES.index(erow["category"])
+                                              if erow.get("category") in GATE_CATEGORIES else 0)
+                        e_dir  = ec3.selectbox("In / Out", GATE_DIRECTIONS,
+                                              index=GATE_DIRECTIONS.index(erow["direction"])
+                                              if erow.get("direction") in GATE_DIRECTIONS else 0)
 
-                    ec4, ec5 = st.columns(2)
-                    e_item = ec4.text_input("Item", value=str(erow.get("item", "") or ""))
-                    e_qty  = ec5.number_input("Quantity", min_value=0.0, step=1.0, value=float(erow.get("qty", 0) or 0))
+                        ec4, ec5 = st.columns(2)
+                        e_item = ec4.text_input("Item", value=str(erow.get("item", "") or ""))
+                        e_qty  = ec5.number_input("Quantity", min_value=0.0, step=1.0, value=float(erow.get("qty", 0) or 0))
 
-                    ec6, ec7 = st.columns(2)
-                    e_unit  = ec6.text_input("Unit", value=str(erow.get("unit", "") or ""))
-                    e_truck = ec7.text_input("Truck No.", value=str(erow.get("truck_no", "") or ""))
+                        ec6, ec7 = st.columns(2)
+                        e_unit  = ec6.text_input("Unit", value=str(erow.get("unit", "") or ""))
+                        e_truck = ec7.text_input("Truck No.", value=str(erow.get("truck_no", "") or ""))
 
-                    ec8, ec9 = st.columns(2)
-                    e_challan = ec8.text_input("Challan No.", value=str(erow.get("challan_no", "") or ""))
-                    e_invoice = ec9.text_input("Invoice No.", value=str(erow.get("invoice_no", "") or ""))
+                        ec8, ec9 = st.columns(2)
+                        e_challan = ec8.text_input("Challan No.", value=str(erow.get("challan_no", "") or ""))
+                        e_invoice = ec9.text_input("Invoice No.", value=str(erow.get("invoice_no", "") or ""))
 
-                    ec10, ec11 = st.columns(2)
-                    e_supplier = ec10.text_input("Supplier Name", value=str(erow.get("supplier_name", "") or ""))
-                    e_site     = ec11.text_input("Site", value=str(erow.get("site", "") or ""))
+                        ec10, ec11 = st.columns(2)
+                        e_supplier = ec10.text_input("Supplier Name", value=str(erow.get("supplier_name", "") or ""))
+                        e_site     = ec11.text_input("Site", value=str(erow.get("site", "") or ""))
 
-                    e_remarks = st.text_input("Remarks", value=str(erow.get("remarks", "") or ""))
+                        e_remarks = st.text_input("Remarks", value=str(erow.get("remarks", "") or ""))
 
-                    esub1, esub2 = st.columns(2)
-                    if esub1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
-                        update_gate_entry(eid, {
-                            "date": str(e_date), "plant": e_plant, "category": e_cat, "direction": e_dir,
-                            "item": e_item, "qty": e_qty, "unit": e_unit, "truck_no": e_truck,
-                            "challan_no": e_challan, "invoice_no": e_invoice,
-                            "supplier_name": e_supplier, "site": e_site, "remarks": e_remarks,
-                        })
-                        flash(f"✅ Gate entry ID {eid} updated!")
-                        st.rerun()
-                    if esub2.form_submit_button("🗑️ Delete this entry", use_container_width=True,
-                                                 disabled=not can_delete_gate):
-                        delete_gate_entry(eid)
-                        flash("🗑️ Gate entry deleted.")
-                        st.rerun()
+                        esub1, esub2 = st.columns(2)
+                        if esub1.form_submit_button("💾 Save Changes", type="primary", use_container_width=True):
+                            update_gate_entry(eid, {
+                                "date": str(e_date), "plant": e_plant, "category": e_cat, "direction": e_dir,
+                                "item": e_item, "qty": e_qty, "unit": e_unit, "truck_no": e_truck,
+                                "challan_no": e_challan, "invoice_no": e_invoice,
+                                "supplier_name": e_supplier, "site": e_site, "remarks": e_remarks,
+                            })
+                            flash(f"✅ Gate entry ID {eid} updated!")
+                            st.rerun()
+                        if esub2.form_submit_button("🗑️ Delete this entry", use_container_width=True,
+                                                     disabled=not can_delete_gate):
+                            delete_gate_entry(eid)
+                            flash("🗑️ Gate entry deleted.")
+                            st.rerun()
