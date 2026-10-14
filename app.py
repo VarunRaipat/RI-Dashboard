@@ -52,9 +52,13 @@ html, body, [class*="css"], button, input, select, textarea,
 }
 
 /* ── Hide Streamlit branding (menu, Deploy button, footer, running-man
-   status icon, top colour strip). The header itself stays so the
-   sidebar expand arrow keeps working. ── */
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
+   status icon, top colour strip). The header AND stToolbar must stay
+   visible — since Streamlit 1.4x the sidebar expand arrow
+   (stExpandSidebarButton) lives inside stToolbar, so hiding the toolbar
+   leaves phone users (sidebar starts collapsed) stuck on the first page.
+   Only the toolbar's menu/action children are hidden. ── */
+#MainMenu, footer, [data-testid="stMainMenu"], [data-testid="stToolbarActions"],
+[data-testid="stDecoration"],
 [data-testid="stStatusWidget"], [data-testid="stAppDeployButton"],
 .viewerBadge_container__1QSob, [class^="viewerBadge_"] { display: none !important; }
 [data-testid="stHeader"] { background: transparent !important; }
