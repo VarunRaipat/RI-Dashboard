@@ -35,7 +35,7 @@ def get_all_users():
         pass
     return _users_default
 
-MODULES = ["dpr", "quotation", "orders", "dispatch", "inventory", "gate_entry", "liability", "admin"]
+MODULES = ["dpr", "quotation", "orders", "dispatch", "inventory", "gate_entry", "liability", "leads", "admin"]
 
 MODULE_LABELS = {
     "dpr":        "DPR Entry",
@@ -45,6 +45,7 @@ MODULE_LABELS = {
     "inventory":  "Inventory",
     "gate_entry": "Gate Entry",
     "liability":  "Liability",
+    "leads":      "Leads & Visits",
     "admin":      "Admin",
 }
 
@@ -60,7 +61,14 @@ _VIEW_ADD  = {"view": True,  "add": True,  "edit": False, "delete": False}
 ROLE_DEFAULTS = {
     "admin": {m: dict(_ALL_TRUE) for m in MODULES},
 
-    "viewer": {m: dict(_VIEW_ONLY) for m in MODULES if m != "liability"} | {"liability": dict(_ALL_FALSE)},
+    "viewer": {m: dict(_VIEW_ONLY) for m in MODULES if m not in ("liability", "leads")}
+              | {"liability": dict(_ALL_FALSE), "leads": dict(_ALL_FALSE)},
+
+    # Leads & Visits is Admin-only by default (grant per user in Admin ▸ User
+    # Permissions). A login with role "sales" in secrets gets its own leads
+    # only — see views/leads.py _scope_leads.
+    "sales": {m: dict(_ALL_FALSE) for m in MODULES if m != "leads"}
+             | {"leads": {"view": True, "add": True, "edit": True, "delete": False}},
 
     "production": {
         "dpr":        dict(_VIEW_ADD),

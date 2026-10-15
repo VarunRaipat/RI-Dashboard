@@ -89,7 +89,7 @@ def timestamp_col_config(label="Entered At"):
     return st.column_config.DatetimeColumn(label, format="DD-MMM-YYYY HH:mm")
 
 
-def flash(message):
+def flash(message, sub=None):
     """Queue a toast to show after the next rerun.
 
     st.toast() doesn't survive a st.rerun() called in the same run — the
@@ -97,6 +97,8 @@ def flash(message):
     Call this instead of st.toast() right before st.rerun(); show_flashes()
     (called once near the top of each page) displays it on the next run.
     """
+    if sub:
+        message = f"{message} — {sub}"
     st.session_state.setdefault("_pending_toasts", []).append(message)
 
 

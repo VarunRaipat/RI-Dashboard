@@ -541,3 +541,15 @@ CREATE TABLE IF NOT EXISTS report_log (
     sent_at     TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE report_log DISABLE ROW LEVEL SECURITY;
+
+-- Migration: Leads & Visits CRM (ported from ECO360) — enquiries with
+-- owner (login), next follow-up and status; field visits; per-lead
+-- follow-up history; CRM settings (auto-assign, IndiaMART sync bookmarks).
+-- Run this in Supabase SQL Editor.
+CREATE TABLE IF NOT EXISTS leads (id BIGSERIAL PRIMARY KEY, lead_date DATE NOT NULL, source TEXT, contact_name TEXT, phone TEXT, company TEXT, product TEXT, qty NUMERIC DEFAULT 0, discussion TEXT, remarks TEXT, status TEXT DEFAULT 'Fresh', follow_up_date DATE, assigned_to TEXT, lost_reason TEXT, order_value NUMERIC, last_contact_at TEXT, owner TEXT, city TEXT, email TEXT, priority TEXT, external_id TEXT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_external_id ON leads(external_id);
+CREATE INDEX IF NOT EXISTS idx_leads_owner ON leads(owner);
+CREATE TABLE IF NOT EXISTS sales_visits (id BIGSERIAL PRIMARY KEY, visit_date DATE NOT NULL, visited_by TEXT, place TEXT, company TEXT, contact_name TEXT, phone TEXT, purpose TEXT, discussion TEXT, remarks TEXT, next_visit_date DATE, lead_id BIGINT, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS lead_activities (id BIGSERIAL PRIMARY KEY, lead_id BIGINT NOT NULL, activity_at TEXT NOT NULL, kind TEXT, notes TEXT, status_after TEXT, next_follow_up DATE, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE INDEX IF NOT EXISTS idx_lead_activities_lead ON lead_activities(lead_id);
+CREATE TABLE IF NOT EXISTS crm_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());

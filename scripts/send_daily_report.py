@@ -15,6 +15,7 @@ import smtplib
 import sys
 import time
 from datetime import datetime, timedelta
+from html import escape
 from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -228,6 +229,101 @@ def _census(table, date_col="date"):
         print(f"census {table}: unavailable ({type(exc).__name__}: {exc})")
 
 
+def _leads_html():
+    """Leads & follow-ups block. Optional: any failure (e.g. the CRM tables not
+    created yet) drops the section instead of failing the whole report."""
+    try:
+        leads = requests.get(f"{SUPABASE_URL}/rest/v1/leads", headers=HEADERS, timeout=HTTP_TIMEOUT,
+                             params={"select": "id,lead_date,status,assigned_to,follow_up_date",
+                                     "limit": "20000"})
+        acts = requests.get(f"{SUPABASE_URL}/rest/v1/lead_activities", headers=HEADERS, timeout=HTTP_TIMEOUT,
+                            params={"select": "lead_id,status_after,created_by",
+                                    "activity_at": f"like.{TODAY}*", "limit": "5000"})
+        leads.raise_for_status(); acts.raise_for_status()
+        leads, acts = leads.json(), acts.json()
+    except Exception as e:
+        print(f"Leads section skipped: {e}")
+        return ""
+    if not leads:
+        return ""
+
+    def due(r):  # next follow-up; a lead without one is due the day after it came in
+        if r.get("follow_up_date"):
+            return r["follow_up_date"][:10]
+        try:
+            return (datetime.strptime(r["lead_date"][:10], "%Y-%m-%d") + timedelta(days=1)).date().isoformat()
+        except Exception:
+            return TODAY
+
+    open_ = [r for r in leads if r.get("status") in ("Fresh", "Negotiation")]
+    new_today = sum(1 for r in leads if (r.get("lead_date") or "")[:10] == TODAY)
+    won_today = sum(1 for a in acts if a.get("status_after") == "Converted")
+    lost_today = sum(1 for a in acts if a.get("status_after") == "Did Not Convert")
+    owner_of = {r["id"]: r.get("assigned_to") or "Unassigned" for r in leads}
+
+    people = {}
+    for r in open_:
+        p = people.setdefault(r.get("assigned_to") or "Unassigned", {"open": 0, "overdue": 0, "updates": 0})
+        p["open"] += 1
+        if due(r) < TODAY:
+            p["overdue"] += 1
+    for a in acts:
+        p = people.setdefault(owner_of.get(a.get("lead_id"), "Unassigned"), {"open": 0, "overdue": 0, "updates": 0})
+        p["updates"] += 1
+    overdue = sum(p["overdue"] for p in people.values())
+
+    rows = ""
+    for name, p in sorted(people.items(), key=lambda x: (-x[1]["overdue"], -x[1]["open"])):
+        od_color = "#E05252" if p["overdue"] else "#7A6565"
+        rows += f"""
+        <tr>
+          <td style="padding:7px 12px;color:#C4AEAE;font-size:13px;">{escape(name)}</td>
+          <td style="padding:7px 12px;color:#F2EDED;font-size:13px;text-align:right;">{p['open']}</td>
+          <td style="padding:7px 12px;color:{od_color};font-size:13px;text-align:right;font-weight:600;">{p['overdue']}</td>
+          <td style="padding:7px 12px;color:#F2EDED;font-size:13px;text-align:right;">{p['updates']}</td>
+        </tr>"""
+
+    return f"""
+        <tr>
+          <td style="padding:0 32px 20px;">
+            <div style="font-size:10px;font-weight:700;color:#C8575B;letter-spacing:0.14em;text-transform:uppercase;border-left:3px solid #8B2428;padding-left:10px;margin-bottom:10px;">Leads &amp; Follow-ups</div>
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:rgba(39,174,96,0.06);border:1px solid rgba(39,174,96,0.16);border-radius:10px;margin-bottom:10px;">
+              <tr>
+                <td style="padding:12px 16px;">
+                  <table width="100%">
+                    <tr>
+                      <td style="font-size:12px;color:#7A6565;">New leads today</td>
+                      <td style="font-size:13px;color:#F2EDED;font-weight:600;text-align:right;">{new_today}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:12px;color:#7A6565;padding-top:6px;">Follow-up updates logged</td>
+                      <td style="font-size:13px;color:#F2EDED;font-weight:600;text-align:right;padding-top:6px;">{len(acts)}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:12px;color:#7A6565;padding-top:6px;">Converted · Did not convert (today)</td>
+                      <td style="font-size:13px;color:#F2EDED;font-weight:600;text-align:right;padding-top:6px;">{won_today} · {lost_today}</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:12px;color:#7A6565;padding-top:6px;">Open leads · overdue follow-ups</td>
+                      <td style="font-size:13px;color:{'#E05252' if overdue else '#F2EDED'};font-weight:600;text-align:right;padding-top:6px;">{len(open_)} · {overdue}</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#181212;border-radius:8px;border:1px solid rgba(139,36,40,0.12);">
+              <tr>
+                <td style="padding:7px 12px;color:#5A4848;font-size:11px;">Salesperson</td>
+                <td style="padding:7px 12px;color:#5A4848;font-size:11px;text-align:right;">Open</td>
+                <td style="padding:7px 12px;color:#5A4848;font-size:11px;text-align:right;">Overdue</td>
+                <td style="padding:7px 12px;color:#5A4848;font-size:11px;text-align:right;">Updates today</td>
+              </tr>{rows}
+            </table>
+          </td>
+        </tr>
+"""
+
+
 def build_email():
     # Printed before the reads so a zero report can be diagnosed from the run
     # log alone. REPORT_DATE comes off the UTC clock while the send time is
@@ -274,6 +370,7 @@ def build_email():
     profit_color = "#27AE60" if total_profit >= 0 else "#E05252"
     profit_label = "PROFIT" if total_profit >= 0 else "LOSS"
     no_prod = len(prod_rows) == 0
+    leads_html = _leads_html()
 
     # ── Product rows HTML ─────────────────────────────────────────────────────
     prod_rows_html = ""
@@ -361,6 +458,7 @@ def build_email():
           </td>
         </tr>
 
+        {leads_html}
         <!-- Product breakdown -->
         <tr>
           <td style="padding:0 32px 24px;">

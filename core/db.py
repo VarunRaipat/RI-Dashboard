@@ -102,6 +102,64 @@ def init_db():
         return  # tables created via supabase_schema.sql
     con = _conn()
     con.executescript("""
+    CREATE TABLE IF NOT EXISTS leads (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_date       TEXT NOT NULL,
+        source          TEXT,
+        contact_name    TEXT,
+        phone           TEXT,
+        company         TEXT,
+        product         TEXT,
+        qty             REAL DEFAULT 0,
+        discussion      TEXT,
+        remarks         TEXT,
+        status          TEXT DEFAULT 'Fresh',
+        follow_up_date  TEXT,
+        assigned_to     TEXT,
+        lost_reason     TEXT,
+        order_value     REAL,
+        last_contact_at TEXT,
+        owner           TEXT,
+        city            TEXT,
+        email           TEXT,
+        priority        TEXT,
+        external_id     TEXT,
+        created_by      TEXT,
+        created_at      TEXT DEFAULT (datetime('now','localtime')),
+        updated_at      TEXT
+    );
+    CREATE TABLE IF NOT EXISTS sales_visits (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        visit_date      TEXT NOT NULL,
+        visited_by      TEXT,
+        place           TEXT,
+        company         TEXT,
+        contact_name    TEXT,
+        phone           TEXT,
+        purpose         TEXT,
+        discussion      TEXT,
+        remarks         TEXT,
+        next_visit_date TEXT,
+        lead_id         INTEGER,
+        created_by      TEXT,
+        created_at      TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS lead_activities (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id        INTEGER NOT NULL,
+        activity_at    TEXT NOT NULL,
+        kind           TEXT,
+        notes          TEXT,
+        status_after   TEXT,
+        next_follow_up TEXT,
+        created_by     TEXT,
+        created_at     TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS crm_settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT,
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_date TEXT NOT NULL,
@@ -1049,7 +1107,8 @@ def update_dispatch(row_id, data):
     log_activity("update", "Dispatch", detail)
 
 
-_MODULE_LABELS = {"production": "DPR Entry", "dispatch": "Dispatch"}
+_MODULE_LABELS = {"production": "DPR Entry", "dispatch": "Dispatch",
+                  "leads": "Leads", "sales_visits": "Sales Visits"}
 
 
 def delete_row(table, row_id):
@@ -1449,3 +1508,104 @@ _EDIT_REQUEST_UPDATE_FN.update({
     "dispatch":   update_dispatch,
     "orders":     update_order,
 })
+
+
+# ── Leads & Sales Visits (views/leads.py) — a simple sales sheet: one row per
+# enquiry with its status (Fresh / Negotiation / Converted / Did Not Convert), and one row per
+# field visit. Deletes go through delete_row().
+@st.cache_data(ttl=15)
+def get_leads():
+    if _use_supabase():
+        return _sb_select("leads", order="lead_date.desc,id.desc", limit=10000)
+    con = _conn()
+    df = pd.read_sql("SELECT * FROM leads ORDER BY lead_date DESC, id DESC", con)
+    con.close()
+    return df
+
+
+@st.cache_data(ttl=15)
+def get_sales_visits():
+    if _use_supabase():
+        return _sb_select("sales_visits", order="visit_date.desc,id.desc", limit=10000)
+    con = _conn()
+    df = pd.read_sql("SELECT * FROM sales_visits ORDER BY visit_date DESC, id DESC", con)
+    con.close()
+    return df
+
+
+@st.cache_data(ttl=15)
+def get_crm_settings():
+    """key -> value from `crm_settings` (lead auto-assign mode, round-robin
+    pointer, IndiaMART sync bookmarks). Empty if the table isn't there yet."""
+    try:
+        if _use_supabase():
+            df = _sb_select("crm_settings", order="key.asc", limit=500)
+        else:
+            con = _conn()
+            df = pd.read_sql("SELECT * FROM crm_settings", con)
+            con.close()
+    except Exception:
+        return {}
+    return dict(zip(df["key"], df["value"])) if not df.empty else {}
+
+
+def get_crm_setting(key):
+    return get_crm_settings().get(key)
+
+
+def set_crm_setting(key, value):
+    value = None if value is None else str(value)
+    if _use_supabase():
+        r = requests.post(_sb_url("crm_settings"), params={"on_conflict": "key"},
+                          headers={**_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"},
+                          json={"key": key, "value": value,
+                                "updated_at": pd.Timestamp.now(tz="UTC").isoformat()})
+        if r.status_code not in (200, 201, 204):
+            raise Exception(f"Supabase upsert failed: {r.text}")
+    else:
+        con = _conn()
+        con.execute("INSERT INTO crm_settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+        con.commit(); con.close()
+    get_crm_settings.clear()
+
+
+@st.cache_data(ttl=15)
+def get_lead_activities():
+    """Every call / WhatsApp / visit / note logged against a lead (views/lead_desk.py)."""
+    if _use_supabase():
+        return _sb_select("lead_activities", order="activity_at.desc,id.desc", limit=20000)
+    con = _conn()
+    df = pd.read_sql("SELECT * FROM lead_activities ORDER BY activity_at DESC, id DESC", con)
+    con.close()
+    return df
+
+
+def insert_lead_activity(data):
+    if _use_supabase(): _sb_insert("lead_activities", data)
+    else: _sqlite_insert("lead_activities", data)
+    _invalidate_cache()
+    log_activity("add", "Leads", f"Lead #{data.get('lead_id')} · {data.get('kind')} → {data.get('status_after')}")
+
+
+def insert_sales_row(table, data):
+    """Insert into `leads` or `sales_visits`."""
+    assert table in ("leads", "sales_visits")
+    if _use_supabase(): _sb_insert(table, data)
+    else: _sqlite_insert(table, data)
+    _invalidate_cache()
+    who = data.get("company") or data.get("contact_name") or ""
+    log_activity("add", _MODULE_LABELS[table], f"{who} · {data.get('status') or data.get('place') or ''}")
+
+
+def update_sales_row(table, row_id, data):
+    assert table in ("leads", "sales_visits")
+    if _use_supabase():
+        _sb_update(table, row_id, data)
+    else:
+        con = _conn()
+        sets = ", ".join(f"{k} = ?" for k in data)
+        con.execute(f"UPDATE {table} SET {sets} WHERE id = ?", [*data.values(), row_id])
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("edit", _MODULE_LABELS[table], f"ID {row_id}: " + ", ".join(f"{k}={v}" for k, v in data.items()))

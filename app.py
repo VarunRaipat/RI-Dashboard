@@ -642,6 +642,8 @@ with st.sidebar:
         pages.append("🚧  Gate Entry")
     if has_permission(username, role, "liability", "view"):
         pages.append("💰  Liability")
+    if has_permission(username, role, "leads", "view"):
+        pages.append("🎯  Leads & Visits")
     if has_permission(username, role, "admin", "view"):
         pages.append("⚙️  Admin")
 
@@ -684,5 +686,7 @@ elif page == "🚧  Gate Entry":
     from views.gate_entry import show; show(PLOT)
 elif page == "💰  Liability":
     from views.liability import show; show(PLOT)
+elif page == "🎯  Leads & Visits":
+    from views.leads import show; show(PLOT)
 elif page == "⚙️  Admin":
     from views.admin import show; show(PLOT)
