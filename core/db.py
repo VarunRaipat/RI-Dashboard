@@ -1510,13 +1510,33 @@ _EDIT_REQUEST_UPDATE_FN.update({
 })
 
 
+# Supabase returns a column-less frame for an empty table; the Leads views
+# index columns directly, so an empty table must still carry its columns.
+_LEAD_TABLE_COLS = {
+    "leads": ["id", "lead_date", "source", "contact_name", "phone", "company", "product", "qty",
+              "discussion", "remarks", "status", "follow_up_date", "assigned_to", "lost_reason",
+              "order_value", "last_contact_at", "owner", "city", "email", "priority", "external_id",
+              "created_by", "created_at", "updated_at"],
+    "sales_visits": ["id", "visit_date", "visited_by", "place", "company", "contact_name", "phone",
+                     "purpose", "discussion", "remarks", "next_visit_date", "lead_id", "created_by",
+                     "created_at"],
+    "lead_activities": ["id", "lead_id", "activity_at", "kind", "notes", "status_after",
+                        "next_follow_up", "created_by", "created_at"],
+}
+
+
+def _with_cols(table, df):
+    missing = [c for c in _LEAD_TABLE_COLS[table] if c not in df.columns]
+    return df.assign(**{c: pd.Series(dtype=object) for c in missing}) if missing else df
+
+
 # ── Leads & Sales Visits (views/leads.py) — a simple sales sheet: one row per
 # enquiry with its status (Fresh / Negotiation / Converted / Did Not Convert), and one row per
 # field visit. Deletes go through delete_row().
 @st.cache_data(ttl=15)
 def get_leads():
     if _use_supabase():
-        return _sb_select("leads", order="lead_date.desc,id.desc", limit=10000)
+        return _with_cols("leads", _sb_select("leads", order="lead_date.desc,id.desc", limit=10000))
     con = _conn()
     df = pd.read_sql("SELECT * FROM leads ORDER BY lead_date DESC, id DESC", con)
     con.close()
@@ -1526,7 +1546,7 @@ def get_leads():
 @st.cache_data(ttl=15)
 def get_sales_visits():
     if _use_supabase():
-        return _sb_select("sales_visits", order="visit_date.desc,id.desc", limit=10000)
+        return _with_cols("sales_visits", _sb_select("sales_visits", order="visit_date.desc,id.desc", limit=10000))
     con = _conn()
     df = pd.read_sql("SELECT * FROM sales_visits ORDER BY visit_date DESC, id DESC", con)
     con.close()
@@ -1574,7 +1594,7 @@ def set_crm_setting(key, value):
 def get_lead_activities():
     """Every call / WhatsApp / visit / note logged against a lead (views/lead_desk.py)."""
     if _use_supabase():
-        return _sb_select("lead_activities", order="activity_at.desc,id.desc", limit=20000)
+        return _with_cols("lead_activities", _sb_select("lead_activities", order="activity_at.desc,id.desc", limit=20000))
     con = _conn()
     df = pd.read_sql("SELECT * FROM lead_activities ORDER BY activity_at DESC, id DESC", con)
     con.close()
