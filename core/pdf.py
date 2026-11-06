@@ -139,6 +139,10 @@ def _letterhead(ss, doc_title, subtitle_lines, isi_mark=False):
             ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ]))
         logo.hAlign = "LEFT"
+        # Company name in text under the logos (quotation only)
+        if LOGO_PATH.exists():
+            logo = [logo, Spacer(1, 2 * mm),
+                    Paragraph("RAMESHWARAM INDUSTRIES", ss["Wordmark"])]
 
     title_block = [Paragraph(doc_title, ss["DocTitle"])] + \
         [Paragraph(t, ss["DocSub"]) for t in subtitle_lines]
