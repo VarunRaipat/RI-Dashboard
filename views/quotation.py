@@ -22,10 +22,16 @@ def _fy_label(on_date=None):
     return f"{start.year % 100:02d}-{(start.year + 1) % 100:02d}"
 
 
+# Numbering for FY 26-27 continues from the earlier quotation book, so it
+# starts at 105. Later financial years reset to 0001 as usual.
+QUOTE_START_SEQ = {"26-27": 105}
+
+
 def _next_quote_no(df, on_date=None):
     """Next 'QTN/25-26/0001'-style number, resetting each financial year."""
-    prefix = f"QTN/{_fy_label(on_date)}/"
-    seq = 1
+    fy = _fy_label(on_date)
+    prefix = f"QTN/{fy}/"
+    seq = QUOTE_START_SEQ.get(fy, 1)
     if df is not None and not df.empty and "quote_no" in df.columns:
         subset = df
         if "quote_date" in df.columns:
@@ -36,7 +42,7 @@ def _next_quote_no(df, on_date=None):
             if v.startswith(prefix) and v[len(prefix):].isdigit():
                 nums.append(int(v[len(prefix):]))
         if nums:
-            seq = max(nums) + 1
+            seq = max(seq, max(nums) + 1)
     return f"{prefix}{seq:04d}"
 
 

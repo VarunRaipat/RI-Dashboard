@@ -20,6 +20,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
 LOGO_PATH = Path(__file__).parent.parent / "assets" / "Logo.png"
+ISI_PATH  = Path(__file__).parent.parent / "assets" / "ISI.png"
 
 INK         = colors.HexColor("#181818")   # near-black body text
 MUTED       = colors.HexColor("#8C8C8C")   # grey labels / secondary text
@@ -116,13 +117,28 @@ def _section_label(ss, text):
     return Paragraph(_tracked(text), ss["SectionLabel"])
 
 
-def _letterhead(ss, doc_title, subtitle_lines):
+def _letterhead(ss, doc_title, subtitle_lines, isi_mark=False):
     """Logo + doc title inside a soft-tinted card, closed off with a gold
     rule over a thin hairline (a "double rule") for a premium letterhead feel."""
     if LOGO_PATH.exists():
         logo = Image(str(LOGO_PATH), width=LOGO_W, height=LOGO_H)
     else:
         logo = Paragraph("RAMESHWARAM INDUSTRIES", ss["Wordmark"])
+
+    # Optional ISI certification mark beside the company logo
+    if isi_mark and ISI_PATH.exists():
+        isi_h = LOGO_H * 0.9
+        isi_w = isi_h * 666 / 519   # ISI.png is 666x519px
+        isi = Image(str(ISI_PATH), width=isi_w, height=isi_h)
+        logo = Table([[logo, isi]], colWidths=[LOGO_W + 4 * mm, isi_w + 2 * mm])
+        logo.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        logo.hAlign = "LEFT"
 
     title_block = [Paragraph(doc_title, ss["DocTitle"])] + \
         [Paragraph(t, ss["DocSub"]) for t in subtitle_lines]
@@ -446,7 +462,7 @@ def generate_quotation(quote_no, header, lines):
         f"No. {quote_no}",
         f"Date: {header.get('quote_date', '—')}",
         f"Valid Until: {header.get('valid_until', '—')}",
-    ])
+    ], isi_mark=True)
 
     story.append(_section_label(ss, "Client"))
     story.append(Spacer(1, 2 * mm))
