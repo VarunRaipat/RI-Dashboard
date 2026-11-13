@@ -356,12 +356,22 @@ QUOTATION_VALIDITY_DAYS = 30
 
 # Pre-filled into the Quotation form's "Terms & Conditions" box (editable per
 # quotation) and printed on the PDF, one term per line.
-DEFAULT_QUOTATION_TERMS = """1. Place of delivery : Free Delivery by our platform type (Open-Dala) truck up to your approachable work-site. Unloading of Pipes at site to be arranged & borne by your scope.
-2. Term of payment : Advance against PI.
-3. Mode of payment : Through Bank (NEFT or RTGS). Bank Details : RAMESHWARAM INDUSTRIES, State Bank of India, Branch: HINOO Branch, A/C No. 33480866545, IFSC: SBIN0030527.
-4. Stock : Pipes are ready in stock. Can start to supply within 2-3 days after receipt of PO & its Payment.
-5. Lot wise MTC will be provided along with the consignment.
-6. Validity : As mentioned here-in-above."""
+DEFAULT_QUOTATION_TERMS = """1. Place of delivery : Free Delivery by our platform type (Open-Dala) truck up to your approachable work-site. Unloading will be our scope.
+2. Term of payment : 100% Advance against PI.
+3. Mode of payment : Through Bank (NEFT or RTGS). Bank details as given above.
+4. Lot wise MTC will be provided along with the consignment.
+5. Validity : As mentioned here-in-above."""
+
+# Company details printed on the quotation letterhead / bank panel.
+COMPANY_GSTIN  = "20AAQFR3341H1ZD"
+COMPANY_PHONES = ["94311 70287", "93249 63348"]
+COMPANY_BANK = {
+    "Account Name": "RAMESHWARAM INDUSTRIES",
+    "Bank":         "State Bank of India",
+    "Branch":       "Hinoo Branch",
+    "A/C No.":      "33480866545",
+    "IFSC":         "SBIN0030527",
+}
 
 PLANTS = ["Pipe Factory", "Pole Factory"]
 

@@ -5,7 +5,8 @@ ink+gold table headers, and a running gold-bar/footer on every page.
 """
 import io
 from xml.sax.saxutils import escape
-from core.config import GST_PCT
+from core.config import GST_PCT, COMPANY_GSTIN, COMPANY_PHONES, COMPANY_BANK
+import re
 from core.tz import now_ist
 from pathlib import Path
 
@@ -595,13 +596,10 @@ def _q_styles(F):
         "totV":      ps("qTotV", fontName=F["disp"], fontSize=13, leading=16, textColor=colors.white, alignment=TA_RIGHT),
         "words":     ps("qWords", fontName=F["semi"], fontSize=10.5, leading=14.5, textColor=Q_NAVY),
         "note":      ps("qNote", fontSize=7.4, leading=10, textColor=Q_MUTED),
+        "contact":   ps("qContact", fontSize=7.8, leading=11, textColor=Q_MUTED),
         "body":      ps("qBody", fontSize=8.8, leading=13),
         "termN":     ps("qTermN", fontName=F["semi"], fontSize=8.2, leading=12.5, textColor=Q_GOLD),
         "term":      ps("qTerm", fontSize=8.4, leading=12.5),
-        "signHead":  ps("qSignHead", fontName=F["semi"], fontSize=8.4, leading=11, textColor=Q_NAVY),
-        "signHeadR": ps("qSignHeadR", fontName=F["semi"], fontSize=8.4, leading=11, textColor=Q_NAVY, alignment=TA_RIGHT),
-        "signL":     ps("qSignL", fontSize=7.4, leading=10, textColor=Q_MUTED),
-        "signR":     ps("qSignR", fontSize=7.4, leading=10, textColor=Q_MUTED, alignment=TA_RIGHT),
         "thanks":    ps("qThanks", fontName=F["dispSemi"], fontSize=9.5, leading=13, textColor=Q_NAVY, alignment=TA_CENTER),
     }
 
@@ -684,7 +682,7 @@ def generate_quotation(quote_no, header, lines):
         quote_no : Quotation number (str), e.g. "QTN/26-27/0105".
         header   : dict with quote_date, valid_until, client_name, contact_person,
                    phone, office, gstin, client_type, sales_person, sale_type,
-                   discount_pct, remarks, terms (newline-separated).
+                   delivery_address, discount_pct, remarks, terms (newline-separated).
         lines    : list of dicts with product, qty, unit, rate, amount, gst_amount,
                    transport_value, transport_gst_amount.
     Returns:
@@ -728,6 +726,15 @@ def generate_quotation(quote_no, header, lines):
         left += [mt, Spacer(1, 4 * mm)]
     left += [Paragraph(COMPANY_NAME, ss["company"]), Spacer(1, 1.2 * mm),
              Paragraph(escape(_tracked(COMPANY_TAGLINE.upper())), ss["tagline"])]
+    contact_bits = []
+    if COMPANY_GSTIN:
+        contact_bits.append(f"GSTIN <font name='{F['semi']}' color='#1D232B'>{escape(COMPANY_GSTIN)}</font>")
+    if COMPANY_PHONES:
+        contact_bits.append(f"Ph. <font name='{F['semi']}' color='#1D232B'>"
+                            f"{escape(' | '.join(COMPANY_PHONES))}</font>")
+    if contact_bits:
+        left += [Spacer(1, 2.2 * mm),
+                 Paragraph("   ·   ".join(contact_bits), ss["contact"])]
 
     meta = Table([
         [Paragraph(_tracked("QUOTE NO."), ss["metaL"]), Paragraph(esc(quote_no), ss["metaV"])],
@@ -768,15 +775,27 @@ def generate_quotation(quote_no, header, lines):
         ("LINEBELOW", (0, 0), (-1, -2), 0.4, Q_HAIR),
         ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ])
-    card = Table([[client_left, kv]], colWidths=[W - 80 * mm, 80 * mm])
-    card.setStyle(TableStyle([
+    card_rows = [[client_left, kv]]
+    card_style = [
         ("BACKGROUND", (0, 0), (-1, -1), Q_CARD),
-        ("LINEBEFORE", (0, 0), (0, 0), 2.4, Q_GOLD),
+        ("LINEBEFORE", (0, 0), (0, -1), 2.4, Q_GOLD),
         ("LINEBEFORE", (1, 0), (1, 0), 0.5, Q_HAIR),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 11), ("RIGHTPADDING", (0, 0), (-1, -1), 11),
         ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-    ]))
+    ]
+    delivery = esc(header.get("delivery_address"), "")
+    if delivery:
+        # full-width strip under the client details, split off by a hairline
+        card_rows.append([[Paragraph(_tracked("DELIVERY ADDRESS"), ss["eyebrow"]), Spacer(1, 1.5 * mm),
+                           Paragraph(delivery, ss["kvV"])], ""])
+        card_style += [
+            ("SPAN", (0, 1), (1, 1)),
+            ("LINEABOVE", (0, 1), (1, 1), 0.5, Q_HAIR),
+            ("TOPPADDING", (0, 1), (-1, 1), 7), ("BOTTOMPADDING", (0, 1), (-1, 1), 9),
+        ]
+    card = Table(card_rows, colWidths=[W - 80 * mm, 80 * mm])
+    card.setStyle(TableStyle(card_style))
     story += [card, Spacer(1, 7 * mm)]
 
     # ── Line items ────────────────────────────────────────────────────────
@@ -854,43 +873,54 @@ def generate_quotation(quote_no, header, lines):
     ]))
 
     words = [Paragraph(_tracked("AMOUNT IN WORDS"), ss["eyebrow"]), Spacer(1, 2 * mm),
-             Paragraph(escape(_amount_in_words(grand_total)), ss["words"]), Spacer(1, 3 * mm),
-             Paragraph("All amounts are in Indian Rupees.", ss["note"])]
+             Paragraph(escape(_amount_in_words(grand_total)), ss["words"])]
+    if COMPANY_BANK:
+        lw = W - sw - 10 * mm
+        b = COMPANY_BANK
+        bank_rows = [
+            ("Account", b.get("Account Name")),
+            ("Bank", ", ".join(x for x in (b.get("Bank"), b.get("Branch")) if x)),
+            ("A/C No.", b.get("A/C No.")),
+            ("IFSC", b.get("IFSC")),
+        ]
+        bank_rows = [(k, v) for k, v in bank_rows if v]
+        # A/C No. and IFSC share one row to keep the panel compact
+        cells = []
+        for k, v in bank_rows:
+            if k == "IFSC" and cells and cells[-1][0] == "A/C No.":
+                cells[-1] = ("A/C No.", f"{cells[-1][1]}   <font name='{F['med']}' size='6.8' "
+                                         f"color='#7A818A'>IFSC</font>  {escape(v)}")
+                continue
+            cells.append((k, escape(v)))
+        bank = Table([[Paragraph(_tracked(k.upper()), ss["kvL"]), Paragraph(v, ss["kvV"])]
+                      for k, v in cells], colWidths=[20 * mm, lw - 20 * mm])
+        _q_layout(bank, [
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.4, Q_HAIR),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.2),
+        ])
+        words += [Spacer(1, 4.5 * mm), Paragraph(_tracked("BANK DETAILS"), ss["eyebrow"]),
+                  Spacer(1, 1.5 * mm), bank]
     totals = _q_layout(Table([[words, "", summary]], colWidths=[W - sw - 10 * mm, 10 * mm, sw]))
-    story += [KeepTogether(totals), Spacer(1, 7 * mm)]
+    story += [KeepTogether(totals), Spacer(1, 6 * mm)]
 
-    # ── Remarks / terms ───────────────────────────────────────────────────
-    remarks = (header.get("remarks") or "").strip()
-    if remarks:
-        story += [_q_section(ss, "Remarks", W), Spacer(1, 2.5 * mm),
-                  Paragraph(escape(remarks).replace("\n", "<br/>"), ss["body"]), Spacer(1, 6 * mm)]
-
-    terms = [t.strip().lstrip("•-*·").strip() for t in str(header.get("terms") or "").splitlines() if t.strip()]
+    # ── Terms (the form's "Additional Note" prints as the last term) ─────
+    # strip any numbering/bullets typed into the terms box — the PDF numbers them itself
+    terms = [re.sub(r"^\s*(?:\d+\s*[.)]|[•\-*·])\s*", "", t).strip()
+             for t in str(header.get("terms") or "").splitlines() if t.strip()]
     terms = [t for t in terms if t]
+    remarks = " ".join(str(header.get("remarks") or "").split())
+    if remarks and remarks.lower() != "nan":
+        terms.append(remarks)
     if terms:
         tt = _q_layout(Table([[Paragraph(f"{i:02d}", ss["termN"]), Paragraph(escape(t), ss["term"])]
                               for i, t in enumerate(terms, 1)], colWidths=[9 * mm, W - 9 * mm]),
                        [("TOPPADDING", (0, 0), (-1, -1), 1.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2)])
-        story += [_q_section(ss, "Terms & Conditions", W), Spacer(1, 2.5 * mm), tt, Spacer(1, 8 * mm)]
+        story += [_q_section(ss, "Terms & Conditions", W), Spacer(1, 2.5 * mm), tt, Spacer(1, 7 * mm)]
 
-    # ── Sign-off ──────────────────────────────────────────────────────────
-    half = (W - 30 * mm) / 2
-    sign = Table([
-        [Paragraph("Client Acceptance", ss["signHead"]), "",
-         Paragraph(f"For {COMPANY_NAME}", ss["signHeadR"])],
-        ["", "", ""],
-        [Paragraph("Signature, Name &amp; Seal", ss["signL"]), "",
-         Paragraph("Authorised Signatory", ss["signR"])],
-    ], colWidths=[half, 30 * mm, half], rowHeights=[None, 14 * mm, None])
-    _q_layout(sign, [
-        ("LINEBELOW", (0, 1), (0, 1), 0.6, Q_MUTED),
-        ("LINEBELOW", (2, 1), (2, 1), 0.6, Q_MUTED),
-        ("TOPPADDING", (0, 2), (-1, 2), 3),
-    ])
-    story.append(KeepTogether([
-        sign, Spacer(1, 7 * mm),
-        Paragraph("Thank you for the opportunity — we look forward to working with you.", ss["thanks"]),
-    ]))
+    # ── Closing line (no signature block — removed at user's request) ────
+    story.append(Paragraph("Thank you for the opportunity — we look forward to working with you.",
+                           ss["thanks"]))
 
     doc.build(story, canvasmaker=_quote_canvas(quote_no, F))
     return buf.getvalue()

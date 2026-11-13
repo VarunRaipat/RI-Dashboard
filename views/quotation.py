@@ -196,6 +196,10 @@ def show(PLOT):
                  key=f"quo_saletype_{_ck}",
                  help="Sale B is off-book — GST is not applied on this quotation.")
 
+    delivery_address = st.text_input(
+        "Delivery Address (site where material is to be delivered)", key="quo_delivery",
+    )
+
     st.caption("*Client Name and Client Type are required.")
 
     gst_applicable = st.checkbox(
@@ -296,6 +300,7 @@ def show(PLOT):
                 "office":         office,
                 "gstin":          gstin,
                 "client_type":    client_type,
+                "delivery_address": delivery_address.strip(),
                 "sales_person":   sales_person,
                 "status":         "Sent",
                 "discount_pct":   discount_pct,
@@ -343,6 +348,7 @@ def show(PLOT):
                     if k.startswith(("quo_prod_", "quo_qty_", "quo_unit_", "quo_rate_")):
                         del st.session_state[k]
                 st.session_state.pop("quo_terms", None)  # next quote starts from the default terms
+                st.session_state.pop("quo_delivery", None)
                 st.rerun()
             else:
                 st.error("Enter qty > 0 for at least one product line.")
@@ -399,6 +405,7 @@ def show(PLOT):
             "office":         qhdr.get("office", ""),
             "gstin":          qhdr.get("gstin", ""),
             "client_type":    qhdr.get("client_type", ""),
+            "delivery_address": qhdr.get("delivery_address", "") or "",
             "sales_person":   qhdr.get("sales_person", ""),
             "discount_pct":   qhdr.get("discount_pct", 0),
             "sale_type":      qhdr.get("sale_type", "Sale A"),
@@ -459,7 +466,7 @@ def show(PLOT):
                         "client_type":      qhdr.get("client_type", ""),
                         "mode_of_payment":  cv_payment,
                         "sale_type":        cv_saletype,
-                        "delivery_address": "",
+                        "delivery_address": qhdr.get("delivery_address", "") or "",
                         "site_person":      "",
                         "site_phone":       "",
                         "remarks":          f"Converted from Quotation {sel_qno}",

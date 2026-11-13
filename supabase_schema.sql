@@ -229,6 +229,8 @@ ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_gst_applicable BOOLEAN
 ALTER TABLE quotations ADD COLUMN IF NOT EXISTS transport_gst_amount REAL DEFAULT 0;
 -- Terms & Conditions printed on the quotation PDF (editable per quote):
 ALTER TABLE quotations ADD COLUMN IF NOT EXISTS terms TEXT;
+-- Site / delivery address printed on the quotation PDF and carried into the DI on convert:
+ALTER TABLE quotations ADD COLUMN IF NOT EXISTS delivery_address TEXT;
 
 CREATE TABLE IF NOT EXISTS vendor_transactions (
     id              BIGSERIAL PRIMARY KEY,
