@@ -368,6 +368,8 @@ DEFAULT_QUOTATION_TERMS = """1. Place of delivery : Free Delivery by our platfor
 # Company details printed on the quotation letterhead / bank panel.
 COMPANY_GSTIN  = "20AAQFR3341H1ZD"
 COMPANY_PHONES = ["94311 70287", "93249 63348"]
+COMPANY_EMAIL   = "rameshwaramindustries@gmail.com"
+COMPANY_WEBSITE = "rameshwaramindustries.com"
 COMPANY_BANK = {
     "Account Name": "RAMESHWARAM INDUSTRIES",
     "Bank":         "State Bank of India",

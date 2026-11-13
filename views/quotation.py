@@ -418,6 +418,10 @@ def show(PLOT):
     all_qnos = sorted(df_quotes["quote_no"].dropna().unique().tolist(), reverse=True)
     sel_qno = st.selectbox("Select Quote No.", all_qnos, key="quo_redownload_sel")
     q_rows = df_quotes[df_quotes["quote_no"] == sel_qno]
+    # get_quotations() returns newest-first (id desc); put this quote's lines
+    # back in the order they were entered, so the PDF / converted DI match it.
+    if "id" in q_rows.columns:
+        q_rows = q_rows.sort_values("id", kind="stable")
     if not q_rows.empty:
         qhdr = q_rows.iloc[0]
         redl_header = {

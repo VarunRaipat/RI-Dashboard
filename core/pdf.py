@@ -5,7 +5,8 @@ ink+gold table headers, and a running gold-bar/footer on every page.
 """
 import io
 from xml.sax.saxutils import escape
-from core.config import GST_PCT, COMPANY_GSTIN, COMPANY_PHONES, COMPANY_BANK
+from core.config import (GST_PCT, COMPANY_GSTIN, COMPANY_PHONES, COMPANY_BANK,
+                         COMPANY_EMAIL, COMPANY_WEBSITE)
 import re
 from core.tz import now_ist
 from pathlib import Path
@@ -600,7 +601,8 @@ def _q_styles(F):
         "body":      ps("qBody", fontSize=8.8, leading=13),
         "termN":     ps("qTermN", fontName=F["semi"], fontSize=8.2, leading=12.5, textColor=Q_GOLD),
         "term":      ps("qTerm", fontSize=8.4, leading=12.5),
-        "thanks":    ps("qThanks", fontName=F["dispSemi"], fontSize=9.5, leading=13, textColor=Q_NAVY, alignment=TA_CENTER),
+        "thanks":    ps("qThanks", fontName=F["dispSemi"], fontSize=10.5, leading=14, textColor=Q_NAVY, alignment=TA_CENTER),
+        "thanksSub": ps("qThanksSub", fontSize=8, leading=11, textColor=Q_MUTED, alignment=TA_CENTER),
     }
 
 
@@ -723,7 +725,7 @@ def generate_quotation(quote_no, header, lines):
     if marks:
         mt = _q_layout(Table([marks], colWidths=mark_w), [("VALIGN", (0, 0), (-1, -1), "MIDDLE")])
         mt.hAlign = "LEFT"
-        left += [mt, Spacer(1, 4 * mm)]
+        left += [mt, Spacer(1, 3 * mm)]
     left += [Paragraph(COMPANY_NAME, ss["company"]), Spacer(1, 1.2 * mm),
              Paragraph(escape(_tracked(COMPANY_TAGLINE.upper())), ss["tagline"])]
     contact_bits = []
@@ -732,9 +734,14 @@ def generate_quotation(quote_no, header, lines):
     if COMPANY_PHONES:
         contact_bits.append(f"Ph. <font name='{F['semi']}' color='#1D232B'>"
                             f"{escape(' | '.join(COMPANY_PHONES))}</font>")
-    if contact_bits:
-        left += [Spacer(1, 2.2 * mm),
-                 Paragraph("   ·   ".join(contact_bits), ss["contact"])]
+    sep = "   ·   "
+    web_bits = [f"<font name='{F['semi']}' color='#1D232B'>{escape(v)}</font>"
+                for v in (COMPANY_EMAIL, COMPANY_WEBSITE) if v]
+    if contact_bits or web_bits:
+        left.append(Spacer(1, 1.8 * mm))
+        for bits in (contact_bits, web_bits):
+            if bits:
+                left.append(Paragraph(sep.join(bits), ss["contact"]))
 
     meta = Table([
         [Paragraph(_tracked("QUOTE NO."), ss["metaL"]), Paragraph(esc(quote_no), ss["metaV"])],
@@ -751,10 +758,10 @@ def generate_quotation(quote_no, header, lines):
 
     head = _q_layout(Table([[left, right]], colWidths=[W - 70 * mm, 70 * mm]),
                      [("VALIGN", (0, 0), (-1, -1), "BOTTOM")])
-    story += [head, Spacer(1, 5 * mm),
+    story += [head, Spacer(1, 4 * mm),
               HRFlowable(width="100%", thickness=1.2, color=Q_NAVY, spaceAfter=1.1 * mm),
               HRFlowable(width="100%", thickness=0.5, color=Q_GOLD),
-              Spacer(1, 6 * mm)]
+              Spacer(1, 5 * mm)]
 
     # ── Client card ───────────────────────────────────────────────────────
     client_left = [Paragraph(_tracked("PREPARED FOR"), ss["eyebrow"]), Spacer(1, 2 * mm),
@@ -766,8 +773,7 @@ def generate_quotation(quote_no, header, lines):
     if contact:
         client_left.append(Paragraph(contact, ss["clientSub"]))
 
-    kv_rows = [("GSTIN", header.get("gstin")), ("Client Type", header.get("client_type")),
-               ("Sales Contact", header.get("sales_person"))]
+    kv_rows = [("GSTIN", header.get("gstin")), ("Sales Contact", header.get("sales_person"))]
     kv = Table([[Paragraph(_tracked(k.upper()), ss["kvL"]), Paragraph(esc(v), ss["kvV"])] for k, v in kv_rows],
                colWidths=[31 * mm, 38 * mm])
     _q_layout(kv, [
@@ -796,18 +802,17 @@ def generate_quotation(quote_no, header, lines):
         ]
     card = Table(card_rows, colWidths=[W - 80 * mm, 80 * mm])
     card.setStyle(TableStyle(card_style))
-    story += [card, Spacer(1, 7 * mm)]
+    story += [card, Spacer(1, 6 * mm)]
 
     # ── Line items ────────────────────────────────────────────────────────
     has_gst       = any(float(l.get("gst_amount", 0) or 0) > 0 for l in lines)
     has_transport = any(float(l.get("transport_value", 0) or 0) > 0 for l in lines)
 
     cols = [("#", 8 * mm, "thC"), ("DESCRIPTION", None, "th"), ("QTY", 16 * mm, "thR"),
-            ("UNIT", 12 * mm, "thC"), (f"RATE ({RS})", 20 * mm, "thR")]
-    if has_gst:
-        cols.append((f"GST ({RS})", 21 * mm, "thR"))
-    if has_transport:
-        cols.append((f"TRANSPORT ({RS})", 23 * mm, "thR"))
+            ("UNIT", 12 * mm, "thC"), (f"RATE ({RS})", 22 * mm, "thR")]
+    # No per-line GST or Transport columns — both are shown once, in the
+    # totals box below, so line Amounts are pre-GST and add up to the Taxable
+    # Value. (Transport can also be quoted as its own line via "Other".)
     cols.append((f"AMOUNT ({RS})", 27 * mm, "thR"))
     fixed = sum(c[1] for c in cols if c[1])
     widths = [c[1] or (W - fixed) for c in cols]
@@ -826,11 +831,7 @@ def generate_quotation(quote_no, header, lines):
         r = [Paragraph(f"{n:02d}", ss["tdC"]), Paragraph(esc(l.get("product")), ss["tdProd"]),
              Paragraph(_inr(qty, 0) if qty == int(qty) else _inr(qty).rstrip("0"), ss["tdR"]),
              Paragraph(esc(l.get("unit"), ""), ss["tdC"]), Paragraph(_inr(rate), ss["tdR"])]
-        if has_gst:
-            r.append(Paragraph(_inr(gst) if gst else "—", ss["tdR"]))
-        if has_transport:
-            r.append(Paragraph(_inr(trn) if trn else "—", ss["tdR"]))
-        r.append(Paragraph(_inr(amt + gst), ss["tdRB"]))
+        r.append(Paragraph(_inr(amt), ss["tdRB"]))
         rows.append(r)
 
     items = Table(rows, colWidths=widths, repeatRows=1)
@@ -838,7 +839,7 @@ def generate_quotation(quote_no, header, lines):
         ("BACKGROUND", (0, 0), (-1, 0), Q_NAVY),
         ("LINEBELOW", (0, 0), (-1, 0), 1.6, Q_GOLD),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ("LINEBELOW", (0, 1), (-1, -2), 0.5, Q_HAIR),
         ("LINEBELOW", (0, -1), (-1, -1), 1.0, Q_NAVY),
@@ -916,11 +917,19 @@ def generate_quotation(quote_no, header, lines):
         tt = _q_layout(Table([[Paragraph(f"{i:02d}", ss["termN"]), Paragraph(escape(t), ss["term"])]
                               for i, t in enumerate(terms, 1)], colWidths=[9 * mm, W - 9 * mm]),
                        [("TOPPADDING", (0, 0), (-1, -1), 1.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2)])
-        story += [_q_section(ss, "Terms & Conditions", W), Spacer(1, 2.5 * mm), tt, Spacer(1, 7 * mm)]
+        story += [_q_section(ss, "Terms & Conditions", W), Spacer(1, 2.5 * mm), tt, Spacer(1, 5 * mm)]
 
     # ── Closing line (no signature block — removed at user's request) ────
-    story.append(Paragraph("Thank you for the opportunity — we look forward to working with you.",
-                           ss["thanks"]))
+    sub = "We look forward to a lasting partnership built on quality and timely delivery."
+    if COMPANY_PHONES:
+        sub += f"<br/>For any clarification, please call {escape(' | '.join(COMPANY_PHONES))}"
+        sub += f" or write to {escape(COMPANY_EMAIL)}." if COMPANY_EMAIL else "."
+    story.append(KeepTogether([
+        HRFlowable(width=22 * mm, thickness=1, color=Q_GOLD, hAlign="CENTER", spaceAfter=2.5 * mm),
+        Paragraph("Thank you for considering Rameshwaram Industries.", ss["thanks"]),
+        Spacer(1, 1 * mm),
+        Paragraph(sub, ss["thanksSub"]),
+    ]))
 
     doc.build(story, canvasmaker=_quote_canvas(quote_no, F))
     return buf.getvalue()
