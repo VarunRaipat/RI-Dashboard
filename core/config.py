@@ -350,7 +350,10 @@ PRODUCT_TYPES = ["Pipe", "Boundary Wall", "PSC Pole", "Fencing Post"]
 
 FACTORIES = ["Rameshwaram Industries"]
 
-QUOTATION_UNITS         = ["Nos", "Rft", "Cft", "Sqft"]
+QUOTATION_UNITS         = ["Nos", "Rft", "Rmt", "Sqft", "Sqm", "Cft", "Cum", "Kg", "MT", "Set", "Lot", "Trip", "Job"]
+# Extra choice on the quotation Product / Unit dropdowns — picking it shows a
+# text box so any product name or unit can be typed for that line.
+QUOTATION_OTHER         = "✏️ Other (type below)"
 QUOTATION_STATUS        = ["Draft", "Sent", "Accepted", "Rejected", "Expired", "Converted"]
 QUOTATION_VALIDITY_DAYS = 30
 

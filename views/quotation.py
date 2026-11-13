@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta
 from core.tz import today_ist
-from core.config import (DEFAULT_QUOTATION_TERMS, ORDER_PRODUCTS, CLIENT_TYPES, QUOTATION_UNITS, QUOTATION_STATUS,
+from core.config import (DEFAULT_QUOTATION_TERMS, ORDER_PRODUCTS, CLIENT_TYPES, QUOTATION_UNITS, QUOTATION_OTHER, QUOTATION_STATUS,
                          QUOTATION_VALIDITY_DAYS, PAYMENT_MODES, SALE_TYPES, GST_PCT)
 from core.db import (insert_quotation, get_quotations, update_quotation, delete_quotation,
                      get_orders, insert_order)
@@ -218,6 +218,15 @@ def show(PLOT):
     )
 
     # ── Product lines ─────────────────────────────────────────────────────────
+    def _line_product(lid):
+        """Selected product, or the typed name when 'Other' is picked ('' if blank)."""
+        v = st.session_state.get(f"quo_prod_{lid}", ORDER_PRODUCTS[0])
+        return (st.session_state.get(f"quo_prodc_{lid}") or "").strip() if v == QUOTATION_OTHER else v
+
+    def _line_unit(lid):
+        v = st.session_state.get(f"quo_unit_{lid}", QUOTATION_UNITS[0])
+        return (st.session_state.get(f"quo_unitc_{lid}") or "").strip() if v == QUOTATION_OTHER else v
+
     st.markdown("**Product Lines**")
     st.caption("Add one line per product. GST (if enabled above) is added on top of Rate x Qty.")
 
@@ -233,9 +242,17 @@ def show(PLOT):
     total_qty = 0.0
     for n, lid in enumerate(line_ids):
         cols = st.columns([3, 1.5, 1.5, 2, 2, 1])
-        cols[0].selectbox("Product", ORDER_PRODUCTS, key=f"quo_prod_{lid}", label_visibility="collapsed")
+        cols[0].selectbox("Product", ORDER_PRODUCTS + [QUOTATION_OTHER], key=f"quo_prod_{lid}",
+                          label_visibility="collapsed")
+        if st.session_state.get(f"quo_prod_{lid}") == QUOTATION_OTHER:
+            cols[0].text_input("Product name", key=f"quo_prodc_{lid}", placeholder="Type product name",
+                               label_visibility="collapsed")
         cols[1].number_input("Qty", min_value=0.0, step=1.0, key=f"quo_qty_{lid}", label_visibility="collapsed")
-        cols[2].selectbox("Unit", QUOTATION_UNITS, key=f"quo_unit_{lid}", label_visibility="collapsed")
+        cols[2].selectbox("Unit", QUOTATION_UNITS + [QUOTATION_OTHER], key=f"quo_unit_{lid}",
+                          label_visibility="collapsed")
+        if st.session_state.get(f"quo_unit_{lid}") == QUOTATION_OTHER:
+            cols[2].text_input("Unit name", key=f"quo_unitc_{lid}", placeholder="Type unit",
+                               label_visibility="collapsed")
         cols[3].number_input("Rate", min_value=0.0, step=0.5, key=f"quo_rate_{lid}", label_visibility="collapsed")
         qty_v  = st.session_state.get(f"quo_qty_{lid}", 0) or 0
         rate_v = st.session_state.get(f"quo_rate_{lid}", 0.0) or 0.0
@@ -286,6 +303,13 @@ def show(PLOT):
         missing = []
         if not client_name.strip():             missing.append("Client Name")
         if client_type == REQUIRED_PLACEHOLDER:  missing.append("Client Type")
+        for _lid in st.session_state.quote_line_ids:
+            if float(st.session_state.get(f"quo_qty_{_lid}", 0) or 0) <= 0:
+                continue
+            if not _line_product(_lid):
+                missing.append("product name for the 'Other' line"); break
+            if not _line_unit(_lid):
+                missing.append("unit for the 'Other' line"); break
 
         if missing:
             st.error(f"Required: {', '.join(missing)}.")
@@ -315,8 +339,8 @@ def show(PLOT):
                 rate_v = float(st.session_state.get(f"quo_rate_{lid}", 0.0) or 0.0)
                 if qty_v <= 0:
                     continue
-                prod = st.session_state.get(f"quo_prod_{lid}", ORDER_PRODUCTS[0])
-                unit = st.session_state.get(f"quo_unit_{lid}", QUOTATION_UNITS[0])
+                prod = _line_product(lid)
+                unit = _line_unit(lid)
                 base = round(qty_v * rate_v, 2)
                 gst_amt, _ = gst_split(base, gst_applicable)
                 # Per-unit transport applies to every line; a Flat amount is
@@ -345,7 +369,7 @@ def show(PLOT):
                 st.session_state.quote_line_ids = [st.session_state.quote_next_line_id]
                 st.session_state.quote_next_line_id += 1
                 for k in list(st.session_state.keys()):
-                    if k.startswith(("quo_prod_", "quo_qty_", "quo_unit_", "quo_rate_")):
+                    if k.startswith(("quo_prod_", "quo_prodc_", "quo_qty_", "quo_unit_", "quo_unitc_", "quo_rate_")):
                         del st.session_state[k]
                 st.session_state.pop("quo_terms", None)  # next quote starts from the default terms
                 st.session_state.pop("quo_delivery", None)
