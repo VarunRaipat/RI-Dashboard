@@ -359,11 +359,11 @@ QUOTATION_VALIDITY_DAYS = 30
 
 # Pre-filled into the Quotation form's "Terms & Conditions" box (editable per
 # quotation) and printed on the PDF, one term per line.
-DEFAULT_QUOTATION_TERMS = """1. Place of delivery : Free Delivery by our platform type (Open-Dala) truck up to your approachable work-site. Unloading will be our scope.
-2. Term of payment : 100% Advance against PI.
-3. Mode of payment : Through Bank (NEFT or RTGS). Bank details as given above.
-4. Lot wise MTC will be provided along with the consignment.
-5. Validity : As mentioned here-in-above."""
+DEFAULT_QUOTATION_TERMS = """1. Place of Delivery: Free delivery shall be provided through our platform-type (Open Dala) trucks up to your accessible work site. Unloading shall be under our scope.
+2. Terms of Payment: 100% advance payment against Proforma Invoice (PI).
+3. Mode of Payment: Payment shall be made through bank transfer via NEFT/RTGS. Bank details are provided above.
+4. Material Test Certificate (MTC): Lot-wise MTC shall be provided along with each consignment.
+5. Validity: As specified hereinabove."""
 
 # Company details printed on the quotation letterhead / bank panel.
 COMPANY_GSTIN  = "20AAQFR3341H1ZD"

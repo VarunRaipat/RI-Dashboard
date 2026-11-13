@@ -606,6 +606,17 @@ def _q_styles(F):
     }
 
 
+def _term_markup(text, F):
+    """Escape a term for the PDF and bold its label — the text before the
+    first colon (e.g. "Place of Delivery:"). Stray **markdown** markers are
+    dropped. A term with no short leading label is left plain."""
+    text = text.replace("**", "").strip()
+    label, colon, rest = text.partition(":")
+    if colon and 0 < len(label.strip()) <= 45:
+        return f"<font name='{F['semi']}'>{escape(label.strip())}:</font> {escape(rest.strip())}"
+    return escape(text)
+
+
 def _q_layout(t, extra=()):
     """Zero-padding style for layout-only tables."""
     t.setStyle(TableStyle([
@@ -914,7 +925,7 @@ def generate_quotation(quote_no, header, lines):
     if remarks and remarks.lower() != "nan":
         terms.append(remarks)
     if terms:
-        tt = _q_layout(Table([[Paragraph(f"{i:02d}", ss["termN"]), Paragraph(escape(t), ss["term"])]
+        tt = _q_layout(Table([[Paragraph(f"{i:02d}", ss["termN"]), Paragraph(_term_markup(t, F), ss["term"])]
                               for i, t in enumerate(terms, 1)], colWidths=[9 * mm, W - 9 * mm]),
                        [("TOPPADDING", (0, 0), (-1, -1), 1.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2)])
         story += [_q_section(ss, "Terms & Conditions", W), Spacer(1, 2.5 * mm), tt, Spacer(1, 5 * mm)]
