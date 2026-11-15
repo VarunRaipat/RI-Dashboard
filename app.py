@@ -285,11 +285,12 @@ html, body, [class*="css"], button, input, select, textarea,
     color: #788F9A !important;
 }
 
-/* ── DataFrames ── */
+/* ── DataFrames ── NEVER set overflow on stDataFrame: its hover toolbar
+   (Download CSV / Search / Fullscreen) sits just ABOVE the table box, and
+   any overflow clipping cuts it off so tables can't be exported. ── */
 [data-testid="stDataFrame"] {
     border: 1px solid rgba(36,106,139,0.12) !important;
     border-radius: 12px !important;
-    overflow: hidden !important;
 }
 
 /* ── Form submit & primary buttons ── */
@@ -460,9 +461,10 @@ input[type="text"], input[type="password"] {
     h2 { font-size: 1.08rem !important; }
     h3 { font-size: 0.98rem !important; }
 
-    /* Tables/dataframes: scroll horizontally in their own box instead of
-       squeezing every column down to unreadable width */
-    [data-testid="stDataFrame"], [data-testid="stTable"] {
+    /* Static tables: scroll horizontally in their own box instead of
+       squeezing every column down to unreadable width. (st.dataframe already
+       scrolls itself — overflow on it would clip its export toolbar.) */
+    [data-testid="stTable"] {
         overflow-x: auto !important;
         -webkit-overflow-scrolling: touch !important;
     }
