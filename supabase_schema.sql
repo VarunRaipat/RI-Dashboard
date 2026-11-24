@@ -555,3 +555,9 @@ CREATE TABLE IF NOT EXISTS sales_visits (id BIGSERIAL PRIMARY KEY, visit_date DA
 CREATE TABLE IF NOT EXISTS lead_activities (id BIGSERIAL PRIMARY KEY, lead_id BIGINT NOT NULL, activity_at TEXT NOT NULL, kind TEXT, notes TEXT, status_after TEXT, next_follow_up DATE, created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE INDEX IF NOT EXISTS idx_lead_activities_lead ON lead_activities(lead_id);
 CREATE TABLE IF NOT EXISTS crm_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());
+
+-- Migration: Stock Adjustments (2026-11-24) — factory operator records a
+-- physical count; the difference counts in Inventory only once admin approves.
+-- Run this in Supabase SQL Editor.
+CREATE TABLE IF NOT EXISTS stock_adjustments (id BIGSERIAL PRIMARY KEY, date DATE NOT NULL, plant TEXT NOT NULL, item_type TEXT NOT NULL, item_key TEXT NOT NULL, item_label TEXT, system_qty NUMERIC DEFAULT 0, physical_qty NUMERIC DEFAULT 0, qty_change NUMERIC DEFAULT 0, reason TEXT, status TEXT DEFAULT 'pending', requested_by TEXT, requested_by_name TEXT, reviewed_by TEXT, review_note TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), reviewed_at TEXT);
+ALTER TABLE stock_adjustments DISABLE ROW LEVEL SECURITY;

@@ -7,7 +7,8 @@ from core.config import (INVENTORY_PRODUCTS, INVENTORY_ANCHOR_DATE,
                           INVENTORY_MATERIAL_LABELS, SKU_TO_PRICING_KEY,
                           GATE_UNTRACKED_ITEMS, GATE_RM_TRACKED_ITEMS, plant_for_product)
 from core.db import (get_production, get_dispatch, get_rm_prices, get_gate_entries, get_rm_usage,
-                      get_inventory_opening, get_product_config)
+                      get_inventory_opening, get_product_config,
+                      get_stock_adjustments)
 
 _ANCHOR = pd.Timestamp(INVENTORY_ANCHOR_DATE)
 
@@ -25,6 +26,25 @@ def _since_anchor(df, date_col="date"):
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     return df[df[date_col] >= _ANCHOR]
+
+
+def _approved_adjustments(item_type, plant=None):
+    """Approved stock adjustments (physical count − system balance) since
+    the anchor date, for 'fg' or 'rm'. Pending/rejected ones never count."""
+    df = get_stock_adjustments(status="approved")
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["date", "plant", "item_key", "qty_change"])
+    df = df[df["item_type"] == item_type].copy()
+    if plant is not None:
+        df = df[df["plant"] == plant]
+    df["qty_change"] = pd.to_numeric(df["qty_change"], errors="coerce").fillna(0)
+    return _since_anchor(df)
+
+
+def _adjusted_total(df_adj, item_key):
+    if df_adj is None or df_adj.empty:
+        return 0.0
+    return float(df_adj.loc[df_adj["item_key"] == item_key, "qty_change"].sum())
 
 
 def _matches_product(series, name):
@@ -48,6 +68,7 @@ def finished_goods_summary(plant=None):
     df_disp = _since_anchor(get_dispatch())
     db_opening = get_inventory_opening()
     product_config = get_product_config()
+    df_adj = _approved_adjustments("fg")
 
     products = INVENTORY_PRODUCTS if plant is None else [
         row for row in INVENTORY_PRODUCTS if plant_for_product(row[0]) == plant
@@ -60,7 +81,8 @@ def finished_goods_summary(plant=None):
             if prod_name and df_prod is not None and not df_prod.empty else 0.0
         dispatched = float(df_disp.loc[_matches_product(df_disp["product"], disp_name), "qty_dispatched"].sum()) \
             if df_disp is not None and not df_disp.empty else 0.0
-        current_stock = opening + produced - dispatched
+        adjusted = _adjusted_total(df_adj, canonical)
+        current_stock = opening + produced - dispatched + adjusted
         # canonical is always a single SKU (e.g. "Hume Pipe 300mm NP2 (M/F)"),
         # unlike prod_name/disp_name which can be tuples — SKU_TO_PRICING_KEY
         # strips the joint suffix to match product_config's diameter+class keys.
@@ -71,6 +93,7 @@ def finished_goods_summary(plant=None):
             "Opening": opening,
             "Produced": produced,
             "Dispatched": dispatched,
+            "Adjusted": adjusted,
             "Current Stock": current_stock,
             "Value (₹)": current_stock * selling_price,
         })
@@ -94,6 +117,7 @@ def rm_summary(plant):
     df_gate = _since_anchor(get_gate_entries())
     rm_prices = get_rm_prices()
     db_opening = get_inventory_opening()
+    df_adj = _approved_adjustments("rm", plant=plant)
 
     if df_usage is not None and not df_usage.empty and "plant" in df_usage.columns:
         df_usage = df_usage[df_usage["plant"] == plant]
@@ -114,13 +138,15 @@ def rm_summary(plant):
         if df_gate is not None and not df_gate.empty and "item" in df_gate.columns:
             in_mask = (df_gate["item"] == material) & (df_gate["direction"] == "In")
             received = float(pd.to_numeric(df_gate.loc[in_mask, "qty"], errors="coerce").fillna(0).sum())
-        current_stock = opening + received - consumed
+        adjusted = _adjusted_total(df_adj, material)
+        current_stock = opening + received - consumed + adjusted
         price_per_kg = rm_prices.get(material, 0)
         rows.append({
             "Material": _RM_LABEL.get(material, material),
             "Opening": opening,
             "Received": received,
             "Consumed": consumed,
+            "Adjusted": adjusted,
             "Current Stock": current_stock,
             "Value (₹)": current_stock * price_per_kg,
         })
@@ -155,6 +181,13 @@ def daily_breakdown(canonical_name, start, end):
         if not df_disp.empty:
             daily_disp = df_disp.groupby("date")["qty_dispatched"].sum()
 
+    daily_adj = pd.Series(dtype=float)
+    df_adj = _approved_adjustments("fg")
+    if df_adj is not None and not df_adj.empty:
+        df_adj = df_adj[df_adj["item_key"] == canonical_name]
+        if not df_adj.empty:
+            daily_adj = df_adj.groupby("date")["qty_change"].sum()
+
     start_ts = max(pd.Timestamp(start), _ANCHOR)
     end_ts   = pd.Timestamp(end)
     if end_ts < start_ts:
@@ -163,15 +196,16 @@ def daily_breakdown(canonical_name, start, end):
     running = opening
     if start_ts > _ANCHOR:
         for d in pd.date_range(_ANCHOR, start_ts - pd.Timedelta(days=1), freq="D"):
-            running += daily_prod.get(d, 0) - daily_disp.get(d, 0)
+            running += daily_prod.get(d, 0) - daily_disp.get(d, 0) + daily_adj.get(d, 0)
 
     rows = []
     for d in pd.date_range(start_ts, end_ts, freq="D"):
         produced   = daily_prod.get(d, 0)
         dispatched = daily_disp.get(d, 0)
-        closing    = running + produced - dispatched
+        adjusted   = daily_adj.get(d, 0)
+        closing    = running + produced - dispatched + adjusted
         rows.append({"Date": d, "Opening": running, "Produced": produced,
-                     "Dispatched": dispatched, "Closing": closing})
+                     "Dispatched": dispatched, "Adjusted": adjusted, "Closing": closing})
         running = closing
 
     return pd.DataFrame(rows)

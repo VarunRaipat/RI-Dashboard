@@ -351,6 +351,25 @@ def init_db():
         created_at        TEXT DEFAULT (datetime('now','localtime')),
         reviewed_at       TEXT
     );
+    CREATE TABLE IF NOT EXISTS stock_adjustments (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        date              TEXT NOT NULL,
+        plant             TEXT NOT NULL,
+        item_type         TEXT NOT NULL,
+        item_key          TEXT NOT NULL,
+        item_label        TEXT,
+        system_qty        REAL DEFAULT 0,
+        physical_qty      REAL DEFAULT 0,
+        qty_change        REAL DEFAULT 0,
+        reason            TEXT,
+        status            TEXT DEFAULT 'pending',
+        requested_by      TEXT,
+        requested_by_name TEXT,
+        reviewed_by       TEXT,
+        review_note       TEXT,
+        created_at        TEXT DEFAULT (datetime('now','localtime')),
+        reviewed_at       TEXT
+    );
     CREATE TABLE IF NOT EXISTS sequence_overrides (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         seq_key    TEXT UNIQUE NOT NULL,
@@ -1634,3 +1653,73 @@ def update_sales_row(table, row_id, data):
         con.commit(); con.close()
     _invalidate_cache()
     log_activity("edit", _MODULE_LABELS[table], f"ID {row_id}: " + ", ".join(f"{k}={v}" for k, v in data.items()))
+
+
+# ── Stock Adjustments (views/inventory.py) — a factory operator records a
+# physical count that differs from the system balance; the difference sits as
+# a 'pending' request and only enters the stock calculation
+# (core/inventory.py) once an admin approves it.
+_STOCK_ADJ_COLS = ["id", "date", "plant", "item_type", "item_key", "item_label", "system_qty",
+                   "physical_qty", "qty_change", "reason", "status", "requested_by",
+                   "requested_by_name", "reviewed_by", "review_note", "created_at", "reviewed_at"]
+
+
+@st.cache_data(ttl=15)
+def get_stock_adjustments(status=None):
+    """Never raises — until the stock_adjustments migration is run in
+    Supabase this returns an empty frame so Inventory still loads."""
+    try:
+        if _use_supabase():
+            filters = {"status": f"eq.{status}"} if status else None
+            df = _sb_select("stock_adjustments", filters=filters, order="created_at.desc,id.desc", limit=5000)
+        else:
+            con = _conn()
+            q, params = "SELECT * FROM stock_adjustments", ()
+            if status:
+                q, params = q + " WHERE status = ?", (status,)
+            df = pd.read_sql(q + " ORDER BY created_at DESC, id DESC", con, params=params)
+            con.close()
+    except Exception:
+        df = pd.DataFrame()
+    missing = [c for c in _STOCK_ADJ_COLS if c not in df.columns]
+    return df.assign(**{c: pd.Series(dtype=object) for c in missing}) if missing else df
+
+
+def create_stock_adjustment(data, auto_approve=False):
+    """data: date, plant, item_type ('fg'|'rm'), item_key, item_label,
+    system_qty, physical_qty, qty_change, reason. auto_approve is for an
+    admin's own adjustment — no point asking themselves for approval."""
+    from core.tz import now_ist
+    row = {
+        **data,
+        "status":            "approved" if auto_approve else "pending",
+        "requested_by":      st.session_state.get("username") or "",
+        "requested_by_name": st.session_state.get("name") or "",
+    }
+    if auto_approve:
+        row.update({"reviewed_by": row["requested_by"], "reviewed_at": str(now_ist()),
+                    "review_note": "Entered by admin"})
+    if _use_supabase(): _sb_insert("stock_adjustments", row)
+    else: _sqlite_insert("stock_adjustments", row)
+    _invalidate_cache()
+    log_activity("stock_adjustment" if auto_approve else "request_stock_adjustment", "Inventory",
+                 f"{data['plant']} · {data['item_label']} · {data['qty_change']:+g}")
+
+
+def review_stock_adjustment(adj_id, approve, note=""):
+    from core.tz import now_ist
+    data = {
+        "status":      "approved" if approve else "rejected",
+        "reviewed_by": st.session_state.get("username") or "",
+        "review_note": note,
+        "reviewed_at": str(now_ist()),
+    }
+    if _use_supabase():
+        _sb_update("stock_adjustments", adj_id, data)
+    else:
+        con = _conn()
+        con.execute("UPDATE stock_adjustments SET status = ?, reviewed_by = ?, review_note = ?, reviewed_at = ? "
+                    "WHERE id = ?", (data["status"], data["reviewed_by"], note, data["reviewed_at"], adj_id))
+        con.commit(); con.close()
+    _invalidate_cache()
+    log_activity("approve_stock_adjustment" if approve else "reject_stock_adjustment", "Inventory", f"#{adj_id}")

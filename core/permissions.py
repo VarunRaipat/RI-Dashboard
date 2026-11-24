@@ -86,7 +86,7 @@ ROLE_DEFAULTS = {
         "quotation":  dict(_ALL_FALSE),
         "orders":     dict(_ALL_FALSE),
         "dispatch":   dict(_VIEW_ADD),
-        "inventory":  dict(_VIEW_ONLY),
+        "inventory":  dict(_VIEW_ADD),   # add = request a stock adjustment (admin approves)
         "gate_entry": dict(_VIEW_ADD),
         "liability":  dict(_ALL_FALSE),
         "admin":      dict(_ALL_FALSE),

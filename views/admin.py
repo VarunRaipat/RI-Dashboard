@@ -47,6 +47,12 @@ def show(PLOT):
         st.warning(f"📝 **{len(_pending_reqs)} edit request(s)** waiting for review — see the "
                    f"**Edit Requests** tab below.")
 
+    from core.db import get_stock_adjustments
+    _pending_adj = get_stock_adjustments(status="pending")
+    if can_edit and not _pending_adj.empty:
+        st.warning(f"📦 **{len(_pending_adj)} stock adjustment(s)** waiting for approval — approve them "
+                   f"on the **Inventory** page.")
+
     tab1, tab2, tab2b, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
         ["💰 RM Prices", "📦 Product Config", "🏭 Inventory Opening", "📋 All Production", "🚚 All Dispatch",
          "🧩 Merge Client Names", "🕵️ Activity Log", f"📝 Edit Requests ({len(_pending_reqs)})",
