@@ -121,12 +121,14 @@ def di_product_balance(df_orders, df_disp):
     SKUs, so a sqft-vs-pieces balance would be meaningless."""
     cols = ["di_no", "order_date", "client_name", "product", "qty_ordered",
             "dispatched_qty", "pending_qty", "ordered_value", "dispatched_value",
-            "pending_value", "challans"]
+            "pending_value", "challans", "on_di", "extra_qty"]
     if df_orders is None or df_orders.empty or "di_no" not in df_orders.columns:
         return pd.DataFrame(columns=cols)
-    o = df_orders[df_orders["product"].notna() & (df_orders["product"] != "Boundary Wall")].copy()
+    o = df_orders[df_orders["product"].notna()].copy()
     o["di_no"] = o["di_no"].astype(str).str.strip()
     o = o[~o["di_no"].isin(["", "None", "nan"])]
+    bw_dis = set(o.loc[o["product"] == "Boundary Wall", "di_no"])
+    o = o[o["product"] != "Boundary Wall"]
     o["qty_ordered"]  = pd.to_numeric(o["qty_ordered"], errors="coerce").fillna(0)
     o["total_amount"] = pd.to_numeric(o.get("total_amount"), errors="coerce").fillna(0)
     bal = o.groupby(["di_no", "product"], sort=False).agg(
@@ -146,12 +148,25 @@ def di_product_balance(df_orders, df_disp):
             dispatched_value=("dispatch_value", "sum"),
             challans=("challan_no", lambda x: ", ".join(x.dropna().astype(str).unique())),
         ).reset_index()
-        bal = bal.merge(dg, on=["di_no", "product"], how="left")
-    for c in ("dispatched_qty", "dispatched_value"):
+        # Outer merge: a challan booked against this DI for a product the
+        # DI doesn't list (other size / joint type) must still show up,
+        # otherwise the per-product view hides it and won't reconcile with
+        # the DI-level pooled Pending Qty. Boundary Wall DIs are skipped —
+        # they're delivered as Slab/Pillar/caps, never as their own SKU.
+        dg = dg[dg["di_no"].isin(set(bal["di_no"])) & ~dg["di_no"].isin(bw_dis)]
+        bal = bal.merge(dg, on=["di_no", "product"], how="outer", indicator=True)
+        bal["on_di"] = bal.pop("_merge") != "right_only"
+        hdr = o.groupby("di_no").agg(_d=("order_date", "min"), _c=("client_name", "first"))
+        bal["order_date"]  = bal["order_date"].fillna(bal["di_no"].map(hdr["_d"]))
+        bal["client_name"] = bal["client_name"].fillna(bal["di_no"].map(hdr["_c"]))
+    if "on_di" not in bal.columns:
+        bal["on_di"] = True
+    for c in ("qty_ordered", "ordered_value", "dispatched_qty", "dispatched_value"):
         bal[c] = bal[c].fillna(0) if c in bal.columns else 0.0
     bal["challans"] = bal["challans"].fillna("") if "challans" in bal.columns else ""
 
     bal["pending_qty"] = (bal["qty_ordered"] - bal["dispatched_qty"]).clip(lower=0)
+    bal["extra_qty"]   = (bal["dispatched_qty"] - bal["qty_ordered"]).clip(lower=0)
     rate = (bal["ordered_value"] / bal["qty_ordered"].where(bal["qty_ordered"] > 0)).fillna(0)
     bal["pending_value"] = bal["pending_qty"] * rate
     return bal[cols]
@@ -163,6 +178,13 @@ def di_balance_text(bal, di_no):
     rows = bal[bal["di_no"] == str(di_no or "").strip()]
     parts = []
     for _, r in rows.iterrows():
-        left = int(round(r["pending_qty"]))
-        parts.append(f"{r['product']}: {left:,} left" if left > 0 else f"{r['product']}: ✓ done")
+        left, extra = int(round(r["pending_qty"])), int(round(r["extra_qty"]))
+        if not r["on_di"]:
+            parts.append(f"⚠️ {r['product']}: {extra:,} sent (not on DI)")
+        elif left > 0:
+            parts.append(f"{r['product']}: {left:,} left")
+        elif extra > 0:
+            parts.append(f"{r['product']}: ✓ done (+{extra:,} extra)")
+        else:
+            parts.append(f"{r['product']}: ✓ done")
     return " · ".join(parts)

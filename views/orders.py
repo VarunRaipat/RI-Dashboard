@@ -664,23 +664,27 @@ def show(PLOT):
     st.markdown("---")
     st.markdown('<div class="section-header">Pending Delivery — by Product</div>', unsafe_allow_html=True)
     st.caption("One row per DI × product, so a multi-product DI shows exactly which item is left and how many. "
-               "Boundary Wall lines are excluded (delivered as Slab/Pillar).")
+               "⚠️ Not on DI = a challan booked against this DI for a size/joint type the DI doesn't list — "
+               "fix the challan's product/DI or revise the order. Boundary Wall DIs are excluded (delivered as Slab/Pillar).")
     show_done = st.checkbox("Also show fully delivered products", key="ord_bal_show_done")
-    bal_view = bal if show_done else bal[bal["pending_qty"] > 0]
+    bal_view = bal if show_done else bal[(bal["pending_qty"] > 0) | (bal["extra_qty"] > 0)]
     if bal_view.empty:
         st.success("✅ Nothing pending — every product on every DI in this range is delivered.")
     else:
         bal_view = bal_view.copy()
         bal_view["Plant"] = bal_view["product"].map(plant_for_product)
         bal_view["Status"] = bal_view.apply(
-            lambda r: "🟢 Done" if r["pending_qty"] <= 0 else ("🟡 Partial" if r["dispatched_qty"] > 0 else "🔴 Pending"),
+            lambda r: "⚠️ Not on DI" if not r["on_di"] else
+                      ("🟠 Over-delivered" if r["extra_qty"] > 0 else
+                       ("🟢 Done" if r["pending_qty"] <= 0 else
+                        ("🟡 Partial" if r["dispatched_qty"] > 0 else "🔴 Pending"))),
             axis=1)
-        for c in ["qty_ordered", "dispatched_qty", "pending_qty", "ordered_value", "dispatched_value", "pending_value"]:
+        for c in ["qty_ordered", "dispatched_qty", "pending_qty", "extra_qty", "ordered_value", "dispatched_value", "pending_value"]:
             bal_view[c] = bal_view[c].round(0).astype(int)
         bal_view = bal_view.sort_values(["order_date", "di_no"], ascending=[False, True])
         bal_cols = ["di_no", "order_date", "client_name", "Plant", "product", "Status",
-                    "qty_ordered", "dispatched_qty", "pending_qty"]
-        bal_sum = ["qty_ordered", "dispatched_qty", "pending_qty"]
+                    "qty_ordered", "dispatched_qty", "pending_qty", "extra_qty"]
+        bal_sum = ["qty_ordered", "dispatched_qty", "pending_qty", "extra_qty"]
         if role != "headoffice":
             bal_cols += ["ordered_value", "dispatched_value", "pending_value"]
             bal_sum  += ["ordered_value", "dispatched_value", "pending_value"]
@@ -688,7 +692,7 @@ def show(PLOT):
         table_by_plant(bal_view, key="ord_bal", sum_cols=bal_sum, show_cols=bal_cols,
                        rename={"di_no": "DI No.", "order_date": "Date", "client_name": "Client",
                                "product": "Product", "qty_ordered": "Ordered", "dispatched_qty": "Delivered",
-                               "pending_qty": "Left", "ordered_value": "Order Val (₹)",
+                               "pending_qty": "Left", "extra_qty": "Extra / Not on DI", "ordered_value": "Order Val (₹)",
                                "dispatched_value": "Delivered Val (₹)", "pending_value": "Pending Val (₹)",
                                "challans": "Challans"},
                        col_config={"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
