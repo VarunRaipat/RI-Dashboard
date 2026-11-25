@@ -263,6 +263,14 @@ def _show_di_warnings(di_no, products, df_orders, df_disp):
     """Surface di_dispatch_warnings() as inline warnings under the DI No.
     field — non-blocking, since a legitimate dispatch can predate its Sales
     Order or reference legacy data the operator knows is fine."""
+    if str(di_no or "").strip() and df_orders is not None and not df_orders.empty:
+        from core.visibility import di_product_balance, di_balance_text
+        di_key = str(di_no).strip()
+        o = df_orders[df_orders["di_no"].astype(str).str.strip() == di_key]
+        if not o.empty:
+            txt = di_balance_text(di_product_balance(o, df_disp), di_key)
+            if txt:
+                st.info(f"📦 DI {di_key} balance — {txt}")
     for w in di_dispatch_warnings(di_no, products, df_orders, df_disp):
         st.warning(f"⚠️ {w}")
 

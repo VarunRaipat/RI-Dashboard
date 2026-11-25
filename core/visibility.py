@@ -110,3 +110,59 @@ def di_dispatch_warnings(di_no, products, df_orders, df_disp):
         if o_qty > 0 and d_qty >= o_qty:
             warnings.append(f"DI {di_no} · \"{prod}\" is already fully dispatched ({int(d_qty):,}/{int(o_qty):,}).")
     return warnings
+
+
+def di_product_balance(df_orders, df_disp):
+    """One row per (DI No., product) with ordered / dispatched / pending qty
+    and value — the per-product balance a multi-product DI needs (the DI-level
+    pipeline only shows one pooled qty). Duplicate order lines for the same
+    product are summed first so dispatches aren't double-counted. Boundary
+    Wall lines are left out: they're fulfilled by dispatching Slab/Pillar
+    SKUs, so a sqft-vs-pieces balance would be meaningless."""
+    cols = ["di_no", "order_date", "client_name", "product", "qty_ordered",
+            "dispatched_qty", "pending_qty", "ordered_value", "dispatched_value",
+            "pending_value", "challans"]
+    if df_orders is None or df_orders.empty or "di_no" not in df_orders.columns:
+        return pd.DataFrame(columns=cols)
+    o = df_orders[df_orders["product"].notna() & (df_orders["product"] != "Boundary Wall")].copy()
+    o["di_no"] = o["di_no"].astype(str).str.strip()
+    o = o[~o["di_no"].isin(["", "None", "nan"])]
+    o["qty_ordered"]  = pd.to_numeric(o["qty_ordered"], errors="coerce").fillna(0)
+    o["total_amount"] = pd.to_numeric(o.get("total_amount"), errors="coerce").fillna(0)
+    bal = o.groupby(["di_no", "product"], sort=False).agg(
+        order_date=("order_date", "min"),
+        client_name=("client_name", "first"),
+        qty_ordered=("qty_ordered", "sum"),
+        ordered_value=("total_amount", "sum"),
+    ).reset_index()
+
+    if df_disp is not None and not df_disp.empty and "di_no" in df_disp.columns:
+        d = df_disp[df_disp["di_no"].notna()].copy()
+        d["di_no"] = d["di_no"].astype(str).str.strip()
+        d["qty_dispatched"] = pd.to_numeric(d["qty_dispatched"], errors="coerce").fillna(0)
+        d["dispatch_value"] = pd.to_numeric(d.get("dispatch_value"), errors="coerce").fillna(0)
+        dg = d.groupby(["di_no", "product"]).agg(
+            dispatched_qty=("qty_dispatched", "sum"),
+            dispatched_value=("dispatch_value", "sum"),
+            challans=("challan_no", lambda x: ", ".join(x.dropna().astype(str).unique())),
+        ).reset_index()
+        bal = bal.merge(dg, on=["di_no", "product"], how="left")
+    for c in ("dispatched_qty", "dispatched_value"):
+        bal[c] = bal[c].fillna(0) if c in bal.columns else 0.0
+    bal["challans"] = bal["challans"].fillna("") if "challans" in bal.columns else ""
+
+    bal["pending_qty"] = (bal["qty_ordered"] - bal["dispatched_qty"]).clip(lower=0)
+    rate = (bal["ordered_value"] / bal["qty_ordered"].where(bal["qty_ordered"] > 0)).fillna(0)
+    bal["pending_value"] = bal["pending_qty"] * rate
+    return bal[cols]
+
+
+def di_balance_text(bal, di_no):
+    """'NP3 600mm: 12 left · Slab 7': done' for one DI — short enough for a
+    table cell or a caption under the DI No. field."""
+    rows = bal[bal["di_no"] == str(di_no or "").strip()]
+    parts = []
+    for _, r in rows.iterrows():
+        left = int(round(r["pending_qty"]))
+        parts.append(f"{r['product']}: {left:,} left" if left > 0 else f"{r['product']}: ✓ done")
+    return " · ".join(parts)

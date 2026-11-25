@@ -618,6 +618,12 @@ def show(PLOT):
 
     di_summary["Status"] = di_summary.apply(_status, axis=1)
 
+    # Per-product balance — a DI with several products otherwise only shows
+    # one pooled Pending Qty, hiding WHICH product is still left.
+    from core.visibility import di_product_balance, di_balance_text
+    bal = di_product_balance(df_orders, df_disp)
+    di_summary["balance"] = di_summary["di_no"].map(lambda d: di_balance_text(bal, d))
+
     from core.ui import table_by_plant, add_ist_timestamp, timestamp_col_config
 
     di_summary = add_ist_timestamp(di_summary)
@@ -627,7 +633,7 @@ def show(PLOT):
         if col in di_summary.columns:
             di_summary[col] = di_summary[col].round(0).astype(int)
 
-    show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","Plant","products","Status",
+    show_cols = ["di_no","order_date","client_name","client_type","product_type","sale_type","Plant","products","Status","balance",
                  "qty_ordered","dispatched_qty","pending_qty",
                  "total_ordered","gst_amount","transport_value","transport_gst_amount",
                  "dispatched_value","pending_value","po_name","po_date","challans","created_at"]
@@ -635,7 +641,7 @@ def show(PLOT):
     rename_map = {
         "di_no":"DI No.","order_date":"Date","client_name":"Client",
         "client_type":"Client Type","product_type":"Product Type","sale_type":"Sale Type",
-        "products":"Products","qty_ordered":"Ord Qty","dispatched_qty":"Disp Qty",
+        "products":"Products","balance":"Left to Deliver","qty_ordered":"Ord Qty","dispatched_qty":"Disp Qty",
         "pending_qty":"Pending Qty","total_ordered":"Material Val (₹)","gst_amount":"Material GST (₹)",
         "transport_value":"Transport (₹)","transport_gst_amount":"Transport GST (₹)",
         "dispatched_value":"Disp Val (₹)","pending_value":"Pending Val (₹)",
@@ -653,6 +659,40 @@ def show(PLOT):
     table_by_plant(di_summary, key="ord_pipeline", sum_cols=sum_cols,
                    show_cols=show_cols, rename=rename_map, col_config=col_cfg,
                    date_col="order_date", show_export=(role != "headoffice"))
+
+    # ── Pending delivery, product-wise ────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<div class="section-header">Pending Delivery — by Product</div>', unsafe_allow_html=True)
+    st.caption("One row per DI × product, so a multi-product DI shows exactly which item is left and how many. "
+               "Boundary Wall lines are excluded (delivered as Slab/Pillar).")
+    show_done = st.checkbox("Also show fully delivered products", key="ord_bal_show_done")
+    bal_view = bal if show_done else bal[bal["pending_qty"] > 0]
+    if bal_view.empty:
+        st.success("✅ Nothing pending — every product on every DI in this range is delivered.")
+    else:
+        bal_view = bal_view.copy()
+        bal_view["Plant"] = bal_view["product"].map(plant_for_product)
+        bal_view["Status"] = bal_view.apply(
+            lambda r: "🟢 Done" if r["pending_qty"] <= 0 else ("🟡 Partial" if r["dispatched_qty"] > 0 else "🔴 Pending"),
+            axis=1)
+        for c in ["qty_ordered", "dispatched_qty", "pending_qty", "ordered_value", "dispatched_value", "pending_value"]:
+            bal_view[c] = bal_view[c].round(0).astype(int)
+        bal_view = bal_view.sort_values(["order_date", "di_no"], ascending=[False, True])
+        bal_cols = ["di_no", "order_date", "client_name", "Plant", "product", "Status",
+                    "qty_ordered", "dispatched_qty", "pending_qty"]
+        bal_sum = ["qty_ordered", "dispatched_qty", "pending_qty"]
+        if role != "headoffice":
+            bal_cols += ["ordered_value", "dispatched_value", "pending_value"]
+            bal_sum  += ["ordered_value", "dispatched_value", "pending_value"]
+        bal_cols.append("challans")
+        table_by_plant(bal_view, key="ord_bal", sum_cols=bal_sum, show_cols=bal_cols,
+                       rename={"di_no": "DI No.", "order_date": "Date", "client_name": "Client",
+                               "product": "Product", "qty_ordered": "Ordered", "dispatched_qty": "Delivered",
+                               "pending_qty": "Left", "ordered_value": "Order Val (₹)",
+                               "dispatched_value": "Delivered Val (₹)", "pending_value": "Pending Val (₹)",
+                               "challans": "Challans"},
+                       col_config={"order_date": st.column_config.DateColumn("Date", format="DD-MMM-YYYY")},
+                       date_col="order_date", show_export=(role != "headoffice"))
 
     # ── Per-DI detail ─────────────────────────────────────────────────────────
     st.markdown("---")
@@ -673,13 +713,12 @@ def show(PLOT):
             f"📅 {pd.to_datetime(hdr['order_date']).strftime('%d-%b-%Y') if pd.notna(hdr['order_date']) else '—'} &nbsp;|&nbsp; "
             f"💳 {hdr.get('mode_of_payment','')}"
         )
-        for _, prod_row in di_rows.iterrows():
-            prod  = prod_row["product"]
-            d_row = di_disps[di_disps["product"] == prod]
+        for prod, o_qty_raw in di_rows.groupby("product", sort=False)["qty_ordered"].sum().items():
+            d_row = di_disps[di_disps["product"] == prod] if not di_disps.empty else di_disps
             d_qty = int(d_row["dispatched_qty"].sum()) if not d_row.empty else 0
             d_val = int(d_row["dispatched_value"].sum()) if not d_row.empty else 0
             challans_str = ", ".join(d_row["challans"].dropna().tolist()) if not d_row.empty else "—"
-            o_qty = int(prod_row["qty_ordered"])
+            o_qty = int(o_qty_raw)
             pend  = o_qty - d_qty
             pct   = min(int(d_qty / o_qty * 100), 100) if o_qty > 0 else 0
             icon  = "🟢" if pend <= 0 else ("🟡" if d_qty > 0 else "🔴")
